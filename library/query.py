@@ -3,127 +3,243 @@
 Search the trading video library — per-topic databases.
 
 Usage:
-  python3 query.py "first candle new high"             # search all topics
-  python3 query.py "30 cent max loss" --topic ross_cameron  # one topic
-  python3 query.py -l                                   # list topics
-  python3 query.py -i                                   # stats
+  python3 query.py "first candle new high"                  # search all topics
+  python3 query.py "stop loss" --topic ross_cameron          # one topic
+  python3 query.py "big loss" -t ross_cameron -t other       # specific topics
+  python3 query.py -l                                        # list topics
+  python3 query.py -i                                        # stats
+  python3 query.py "icebreaker rule" --json                  # JSON output
+  python3 query.py "VWAP" --min-views 50000 --limit 5        # filtered
 """
 
-import sqlite3, os, sys, re, argparse
+import sqlite3, os, sys, re, argparse, json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 LIB = os.path.dirname(os.path.abspath(__file__))
 
-def discover_topics():
-    """Scan for */library.db directories."""
-    topics = []
-    for entry in sorted(os.listdir(LIB)):
-        db = os.path.join(LIB, entry, "library.db")
-        if os.path.isfile(db):
-            try:
-                conn = sqlite3.connect(db)
-                c = conn.cursor()
-                name = c.execute("SELECT value FROM meta WHERE key='topic_name'").fetchone()[0]
-                display = c.execute("SELECT value FROM meta WHERE key='display_name'").fetchone()[0]
-                count = c.execute("SELECT value FROM meta WHERE key='video_count'").fetchone()[0]
-                conn.close()
-                topics.append((name, display, int(count), db))
-            except Exception:
-                topics.append((entry, entry, 0, db))
-    return topics
 
-def search_db(db_path, query, limit=10):
-    """FTS5 search on a single per-topic DB."""
+def discover_topics(strict=False):
+    """Scan for */library.db directories.
+
+    Returns (good_topics, errors) where errors is list of (slug, error_msg).
+    In non-strict mode (default), corrupt/locked/missing-meta DBs are skipped
+    with a warning so that a bad topic doesn't kill a multi-topic search.
+    When strict=True (used for explicit --topic requests), errors cause failure.
+    """
+    topics = []
+    errors = []
+    for entry in sorted(os.listdir(LIB)):
+        db_path = os.path.join(LIB, entry, "library.db")
+        if not os.path.isfile(db_path):
+            continue
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA busy_timeout=3000")
+            conn.execute("PRAGMA query_only=1")
+            c = conn.cursor()
+            name = c.execute("SELECT value FROM meta WHERE key='topic_name'").fetchone()
+            display = c.execute("SELECT value FROM meta WHERE key='display_name'").fetchone()
+            count = c.execute("SELECT value FROM meta WHERE key='video_count'").fetchone()
+            conn.close()
+
+            if not name or not display or count is None:
+                raise RuntimeError("missing required meta rows (topic_name/display_name/video_count)")
+
+            topics.append((name[0], display[0], int(count[0]), db_path))
+        except Exception as e:
+            msg = f"{entry}: {e}"
+            errors.append((entry, str(e)))
+            if strict:
+                # Will be handled by caller for explicit topics
+                pass
+            else:
+                print(f"  WARN: skipping '{msg}'", file=sys.stderr)
+    return topics, errors
+
+
+def search_db(db_path, query, min_views=0, limit=40):
+    """FTS5 search on a single per-topic DB. Returns results grouped by video_id."""
     conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA busy_timeout=3000")
     conn.execute("PRAGMA query_only=1")
     c = conn.cursor()
 
-    terms = [t for t in query.split() if len(t) > 1]
-    fts_query = ' AND '.join(terms) if terms else query
-
     try:
         c.execute("""
-            SELECT t.id, t.title, t.url, t.view_count, t.video_id,
+            SELECT t.id, t.video_id, t.chunk_index, t.title, t.url, t.view_count,
                    snippet(transcripts_fts, 1, '\x01', '\x02', '...', 40)
             FROM transcripts_fts
             JOIN transcripts t ON t.id = transcripts_fts.rowid
             WHERE transcripts_fts MATCH ?
+              AND t.view_count >= ?
             ORDER BY rank
             LIMIT ?
-        """, (fts_query, limit))
-        results = c.fetchall()
+        """, (query, min_views, limit))
+
+        # Group by video_id, keep the best chunk per video
+        groups = {}
+        for row in c.fetchall():
+            vid = row[1]
+            if vid not in groups:
+                groups[vid] = row
+        results = list(groups.values())
     except sqlite3.OperationalError:
         results = []
 
     conn.close()
     return results
 
+
+def format_snippet(snippet):
+    return snippet.replace('\x01', '\033[1;33m').replace('\x02', '\033[0m')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Search the trading video library')
-    parser.add_argument('query', nargs='?', help='Search query')
-    parser.add_argument('-t', '--topic', help='Limit to one topic (slug)')
+    parser.add_argument('query', nargs='?', help='Search query (raw FTS5 syntax)')
+    parser.add_argument('-t', '--topic', action='append', help='Topic slug(s) to search (repeatable)')
     parser.add_argument('-l', '--list-topics', action='store_true', help='List topics')
     parser.add_argument('-i', '--info', action='store_true', help='Library stats')
-    parser.add_argument('--limit', type=int, default=10)
+    parser.add_argument('--limit', type=int, default=10, help='Max results (default: 10)')
+    parser.add_argument('--min-views', type=int, default=0, help='Minimum view count filter')
+    parser.add_argument('--json', action='store_true', help='Output as JSON')
+    parser.add_argument('--no-color', action='store_true', help='Disable color highlighting')
     args = parser.parse_args()
 
-    topics = discover_topics()
+    # Use strict mode when the user explicitly asked for particular topics.
+    # This makes missing/corrupt topics fail loudly instead of being silently dropped.
+    strict = bool(args.topic)
+    topics, discovery_errors = discover_topics(strict=strict)
+
+    # Surface discovery problems
+    for slug, err in discovery_errors:
+        if strict and any(t == slug for t in (args.topic or [])):
+            print(f"ERROR: failed to load requested topic '{slug}': {err}", file=sys.stderr)
+            sys.exit(1)
+        else:
+            print(f"  WARN: skipping '{slug}' ({err})", file=sys.stderr)
 
     if args.list_topics:
-        print("Available topics:")
         for name, display, count, _ in topics:
-            print(f"  {name:20s}  {display:30s}  {count} transcripts")
+            print(f"{name:20s}  {display:30s}  {count} videos")
         sys.exit(0)
 
     if args.info:
         total_vids = sum(t[2] for t in topics)
         total_bytes = sum(os.path.getsize(t[3]) for t in topics)
-        print(f"Topics:     {len(topics)}")
-        print(f"Transcripts: {total_vids}")
-        print(f"DB size:    {total_bytes/1024/1024:.1f}MB")
-        for name, display, count, db in topics:
-            print(f"  {display}: {count} transcripts ({os.path.getsize(db)/1024/1024:.1f}MB)")
+        print(f"Topics:      {len(topics)}")
+        print(f"Unique videos: {total_vids}")
+        print(f"DB size:     {total_bytes/1024/1024:.1f}MB")
+        for name, display, count, db_path in topics:
+            extra = ""
+            try:
+                conn = sqlite3.connect(db_path)
+                conn.execute("PRAGMA busy_timeout=3000")
+                conn.execute("PRAGMA query_only=1")
+                chunks = conn.execute("SELECT value FROM meta WHERE key='chunk_count'").fetchone()
+                if chunks:
+                    extra = f" ({chunks[0]} rows)"
+                conn.close()
+            except Exception:
+                pass
+            print(f"  {display}: {count} videos{extra} ({os.path.getsize(db_path)/1024/1024:.1f}MB)")
         sys.exit(0)
 
     if not args.query:
         print("Usage:")
-        print("  python3 query.py <search query>           # all topics")
-        print("  python3 query.py <q> --topic <name>       # one topic")
-        print("  python3 query.py -l                       # list topics")
-        print("  python3 query.py -i                       # stats")
+        print("  python3 query.py <query>               # search all topics")
+        print("  python3 query.py <q> -t <topic>        # one topic")
+        print("  python3 query.py <q> -t A -t B         # specific topics")
+        print("  python3 query.py -l                    # list topics")
+        print("  python3 query.py -i                    # stats")
+        print("  python3 query.py <q> --json            # JSON output")
+        print("  python3 query.py <q> --min-views 50000")
         sys.exit(0)
 
-    # Filter topics
     if args.topic:
-        target_topics = [(n, d, c, db) for n, d, c, db in topics if n == args.topic]
-        if not target_topics:
-            print(f"Topic '{args.topic}' not found. Use -l to list.")
+        target = [(n, d, c, db) for n, d, c, db in topics if n in args.topic]
+        # Also check if user asked for topics that were filtered due to errors
+        requested = set(args.topic)
+        found = {t[0] for t in target}
+        missing = requested - found
+        if missing:
+            print(f"ERROR: requested topic(s) not available: {sorted(missing)}", file=sys.stderr)
+            sys.exit(1)
+        if not target:
+            print(f"No matching topics for: {args.topic}. Use -l to list.", file=sys.stderr)
             sys.exit(1)
     else:
-        target_topics = topics
+        target = topics
 
-    # Search each topic
+    if not target:
+        print("No topics found.", file=sys.stderr)
+        sys.exit(1)
+
+    per_topic_limit = args.limit * 3
     all_results = []
-    for name, display, count, db in target_topics:
-        results = search_db(db, args.query, args.limit)
-        for r in results:
-            all_results.append((display, name, r))
+
+    explicit_topics = set(args.topic) if args.topic else set()
+    with ThreadPoolExecutor(max_workers=min(8, len(target))) as pool:
+        futures = {
+            pool.submit(search_db, db, args.query, args.min_views, per_topic_limit):
+            (name, display) for name, display, _, db in target
+        }
+        for future in as_completed(futures):
+            name, display = futures[future]
+            try:
+                results = future.result()
+                all_results.extend((display, name, r) for r in results)
+            except Exception as e:
+                if name in explicit_topics:
+                    print(f"ERROR: search failed for requested topic '{display}': {e}", file=sys.stderr)
+                else:
+                    print(f"  WARN: search failed for '{display}': {e}", file=sys.stderr)
 
     if not all_results:
         print(f"No results for: {args.query}")
+        sys.exit(0)
+
+    # Stabilize cross-topic ordering.
+    # Within each topic results are already ordered by FTS rank of the best chunk.
+    # Across topics (as_completed order) we use view_count as a cheap, stable,
+    # comparable secondary key so that result order is no longer dependent on
+    # thread scheduling. Higher-view videos are preferred on ties.
+    all_results.sort(key=lambda item: -(item[2][5] or 0))
+
+    # Global limit (applied after stabilization)
+    all_results = all_results[:args.limit]
+
+    if args.json:
+        output = []
+        for display, topic_name, row in all_results:
+            _, vid, ci, title, url, views, snippet = row
+            output.append({
+                'title': title,
+                'topic': display,
+                'topic_slug': topic_name,
+                'url': url,
+                'views': views,
+                'video_id': vid,
+                'chunk': ci,
+                'snippet': snippet.replace('\x01', '').replace('\x02', ''),
+            })
+        print(json.dumps(output, indent=2))
         sys.exit(0)
 
     print(f"\n{'='*60}")
     print(f"  Query: {args.query}")
     print(f"  Results: {len(all_results)}")
     if args.topic:
-        print(f"  Topic: {args.topic}")
+        print(f"  Topics: {', '.join(args.topic)}")
     else:
-        print(f"  Topics searched: {len(target_topics)}")
+        print(f"  Topics searched: {len(target)}")
+    if args.min_views:
+        print(f"  Min views: {args.min_views:,}")
     print(f"{'='*60}\n")
 
     for i, (display, topic_name, row) in enumerate(all_results):
-        rid, title, url, views, vid, snippet = row
-        snippet = snippet.replace('\x01', '\033[1;33m').replace('\x02', '\033[0m')
+        _, vid, ci, title, url, views, snippet = row
+        snippet = snippet if args.no_color else format_snippet(snippet)
 
         print(f"  [{i+1}] {title}")
         print(f"      Topic: {display}")

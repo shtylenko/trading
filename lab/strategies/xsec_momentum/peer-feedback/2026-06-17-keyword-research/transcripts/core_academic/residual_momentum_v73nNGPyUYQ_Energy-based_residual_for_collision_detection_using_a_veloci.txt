@@ -1,0 +1,9 @@
+TITLE: Energy-based residual for collision detection using a velocity observer
+URL: https://youtube.com/watch?v=v73nNGPyUYQ
+CHANNEL: RoboticsLabSapienza
+VIEWS: 74
+PUBLISHED: 4 months ago
+KEYWORD: residual momentum
+=======================================================================
+
+[NO TRANSCRIPT AVAILABLE]

@@ -1,0 +1,9 @@
+# trading.live runtime deps (P0-P3). Pin in CI; ranges here for clarity.
+fastapi>=0.110
+uvicorn>=0.29
+jinja2>=3.1
+pyyaml>=6.0
+pandas>=2.0
+alpaca-py>=0.20
+python-multipart>=0.0.9     # FastAPI form posts (control actions)
+# marketdata/lab bring their own deps (duckdb, numpy, etc.) via the repo install

@@ -1,0 +1,8 @@
+TITLE: Algorithmic Trading: Build a Momentum Strategy in Python
+URL: https://youtube.com/watch?v=zi5nBaS9VFI
+CHANNEL: Digital Hub Insights
+VIEWS: 24
+KEYWORD: momentum strategy backtest python
+======================================================================
+
+We are overloaded with promises that investment strategies will make you money. But how can we separate the quality strategies and learning programs from those that will just waste your time and money? Well, are you ready to stop learning theory and start building a real working trading strategy? I'm Cordell Tanny, a 25-y year veteran portfolio manager, and I've built many successful trading strategies for my companies and for my clients. In this course, I'm giving you my full code, a complete working momentum strategy, a full back testing structure, and my entire professional level Python analysis library. This isn't just a course. It's a complete toolkit. You will gain the full benefit of my decades of professional expertise all condensed into one of the best learning programs out there. Come join us. I am so confident that you are going to love this experience.

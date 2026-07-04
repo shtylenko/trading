@@ -1,0 +1,15 @@
+name: eval_2024_h1_broad
+description: H1 2024 evaluation on the rule-based liquid PIT universe.
+universe: liquid_pit
+universe_policy: point_in_time
+candidate_limit: 10
+date_ranges:
+  - start: "2024-01-02"
+    end: "2024-06-28"
+    label: h1_2024_eval
+    role: eval
+notes: >
+  IN-TUNING-SAMPLE: 2024 data was used for o03 research (walk-forward, but
+  parameter choices saw this period). Useful for the universe-sensitivity
+  comparison against eval_2024_h2_broad's ad-hoc cached universe, not as
+  independent validation.

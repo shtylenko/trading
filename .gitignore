@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+
+# OS / editor
+.DS_Store
+**/.DS_Store
+
+# Secrets / env
+.env
+*.lock
+.locks
+
+# Logs (large run output, never read back)
+*.log
+logs/
+
+# Live runtime state — local per-env DB + kill-switch file; NEVER commit
+live/_state/
+*.db
+*.db-wal
+*.db-shm
+
+# Large local data caches — regenerated on demand; NEVER commit
+*.parquet
+*.duckdb
+*.duckdb.wal
+*.duckdb.tmp
+marketdata/data/*
+!marketdata/data/.gitkeep
+data/_sec_cache/
+
+# lab keeps its own .gitignore too (reports/, strategy artifacts) — defense in depth here
+reports/*
+!reports/.gitkeep

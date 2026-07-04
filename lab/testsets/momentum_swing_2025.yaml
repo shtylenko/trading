@@ -1,0 +1,20 @@
+name: momentum_swing_2025
+description: >-
+  Sealed-OOS 2025 engine cross-check for the cross-sectional momentum swing release
+  (x01). Daily-rebalanced, multi-day-hold — run by the additive swing runner
+  (runner/swing_pipeline.py), NOT the intraday engine. Confirms the offline
+  multi-day ledger (validation/multiday_momentum_findings.md, sealed-OOS PASS) through
+  the real DuckDB pipeline.
+universe: liquid_pit
+universe_policy: point_in_time
+candidate_limit: 50
+date_ranges:
+  - start: "2025-01-02"
+    end: "2025-12-31"
+    label: y2025_momentum_swing
+    role: oos
+notes: >
+  2025 is the survivorship-honest PIT sealed year (already spent once on momentum in
+  the offline harness; this is the engine reproduction of that same spend, not a new
+  query). The swing runner rebalances every 20 trading days and holds 20 days, so the
+  last complete hold ends inside 2025.

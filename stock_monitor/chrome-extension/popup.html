@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Webull Monitor</title>
+  <style>
+    body {
+      width: 320px;
+      font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1117;
+      color: #e6e6e6;
+      margin: 0;
+      padding: 12px;
+    }
+    h3 { margin: 0 0 10px; font-size: 14px; color: #60a5fa; }
+    .section { background: #161a24; border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+    .row { display: flex; justify-content: space-between; margin: 4px 0; }
+    .label { color: #888; font-size: 12px; }
+    .val { font-family: ui-monospace, monospace; }
+    .status { padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+    .ok { background: #14532d; color: #86efac; }
+    .warn { background: #451a03; color: #fdba74; }
+    .err { background: #450a0a; color: #fca5a5; }
+    button {
+      background: #1f2937; color: #e6e6e6; border: 1px solid #334155;
+      padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;
+    }
+    button:hover { background: #334155; }
+    .small { font-size: 11px; color: #666; }
+    input[type="text"] { width: 100%; background: #0b0e14; color: #ddd; border: 1px solid #334155; padding: 4px 6px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h3>📈 Webull Chart Monitor</h3>
+
+  <div id="backend-status" class="section" style="display:none;">
+    <div class="row">
+      <span class="label">Backend</span>
+      <span id="backend" class="val">—</span>
+    </div>
+    <div class="row">
+      <span class="label">Connection</span>
+      <span id="conn" class="status warn">checking...</span>
+    </div>
+  </div>
+
+  <div id="webull-data" class="section" style="display:none;">
+    <div class="row"><span class="label">Symbol</span> <span id="symbol" class="val">—</span></div>
+    <div class="row"><span class="label">Timeframe</span> <span id="tf" class="val">—</span></div>
+    <div class="row"><span class="label">Buffered</span> <span id="buf" class="val">—</span></div>
+    <div class="row"><span class="label">Last received</span> <span id="last-received" class="val">—</span></div>
+    <div class="row"><span class="label">Last pushed</span> <span id="last-pushed" class="val">—</span></div>
+    <div class="row"><span class="label">Tab ID</span> <span id="tab-id" class="val">—</span></div>
+  </div>
+
+  <div id="webull-required" style="text-align:center; padding:16px; background:#161a24; border-radius:6px; margin-bottom:10px;">
+    <p style="margin:0 0 10px; font-size:13px;">Not on Webull stocks page.</p>
+    <button id="go-to-webull" style="width:100%; padding:10px; font-size:14px; font-weight:600;">
+      Go to Webull
+    </button>
+  </div>
+
+  <div id="capture-section" style="margin: 12px 0; display:none;">
+    <button id="toggle-capture" style="width: 100%; padding: 10px 12px; font-size: 14px; font-weight: 600;">
+      Start Capture
+    </button>
+    <div id="capture-state" class="small" style="margin-top: 6px; text-align: center; color: #888;">
+      Capture is OFF
+    </div>
+  </div>
+
+
+
+  <script src="popup.js"></script>
+</body>
+</html>

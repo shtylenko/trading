@@ -1,0 +1,55 @@
+# trading.live — one compose stack PER ENV (testing, prod) on the DigitalOcean droplet.
+# Bring up with an env-specific project name + env file so testing & prod are fully
+# isolated (separate networks, volumes, ports) on the same box (DESIGN §18):
+#
+#   docker compose --project-name tl-testing --env-file .env.testing up -d
+#   docker compose --project-name tl-prod    --env-file .env.prod    up -d
+#
+# Ingress is Tailscale-only: web binds to the host's Tailscale IP (TRADING_LIVE_WEB_HOST),
+# never 0.0.0.0. No public ports (DESIGN §17).
+
+services:
+  web:
+    image: ${IMAGE:-ghcr.io/shtylenko/trading-live:latest}
+    restart: unless-stopped
+    command: ["python", "-m", "trading.live.web.app"]
+    environment:
+      TRADING_ENV: ${TRADING_ENV}
+      TRADING_LIVE_STATE_DIR: /state
+      TRADING_LIVE_LOG_DIR: /logs
+      TRADING_LIVE_WEB_HOST: 0.0.0.0          # bound inside the container…
+      TRADING_LIVE_WEB_TOKEN: ${TRADING_LIVE_WEB_TOKEN}
+    ports:
+      - "${TAILSCALE_IP}:${WEB_PORT}:8800"    # …published ONLY on the Tailscale IP
+    volumes:
+      - state:/state
+      - logs:/logs
+      - mdcache:/app/trading/marketdata/data
+    networks: [tl]
+
+  scheduler:
+    image: ${IMAGE:-ghcr.io/shtylenko/trading-live:latest}
+    restart: unless-stopped
+    # the scheduler decides which portfolios are due and runs the engine (cron-style loop)
+    command: ["python", "-m", "trading.live.cli", "status"]   # placeholder until scheduler.py (P4)
+    environment:
+      TRADING_ENV: ${TRADING_ENV}
+      TRADING_LIVE_STATE_DIR: /state
+      TRADING_LIVE_LOG_DIR: /logs
+    env_file:
+      - ${SECRETS_FILE}                       # per-portfolio broker keys (prod-only); read-only
+    volumes:
+      - state:/state
+      - logs:/logs
+      - mdcache:/app/trading/marketdata/data
+    networks: [tl]
+
+# named volumes are per-project (compose prefixes them) → testing & prod never share state
+volumes:
+  state:
+  logs:
+  mdcache:
+
+networks:
+  tl:
+    driver: bridge

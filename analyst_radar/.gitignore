@@ -1,0 +1,16 @@
+# Dependencies
+__pycache__/
+*.pyc
+
+# Database (incl. WAL/SHM sidecars)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Environment
+.env
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db

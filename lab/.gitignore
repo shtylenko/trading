@@ -1,0 +1,17 @@
+*.duckdb
+*.duckdb.wal
+*.duckdb.tmp
+logs/*.log
+reports/*
+!reports/.gitkeep
+
+# ML artifacts and research data (large files, generated)
+strategies/stocks_in_play_orb/research/artifacts/*.parquet
+strategies/stocks_in_play_orb/research/artifacts/*.pkl
+strategies/stocks_in_play_orb/research/data/*.parquet
+
+# SEC EDGAR companyfacts cache (large JSON, fetched from data.sec.gov; ~6GB at full universe).
+# Regenerated on demand by data/sec_fundamentals.py; never commit. Location overridable via
+# STRATEGY_LAB_SEC_DIR.
+data/_sec_cache/
+

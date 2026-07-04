@@ -1,0 +1,42 @@
+# trading.live — platform BUY denylist (version-controlled baseline)
+#
+# Symbols here can NEVER be BOUGHT by any portfolio, regardless of how a strategy
+# ranks them. Selling/exiting a position you already hold is ALWAYS allowed — the
+# denylist only gates buys (see DESIGN.md §8).
+#
+# This file is the platform-wide baseline and applies to every portfolio. Changes
+# here are auditable through git. Per-portfolio / emergency additions live in the
+# live DB and are editable from the web UI; the two layers are merged at gate time.
+#
+# Entry schema (per item under `symbols`):
+#   symbol:   ticker, uppercase (required)
+#   reason:   why it's blocked — shown in the UI and logged (required)
+#   added_by: who added it (audit)
+#   added_at: YYYY-MM-DD (audit)
+#   expires:  YYYY-MM-DD — auto-removed on/after this date (optional; omit = permanent)
+#
+# Symbol matching is exact (corporate-action renames are normalized via trading.marketdata).
+
+schema_version: "1.0"
+
+# --- Explicit symbol denylist ---
+symbols:
+  - symbol: "META"
+    reason: "Manual exclusion (user policy)"
+    added_by: "shtylenko"
+    added_at: "2026-06-20"
+  # Examples (uncomment + edit):
+  # - symbol: "XYZ"
+  #   reason: "Pending litigation — block buys until resolved"
+  #   added_by: "shtylenko"
+  #   added_at: "2026-06-19"
+  #   expires: "2026-12-31"
+
+# --- Category rules: block whole classes of names without listing each symbol ---
+# These are OFF by default. A portfolio may also override these in its own config.
+categories:
+  block_leveraged_inverse: false   # e.g. TQQQ/SQQQ/UVXY-style geared & inverse ETFs
+  block_otc_pinksheet:      false   # non-exchange-listed / OTC
+  # Numeric floors (null = disabled). Applied at buy time using trading.marketdata.
+  min_price:        null            # e.g. 5.0 — never buy below $5 (x03 already enforces $5)
+  min_dollar_vol:   null            # e.g. 10000000 — 20-day avg $ volume floor

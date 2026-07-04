@@ -1,0 +1,147 @@
+{% extends "portfolio_base.html" %}
+{% from "_insights.html" import sector_panel, concentration_panel, conviction_panel %}
+
+{% block content %}
+    <div class="card">
+      <h2>Equity ({{ equity_n }} point{{ '' if equity_n == 1 else 's' }})</h2>
+      {% if equity_n %}
+        <div id="equity-chart" style="height:260px;"></div>
+      {% else %}
+        <p class="muted">No equity history yet — click <b>↻ Refresh data</b> (or run
+          <code>cli refresh</code>) to record the NAV curve.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Positions ({{ positions|length }})</h2>
+      {% if positions %}
+      <table class="sortable"><thead><tr>
+        <th data-type="text">Ticker</th><th class="num" data-type="num">Qty</th>
+        <th class="num" data-type="num">Avg entry</th><th class="num" data-type="num">Last</th>
+        <th class="num" data-type="num">Value</th><th class="num" data-type="num">Unrealized $</th>
+        <th class="num" data-type="num">Unrealized %</th><th data-type="text">Entry date</th>
+      </tr></thead><tbody>
+      {% for pos in positions %}
+        <tr><td data-sort="{{ pos.ticker }}">{{ pos.ticker }}</td>
+          <td class="num" data-sort="{{ pos.qty }}">{{ '%.4f'|format(pos.qty) }}</td>
+          <td class="num" data-sort="{{ pos.avg_entry_price }}">${{ '%.2f'|format(pos.avg_entry_price) }}</td>
+          <td class="num" data-sort="{{ pos.last_price if pos.last_price else '' }}">{{ ('$%.2f'|format(pos.last_price)) if pos.last_price else '—' }}</td>
+          <td class="num" data-sort="{{ pos.value if pos.value is not none else '' }}">{{ ('$' ~ '{:,.2f}'.format(pos.value)) if pos.value is not none else '—' }}</td>
+          <td class="num {{ 'side-buy' if (pos.upnl or 0) >= 0 else 'side-sell' }}" data-sort="{{ pos.upnl if pos.upnl is not none else '' }}">{{ '{:+,.2f}'.format(pos.upnl) if pos.upnl is not none else '—' }}</td>
+          <td class="num {{ 'side-buy' if (pos.upnl_pct or 0) >= 0 else 'side-sell' }}" data-sort="{{ pos.upnl_pct if pos.upnl_pct is not none else '' }}">{{ '{:+.1f}%'.format(pos.upnl_pct) if pos.upnl_pct is not none else '—' }}</td>
+          <td class="muted" data-sort="{{ pos.entry_date or '' }}">{{ pos.entry_date or '—' }}</td></tr>
+      {% endfor %}
+      </tbody>
+      {% if pos_totals.value is not none %}
+      <tfoot><tr style="border-top:2px solid #2b3340;font-weight:700">
+        <td>Total</td><td></td><td></td><td></td>
+        <td class="num">${{ '{:,.2f}'.format(pos_totals.value) }}</td>
+        <td class="num {{ 'side-buy' if (pos_totals.upnl or 0) >= 0 else 'side-sell' }}">{{ '{:+,.2f}'.format(pos_totals.upnl) }}</td>
+        <td class="num {{ 'side-buy' if (pos_totals.upnl_pct or 0) >= 0 else 'side-sell' }}">{{ '{:+.1f}%'.format(pos_totals.upnl_pct) }}</td>
+        <td></td>
+      </tr></tfoot>
+      {% endif %}
+      </table>
+      {% set asof = positions|map(attribute='last_price_at')|select|list %}
+      {% if asof %}<p class="muted" style="font-size:.74rem;margin:.6rem 0 0">
+        Values as of <span class="localtime" data-utc="{{ asof|max }}">{{ asof|max }}</span>
+        (last refresh). Click ↻ Refresh data to update.</p>{% endif %}
+      {% else %}<p class="muted">Flat — no open positions.</p>{% endif %}
+    </div>
+
+    {% if perf %}
+    {% macro pct(v) %}{% if v is not none %}<span class="{{ 'pos' if v >= 0 else 'neg' }}">{{ '{:+.2f}%'.format(v) }}</span>{% else %}—{% endif %}{% endmacro %}
+    {% set ex_today = (perf.port_daily_pct - perf.spy_daily_pct) if (perf.port_daily_pct is not none and perf.spy_daily_pct is not none) else none %}
+    {% set ex_30d = (perf.port_30d_pct - perf.spy_30d_pct) if (perf.port_30d_pct is not none and perf.spy_30d_pct is not none) else none %}
+    {% set ex_total = (perf.port_total_pct - perf.spy_total_pct) if (perf.port_total_pct is not none and perf.spy_total_pct is not none) else none %}
+    <div class="card">
+      <h2>Performance vs SPY</h2>
+      <table>
+        <thead><tr><th>Period</th><th class="num">Portfolio</th><th class="num">SPY <span class="muted">(price)</span></th><th class="num">Excess</th></tr></thead>
+        <tbody>
+          <tr><td>Today</td><td class="num">{{ pct(perf.port_daily_pct) }}</td><td class="num">{{ pct(perf.spy_daily_pct) }}</td><td class="num">{{ pct(ex_today) }}</td></tr>
+          <tr><td>Last 30 trading days</td><td class="num">{{ pct(perf.port_30d_pct) }}</td><td class="num">{{ pct(perf.spy_30d_pct) }}</td><td class="num">{{ pct(ex_30d) }}</td></tr>
+          <tr><td>Total <span class="muted">(since inception)</span></td><td class="num">{{ pct(perf.port_total_pct) }}</td><td class="num">{{ pct(perf.spy_total_pct) }}</td><td class="num">{{ pct(ex_total) }}</td></tr>
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:.74rem;margin:.6rem 0 0">
+        Today = current value vs prior close (live — matches your broker app). 30 days =
+        vs ~30 trading sessions ago. Total = since inception. SPY is price return over the
+        same window. Updated on refresh.</p>
+
+      {% if perf_daily %}
+      <h2 style="margin-top:1.2rem">By trading day</h2>
+      <table class="sortable">
+        <thead><tr><th data-type="text" data-dir="asc">Date<span class="arr">▲</span></th>
+          <th class="num" data-type="num">Portfolio</th><th class="num" data-type="num">SPY</th>
+          <th class="num" data-type="num">Excess</th></tr></thead>
+        <tbody>
+        {% for d in perf_daily %}
+          <tr>
+            <td data-sort="{{ d.date }}">{{ d.date }}{% if d.get('live') %} <span class="badge" style="background:#1d4ed8;font-size:.66rem">live</span>{% endif %}</td>
+            <td class="num {{ 'side-buy' if (d.port_pct or 0) >= 0 else 'side-sell' }}" data-sort="{{ d.port_pct }}">{{ '{:+.2f}%'.format(d.port_pct) }}</td>
+            <td class="num {{ 'side-buy' if (d.spy_pct or 0) >= 0 else 'side-sell' }}" data-sort="{{ d.spy_pct if d.spy_pct is not none else '' }}">{{ '{:+.2f}%'.format(d.spy_pct) if d.spy_pct is not none else '—' }}</td>
+            <td class="num {{ 'side-buy' if (d.excess or 0) >= 0 else 'side-sell' }}" data-sort="{{ d.excess if d.excess is not none else '' }}">{{ '{:+.2f}%'.format(d.excess) if d.excess is not none else '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:.74rem;margin:.6rem 0 0">
+        One row per trading session since the portfolio was created (close-to-close). The
+        top <b>live</b> row is today in progress (matches "Today" above); completed days sit
+        below. The first calendar day shows no row — a full-day return needs a prior close.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if holdings_stats.n %}
+    <div class="card">
+      <h2>Holdings insights</h2>
+      {{ sector_panel(holdings_stats) }}
+      <div class="grid" style="margin-top:1rem">
+        {{ concentration_panel(holdings_stats) }}
+        {{ conviction_panel(holdings_stats) }}
+      </div>
+      <p class="muted" style="font-size:.74rem;margin:.7rem 0 0">
+        Computed over current holdings by market value. Conviction scores come from the
+        latest strategy target (blank for any held name no longer in the target).</p>
+    </div>
+    {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {% if equity_n %}
+  <script src="/static/lightweight-charts.standalone.production.js"></script>
+  <script>
+    (function () {
+      var data = {{ equity_json|safe }};
+      var el = document.getElementById('equity-chart');
+      if (!el || !window.LightweightCharts || !data.length) return;
+      var chart = LightweightCharts.createChart(el, {
+        height: 260, autoSize: true,
+        layout: { background: { color: '#171a21' }, textColor: '#9aa4b2' },
+        grid: { vertLines: { color: '#21262f' }, horzLines: { color: '#21262f' } },
+        rightPriceScale: { borderColor: '#262b36' },
+        timeScale: { borderColor: '#262b36', timeVisible: true, secondsVisible: false },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      });
+      var series = chart.addAreaSeries({
+        lineColor: '#5b9dff', topColor: 'rgba(91,157,255,.30)',
+        bottomColor: 'rgba(91,157,255,.02)', lineWidth: 2,
+        priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+      });
+      // Lightweight Charts renders the time axis in UTC. Shift each point by its local
+      // UTC offset (per-point so DST is correct) so the axis shows local wall-clock time.
+      function toLocal(t) { return t - new Date(t * 1000).getTimezoneOffset() * 60; }
+      var byTime = {};
+      data.forEach(function (d) { byTime[d.time] = d.value; });
+      var rows = Object.keys(byTime).map(function (t) {
+          return { time: toLocal(Number(t)), value: byTime[t] }; })
+        .sort(function (a, b) { return a.time - b.time; });
+      series.setData(rows);
+      chart.timeScale().fitContent();
+      new ResizeObserver(function () { chart.applyOptions({ width: el.clientWidth }); }).observe(el);
+    })();
+  </script>
+  {% endif %}
+{% endblock %}

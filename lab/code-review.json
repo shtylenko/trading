@@ -1,0 +1,25 @@
+{
+  "phase1_core": {
+    "state_contamination": "Pass - Execution engines generate `SimulatedTrade` instances without mutating the `signal` or `context` objects.",
+    "timezone_leaks": "Pass - Timezone conversions use safe tz_convert to `America/New_York` explicitly.",
+    "look_ahead_bias": "Pass - Strict `bars_5m.index > signal.signal_time` check. VWAP gate properly uses `.shift(1)` to avoid intrabar look-ahead.",
+    "runner_signature_robustness": "Pass - Runner uses robust source-hashing signature (`current_code_signature`) of core engine logic to prevent stale results."
+  },
+  "phase2_families": {
+    "missing_super_calls": [
+      "engine/strategy_lab/strategies/dominance_flip_reversal/variants.py: FlipVariant.build_candidates completely overwrites F01Release.build_candidates instead of calling super(), violating inheritance integrity."
+    ],
+    "filter_until_zero_bugs": [
+      "o06: Missing `requires_spy_5m = True`. `context.spy_5m` is None, `green_first_candle` returns False, resulting in zero candidates.",
+      "d08: Missing `requires_spy_5m = True`. `_spy_gap_pct` returns None, dropping all candidates.",
+      "o03: Missing `requires_spy_5m = True`. SPY ML features compute as 0.0/None, silently corrupting model predictions."
+    ],
+    "direct_class_references": []
+  },
+  "phase3_validation": {
+    "leak_free_time_alignment": "Pass",
+    "wilder_smoothing_correctness": "Pass",
+    "oos_discipline": "Pass - `check_oos_prerequisite` strictly guards OOS testsets until prior funnel in-sample stages are cleared.",
+    "dashboard_port_safety": "Pass - Dashboard properly handles port arguments and uses `connect(read_only=True)` to prevent DB locks/writes."
+  }
+}

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sim Viewer — Sessions</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <div>
+          <strong>Sessions</strong>
+          <span id="session-count" class="muted small"></span>
+        </div>
+        <div class="sidebar-actions">
+          <button id="refresh-list-btn" class="small-btn" title="Refresh list">↻</button>
+        </div>
+      </div>
+      <div id="session-list" class="session-list"></div>
+      <div class="sidebar-footer muted small">
+        Click = open &nbsp; Cmd/Ctrl+Click = new tab
+      </div>
+    </aside>
+
+    <!-- Main area -->
+    <main id="main">
+      <div id="no-session" class="placeholder">
+        Select a session from the sidebar.<br>
+        Newest sessions are at the top.
+      </div>
+
+      <div id="session-detail" class="hidden">
+        <header id="hdr">
+          <div id="hdr-main">
+            <span id="h-ticker">—</span>
+            <span id="h-date" class="muted"></span>
+            <span id="h-status" class="badge"></span>
+            <span id="h-pnl" class="badge"></span>
+            <div class="hdr-actions">
+              <button id="finalize-btn" class="action-btn" title="Finalize this session (force close if open)">Finalize</button>
+              <button id="refresh-btn" class="small-btn" title="Refresh now">Refresh</button>
+            </div>
+          </div>
+          <div id="h-chips" class="chips"></div>
+          <div id="h-levels" class="chips muted"></div>
+          <div id="h-reason" class="muted"></div>
+          <div id="live-indicator" class="live-indicator hidden">● LIVE — updates via SSE</div>
+        </header>
+
+        <div class="content">
+          <section id="left">
+            <div id="chart"></div>
+            <div id="legend" class="muted">
+              <span class="lg lg-c">candles</span>
+              <span class="lg lg-vwap">VWAP</span>
+              <span class="lg lg-ema">EMA9</span>
+              <span class="lg lg-ema2">EMA20</span>
+              <span class="lg lg-macd">MACD hist</span>
+              <span class="lg lg-entry">entry</span>
+              <span class="lg lg-stop">stop</span>
+              <span class="lg lg-pm">pm/levels</span>
+            </div>
+            <div id="blotter-wrap">
+              <table id="blotter">
+                <thead><tr><th>time</th><th>side</th><th>shares</th><th>price</th><th>realized</th><th>reason</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="right">
+            <h3>Decision timeline <span id="t-count" class="muted"></span></h3>
+            <div id="timeline"></div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div id="error" class="hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>

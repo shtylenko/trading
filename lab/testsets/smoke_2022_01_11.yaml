@@ -1,0 +1,10 @@
+name: smoke_2022_01_11
+description: Single-day smoke test (2022-01-11) for verifying o04-o08 mechanics against manually checkable data.
+universe: liquid_pit
+universe_policy: point_in_time
+candidate_limit: 25
+date_ranges:
+  - start: "2022-01-11"
+    end: "2022-01-11"
+    label: smoke
+    role: smoke

@@ -1,0 +1,12 @@
+name: mom_etf_smoke_april_2024
+description: >-
+  Smoke test for the intraday-momentum (m) family: one month (April 2024) on the
+  liquid-ETF universe. Mechanics/fill sanity before the full Stage-0 baseline.
+universe: etf_liquid_pit
+universe_policy: point_in_time
+candidate_limit: 10
+date_ranges:
+  - start: "2024-04-01"
+    end: "2024-04-30"
+    label: apr2024_mom_etf_smoke
+    role: smoke

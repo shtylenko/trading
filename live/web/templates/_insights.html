@@ -1,0 +1,58 @@
+{# Reusable insight panels over a stats.compute() result `s`. Used by both tabs:
+   Monitor renders sector+concentration+conviction over HOLDINGS; Manage renders the
+   full set (incl. capital + composition) over the pending/queue names. #}
+
+{% macro sector_panel(s) %}
+  <div class="panel">
+    <h3>Sector distribution ({{ s.sectors|length }} sectors, {{ s.n }} names)</h3>
+    {% for sec in s.sectors %}
+      <div class="bar"><i style="width:{{ '%.0f'|format(sec.pct) }}%"></i>
+        <span><b>{{ sec.sector }}</b>
+          <span>{{ sec.count }} · ${{ '{:,.0f}'.format(sec.notional) }} · {{ '%.0f'|format(sec.pct) }}%</span>
+        </span></div>
+    {% endfor %}
+  </div>
+{% endmacro %}
+
+{% macro concentration_panel(s) %}
+  <div class="panel">
+    <h3>Concentration</h3>
+    <div class="stat"><span>Top-5 weight</span><span class="v">{{ '%.0f%%'|format(s.concentration.top5_pct) if s.concentration.top5_pct is not none else '—' }}</span></div>
+    <div class="stat"><span>Max single name</span><span class="v">{{ '%.0f%%'|format(s.concentration.max_weight_pct) if s.concentration.max_weight_pct is not none else '—' }}</span></div>
+    <div class="stat"><span>HHI</span><span class="v">{{ s.concentration.hhi if s.concentration.hhi is not none else '—' }}</span></div>
+    <div class="stat"><span>Effective # names</span><span class="v">{{ s.concentration.effective_n if s.concentration.effective_n is not none else '—' }}</span></div>
+  </div>
+{% endmacro %}
+
+{% macro conviction_panel(s) %}
+  <div class="panel">
+    <h3>Conviction (strategy score)</h3>
+    <div class="stat"><span>Score min / med / max</span><span class="v">
+      {{ '%+.3f'|format(s.conviction.score_min) if s.conviction.score_min is not none else '—' }} /
+      {{ '%+.3f'|format(s.conviction.score_med) if s.conviction.score_med is not none else '—' }} /
+      {{ '%+.3f'|format(s.conviction.score_max) if s.conviction.score_max is not none else '—' }}</span></div>
+    <div class="stat"><span>Rank span</span><span class="v">{{ s.conviction.rank_min if s.conviction.rank_min is not none else '—' }}–{{ s.conviction.rank_max if s.conviction.rank_max is not none else '—' }}</span></div>
+  </div>
+{% endmacro %}
+
+{% macro capital_panel(s) %}
+  <div class="panel">
+    <h3>Capital</h3>
+    <div class="stat"><span>Buy notional</span><span class="v">${{ '{:,.0f}'.format(s.capital.buy_notional) }}</span></div>
+    <div class="stat"><span>Sell notional</span><span class="v">${{ '{:,.0f}'.format(s.capital.sell_notional) }}</span></div>
+    <div class="stat"><span>Net</span><span class="v">${{ '{:,.0f}'.format(s.capital.net_notional) }}</span></div>
+    <div class="stat"><span>Buy % of capital</span><span class="v">{{ '%.1f%%'|format(s.capital.buy_pct_of_capital) if s.capital.buy_pct_of_capital is not none else '—' }}</span></div>
+    <div class="stat"><span>Orders</span><span class="v">{{ s.capital.n_buys }} buy / {{ s.capital.n_sells }} sell</span></div>
+  </div>
+{% endmacro %}
+
+{% macro composition_panel(s) %}
+  <div class="panel">
+    <h3>Composition</h3>
+    <div class="stat"><span>New positions</span><span class="v">{{ s.composition.new_positions }}</span></div>
+    <div class="stat"><span>Adds to held</span><span class="v">{{ s.composition.adds }}</span></div>
+    {% for reason, cnt in s.composition.reasons %}
+      <div class="stat"><span class="muted">{{ reason }}</span><span class="v">{{ cnt }}</span></div>
+    {% endfor %}
+  </div>
+{% endmacro %}

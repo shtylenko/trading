@@ -1,0 +1,8 @@
+TITLE: Build an ETF Momentum Strategy (Python + Backtesting + Pyfolio)
+URL: https://youtube.com/watch?v=gdolsIWbmqg
+CHANNEL: Quant Tactics
+VIEWS: 474
+KEYWORD: momentum strategy backtest python
+======================================================================
+
+Momentum is one of the most well-researched edges in finance. It's been documented for decades, across markets, across asset classes. And in this course, you'll learn how to build it yourself. Step-by-step in Python. No local setup. Everything runs in Google Colab. You open a browser and you start building. You'll learn how momentum works and why decades of research back it up. You'll pull real market data, rank ETFs, and build a rules-based selection process. Then, you'll run a clean backtest and analyze performance with Pyfolio, a professional-grade portfolio analysis library. No shortcuts, no black boxes, just a framework you actually understand. By the end, you'll have a complete backtesting workflow, one you can modify, extend, and build on. If this sounds like what you've been looking for, the link is in the description. See you inside.

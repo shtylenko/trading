@@ -1,0 +1,21 @@
+cd /Users/shtylenko/Hermes/projects/trading_strategy_finder
+
+python3 -m compileall -q trading/lab
+python3 -m pytest trading/lab/tests -q
+
+python3 -m trading.lab.scripts.backtest --list
+
+
+
+python3 -m trading.lab.scripts.backtest --release o01 --testset smoke_april_2024_sample
+python3 -m trading.lab.scripts.backtest --release d01 --testset gap_drive_smoke_april_2024
+python3 -m trading.lab.scripts.report
+
+python3 -m trading.lab.scripts.dashboard --port 8890
+
+
+cd /Users/shtylenko/Hermes/projects/trading_strategy_finder
+MARKETDATA_PROVIDERS=alpaca PYTHONUNBUFFERED=1 \
+python3 -m trading.lab.scripts.backtest \
+--resume run_o03_eval_2025_broad_20260610_195236_09ca19 \
+2>&1 | tee /tmp/eval_2025_broad.log

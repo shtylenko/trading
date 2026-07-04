@@ -1,0 +1,290 @@
+{
+  "audit_meta": {
+    "family": "post_gap_opening_drive",
+    "letter": "d",
+    "releases_audited": ["d01", "d02", "d03", "d04", "d05", "d06", "d07", "d08", "d09", "d10", "d11", "d12", "d13", "d14", "d15"],
+    "files_read": [
+      "d01.py", "d02.py", "d03.py", "d04.py", "d05.py", "d06.py", "d07.py", "d08.py", "d09.py", "d10.py",
+      "d11.py", "d12.py", "d13.py", "d14.py", "d15.py",
+      "variants.py", "capture.py", "__init__.py", "base.py", "backlog.md"
+    ],
+    "timestamp": "2026-06-18"
+  },
+
+  "registry": {
+    "status": "OK",
+    "parent_init_path": "engine/strategy_lab/strategies/__init__.py",
+    "family_init_path": "engine/strategy_lab/strategies/post_gap_opening_drive/__init__.py",
+    "family_init_contents": "module docstring only (no per-family registry)",
+    "all_registered": true,
+    "notes": "All d01-d15 + capture_d_features are explicitly registered in the parent-level RELEASES dict."
+  },
+
+  "inheritance": {
+    "chain_d01": "D01Release -> StrategyRelease (base.py)",
+    "chain_d02_d10_d13_d15": "DriveVariant -> D01Release -> StrategyRelease",
+    "chain_d11": "D11Release -> DriveVariant -> D01Release -> StrategyRelease",
+    "chain_d12": "D12Release -> DriveVariant -> D01Release -> StrategyRelease",
+    "chain_d14": "D14Release -> D11Release -> DriveVariant -> D01Release -> StrategyRelease",
+    "chain_capture": "CaptureRelease -> D01Release -> StrategyRelease",
+    "verdict": "all chains valid, MRO consistent, no diamond issues",
+    "notes": "d14 inherits from D11Release (not DriveVariant directly), which correctly stacks the regime gate (d11) + close-position gate (via DriveVariant lever). d14 does NOT override build_candidates; it inherits D11Release.build_candidates which checks SPY<50d then delegates to DriveVariant.build_candidates which applies max_first_close_pos=0.9."
+  },
+
+  "data_gates_per_release": {
+    "d01": {
+      "gates": ["gap > 1% above prior high", "green first 5m candle", "min_price >= $5", "prior daily exists", "first candle exists"],
+      "data_attrs": {},
+      "additional_declared": []
+    },
+    "d02": {
+      "gates": ["d01 baseline", "opening relative-volume >= 2.0x (min_rv=2.0)"],
+      "data_attrs": {"historical_5m_lookback_days": 14},
+      "additional_declared": ["historical_5m_lookback_days to hydrate RV history"]
+    },
+    "d03": {
+      "gates": ["d01 baseline", "NO filter change — uncapped target in build_signal"],
+      "data_attrs": {"uncapped": true},
+      "additional_declared": []
+    },
+    "d04": {
+      "gates": ["d01 baseline", "NO filter change — exit_cutoff moved to 15:55"],
+      "data_attrs": {"exit_hour": 15, "exit_minute": 55},
+      "additional_declared": []
+    },
+    "d05": {
+      "gates": ["d01 baseline", "split_guard=True (has_split_like_jump, lookback=15, threshold=40%)"],
+      "data_attrs": {"split_guard": true},
+      "additional_declared": [],
+      "notes": "Pre-registered control; backlog confirms ~no-op (0 gaps >40% in d-family)"
+    },
+    "d06": {
+      "gates": ["d01 baseline", "require_above_vwap=True (runtime gate in simulator, not build_candidates)"],
+      "data_attrs": {"require_above_vwap": true},
+      "additional_declared": [],
+      "notes": "Needed engine change to simulate_long_breakout to compute session VWAP at fill time"
+    },
+    "d07": {
+      "gates": ["d01 baseline", "max_gap_pct=8.0 (gap ceiling)"],
+      "data_attrs": {"max_gap_pct": 8.0},
+      "additional_declared": []
+    },
+    "d08": {
+      "gates": ["d01 baseline", "min_rel_spy_gap=2.0 (stock gap >= 2x SPY gap)"],
+      "data_attrs": {"min_rel_spy_gap": 2.0, "requires_spy_daily": true},
+      "additional_declared": ["requires_spy_daily"],
+      "notes": "2026-H1 diagnostic gate"
+    },
+    "d09": {
+      "gates": ["d01 baseline", "max_candle_atr_frac=0.5 (first-candle range <= 0.5x ATR14)"],
+      "data_attrs": {"max_candle_atr_frac": 0.5},
+      "additional_declared": [],
+      "notes": "Uses daily_atr_14 from existing daily context (daily_lookback_days=40 default sufficient for 14-day ATR)"
+    },
+    "d10": {
+      "gates": ["d01 baseline", "min_candle_atr_frac=0.3 (first-candle range >= 0.3x ATR14)"],
+      "data_attrs": {"min_candle_atr_frac": 0.3},
+      "additional_declared": [],
+      "notes": "Paired with d09. Same data path as d09."
+    },
+    "d11": {
+      "gates": ["d01 baseline", "SPY prior close < 50-day SMA (whole-day gate, zero candidates if false)"],
+      "data_attrs": {"requires_spy_daily": true, "spy_daily_lookback_days": 90, "spy_sma_period": 50},
+      "additional_declared": ["requires_spy_daily", "spy_daily_lookback_days"],
+      "notes": "Overrides build_candidates: checks _spy_below_sma first, returns [] if not below. Then delegates to super (DriveVariant). Adds spy_below_50d_sma:True to features."
+    },
+    "d12": {
+      "gates": ["d01 baseline", "per-sector ETF < 50-day SMA (per-candidate), fallback to SPY < 50d if unmapped"],
+      "data_attrs": {"requires_spy_daily": true, "spy_daily_lookback_days": 90, "extra_daily_symbols": ["XLK","XLF","XLE","XLV","XLY","XLP","XLI","XLB","XLRE","XLU","XLC"]},
+      "additional_declared": ["requires_spy_daily", "spy_daily_lookback_days", "extra_daily_symbols"],
+      "notes": "Overrides build_candidates: delegates to super first, then applies per-sector gate with SPY fallback. Uses _below_50d_sma helper. Loads sector_map.yaml via _load_sector_map classmethod."
+    },
+    "d13": {
+      "gates": ["d01 baseline", "max_first_close_pos=0.9 (reject first bars closing in top decile)"],
+      "data_attrs": {"max_first_close_pos": 0.9},
+      "additional_declared": [],
+      "notes": "Standalone geometry gate, NO regime gate. Backlog: survives screen but 2026H1-carried; ex-2026H1 = -17.8R."
+    },
+    "d14": {
+      "gates": ["d01 baseline", "d11 SPY<50d whole-day gate", "d13 max_first_close_pos=0.9 (close-position gate)"],
+      "data_attrs": {"requires_spy_daily": true, "spy_daily_lookback_days": 90, "spy_sma_period": 50, "max_first_close_pos": 0.9},
+      "additional_declared": ["stacked gates: regime (d11) + geometry (d13)"],
+      "notes": "Inherits D11Release.build_candidates (SPY regime gate) + sets max_first_close_pos=0.9 on class. Gate order: whole-day SPY filter first, then per-candidate close-position via DriveVariant.build_candidates. Backlog: SURVIVED screen (+48.7R), KILLED on broad eval (2022 -6.8R, 2023 -16.2R)."
+    },
+    "d15": {
+      "gates": ["gap > 3% above prior high (raised from 1%)", "min_rv=1.5 (opening RV gate)", "green first candle", "min_price >= $5"],
+      "data_attrs": {"min_gap_pct": 3.0, "min_rv": 1.5, "historical_5m_lookback_days": 30},
+      "additional_declared": ["historical_5m_lookback_days for RV baseline (30d matches capture run)"],
+      "notes": "Feature-search winner combo. KILLED on sealed 2025 OOS (-34.1R ledger, -30.1R engine cross-check). Kept as record + engine-fidelity cross-check."
+    }
+  },
+
+  "prior_findings_review": {
+    "M2_L2_opening_relative_volume_timezone": {
+      "location": "variants.py:44-49",
+      "status": "CONFIRMED_MINOR",
+      "detail": "Line 46: if timezone-naive, between_time applied to naive index. Works with naive data but relies on bars being in NY time already — fragile if provider returns UTC or other tz. Handler is defensive (tz_convert or keep naive) but the naive path is unguaranteed."
+    },
+    "L3_build_candidates_mutates_features_in_place": {
+      "location": "variants.py:99-100",
+      "status": "FIXED",
+      "detail": "Lines 99-100 now do `f = dict(c.features); c.features = f` — a clone before mutation. Confirmed. Prior concern about line 109-129 in-place mutation is addressed."
+    },
+    "L6_historical_5m_lookback_days_leaf_only": {
+      "status": "CONFIRMED_CORRECT",
+      "detail": "historical_5m_lookback_days set only on leaf classes that need it: d02 (14), d15 (30), capture.py (30). All others inherit default=0 from StrategyRelease base. This is the correct pattern."
+    },
+    "M16_d09_d10_undocumented_ATR_data_gate": {
+      "status": "RESOLVED_NOT_AN_ISSUE",
+      "detail": "d09/d10 use daily_atr_14 which reads from context.daily — already hydrated by d01's requirements (daily_lookback_days=40 default). No additional data declaration needed. The ATR filter is a computation on existing data, not a new data requirement."
+    },
+    "L17_variants_py_docstring_stale": {
+      "status": "CONFIRMED_STALE",
+      "detail": "variants.py module docstring line 1 says 'Parametrized base for the d02–d04' but the class now serves d02-d10, d11, d12, d13, d15 (11 releases). Docstring and numbered-list body (lines 7-19) only describe d02/d03/d04."
+    }
+  },
+
+  "docstring_accuracy": {
+    "variants_py": {
+      "claim": "Parametrized base for the d02-d04 post-gap-opening-drive variants",
+      "actual": "Serves d02-d10, d11, d12, d13, d15 (11 releases)",
+      "verdict": "STALE — docstring describes only d02/d03/d04, class now used by 11 releases"
+    },
+    "d01_next_intended": {
+      "claims": {
+        "d02": "add premarket volume and gap-hold filters",
+        "d03": "add 2R/scale-out/EMA trailing management",
+        "d04+": "add common market-regime and execution-quality filters"
+      },
+      "actual": {
+        "d02": "opening relative-volume filter (not premarket volume)",
+        "d03": "uncapped winners (not 2R/scale-out/EMA)",
+        "d04": "full-session hold (not market-regime/execution filters)"
+      },
+      "verdict": "STALE — d01's 'Next intended releases' section describes different releases than what was actually built"
+    },
+    "d11_next_intended": {
+      "claims": {
+        "d12": "relax to SPY's 100d/200d SMA",
+        "d13": "per-ticker relative-strength gate"
+      },
+      "actual": {
+        "d12": "sector-trend regime gate",
+        "d13": "first-bar close-position gate"
+      },
+      "verdict": "STALE — d11 predicted different follow-on releases"
+    },
+    "d12_next_intended": {
+      "claims": {
+        "d13": "per-ticker relative-strength gate"
+      },
+      "actual": {
+        "d13": "first-bar close-position gate"
+      },
+      "verdict": "STALE"
+    },
+    "d14_next_intended": {
+      "claims": {
+        "d15+": "per-ticker relative-strength gate"
+      },
+      "actual": {
+        "d15": "gap>=3% + opening-RV>=1.5 (feature-search winner, killed OOS)"
+      },
+      "verdict": "STALE"
+    },
+    "d13_docstring": {
+      "verdict": "ACCURATE — describes its own gate correctly, no 'Next intended' mismatches beyond what d14 addresses"
+    },
+    "d15_docstring": {
+      "verdict": "ACCURATE — correctly describes killed status, feature-search provenance, and engine cross-check purpose"
+    }
+  },
+
+  "filter_until_zero_assessment": {
+    "concern": "Stacking sparsifying gates (regime + geometry) could collapse trade counts",
+    "evidence": {
+      "d14_screen": "N=309 trades / 108 sampled days (~2.9/day)",
+      "d14_broad_2022": "N=647 / ~250 days (~2.6/day), trades/qtr: 90-208",
+      "d14_broad_2023": "N=314 / ~250 days (~1.3/day)",
+      "d11_bull_stretches": "SPY>50d days produce ZERO candidates (by design)",
+      "d15_2025_oos": "760 trades / ~250 days (~3.0/day)"
+    },
+    "verdict": "PASS — trade counts remain above the >20/quarter floor on broad eval. However, d11/d12/d14 are regime-gated (only fire in weak markets) so trade counts are sparser than ungated releases. d14 was killed at stage-2 broad eval for negative sumR, not for thin trades."
+  },
+
+  "split_guard_analysis": {
+    "d05_split_guard": {
+      "mechanism": "has_split_like_jump with default lookback=15, threshold=0.40 (40%)",
+      "triggered_in_d05": "Backlog confirms ZERO trades tripped this guard (diagnostic found 0 gaps >40% in d01's 1343 trades)",
+      "verdict": "~no-op for the d-family — the guard exists but never fires on this universe"
+    },
+    "capture_py_split_guard": {
+      "mechanism": "has_split_like_jump with lookback=252 (extended window)",
+      "purpose": "Data-integrity gate on the capture ledger (wider window to catch split artifacts in training data)",
+      "verdict": "Different use case from d05 — capture uses extended 252-day lookback for max recall on data-integrity events"
+    }
+  },
+
+  "max_first_close_pos_edge_cases": {
+    "location": "variants.py:142-150",
+    "zero_range_bar": {
+      "condition": "rng = fh - fl == 0",
+      "behavior": "Kept (not filtered). Comment says 'degenerate zero-range bars are not the target — keep'",
+      "verdict": "INTENTIONAL — avoids divide-by-zero, passes degenerate bars through"
+    },
+    "negative_close_pos": {
+      "condition": "first_close < first_low (theoretically impossible for valid candle)",
+      "behavior": "Would produce negative close_pos < 0.9, candidate kept",
+      "verdict": "HARMLESS — guardrail against corrupt data, passes through rather than filtering"
+    },
+    "close_pos_gt_1": {
+      "condition": "first_close > first_high",
+      "behavior": "Would produce >1.0 value, filtered if >0.9",
+      "verdict": "HARMLESS — corrupt data would be filtered, correct candles with close==high produce 1.0 > 0.9, correctly filtered"
+    },
+    "all_inputs_zero": {
+      "condition": "features missing / all zeros",
+      "behavior": "rng=0, kept (zero-range bar path)",
+      "verdict": "HARMLESS — degenerate data not falsely filtered"
+    },
+    "overall": "Edge cases handled defensively. The threshold 0.9 correctly identifies bars closing at/near high. Zero-range bars passed through intentionally."
+  },
+
+  "d15_min_gap_pct_override": {
+    "chain": "d15.min_gap_pct=3.0 -> DriveVariant (no override) -> D01Release.min_gap_pct=1.0",
+    "resolution": "d15's min_gap_pct=3.0 overrides D01Release's 1.0. D01Release.build_candidates uses self.min_gap_pct which resolves to 3.0 for d15 instances. Combined with min_rv=1.5 from DriveVariant filter.",
+    "verdict": "CORRECT — gap floor properly raised from 1% to 3% for d15"
+  },
+
+  "new_releases_functional_check": {
+    "d11": {"exists": true, "imports_valid": true, "build_candidates_overridden": true, "sma_logic": "SPY prior close < trailing 50-day SMA of prior closes (no look-ahead, context.spy_daily is strictly before trade_date)"},
+    "d12": {"exists": true, "imports_valid": true, "build_candidates_overridden": true, "sector_fallback": "per-sector ETF < 50d SMA, falls back to SPY < 50d for unmapped tickers or short ETF history"},
+    "d13": {"exists": true, "imports_valid": true, "build_candidates_overridden": false, "parent_filter": "max_first_close_pos=0.9 applied in DriveVariant.build_candidates"},
+    "d14": {"exists": true, "imports_valid": true, "build_candidates_overridden": false, "parent_filter": "Inherits D11Release.build_candidates (SPY<50d) + DriveVariant.build_candidates applies max_first_close_pos=0.9"},
+    "d15": {"exists": true, "imports_valid": true, "build_candidates_overridden": false, "parent_filter": "min_gap_pct=3.0 in D01Release.build_candidates, min_rv=1.5 in DriveVariant.build_candidates, historical_5m_lookback_days=30"}
+  },
+
+  "overall_verdict": {
+    "summary": "All 15 releases (d01-d15) exist, are registered, and have valid inheritance. No broken MRO, no missing data declarations that would cause runtime errors. Immutable release files intact.",
+    "issues_found": [
+      {"severity": "LOW", "item": "variants.py module docstring stale — says d02-d04, serves 11 releases"},
+      {"severity": "LOW", "item": "d01 'Next intended releases' docstring stale — describes different releases than what was built"},
+      {"severity": "LOW", "item": "d11 'Next intended releases' docstring stale — d12/d13 don't match predictions"},
+      {"severity": "LOW", "item": "d12 'Next intended releases' docstring stale — d13 doesn't match prediction"},
+      {"severity": "LOW", "item": "d14 'Next intended releases' docstring stale — d15 doesn't match prediction"},
+      {"severity": "LOW", "item": "opening_relative_volume timezone-naive path (variants.py:46) — works with NY-naive bars but fragile"},
+      {"severity": "INFO", "item": "Family is effectively retired: d15 killed on OOS, d14 killed on broad eval, no surviving release has passed stage-2 broad eval"}
+    ],
+    "positive_findings": [
+      "L3 features-mutation bug FIXED (dict clone at variants.py:99-100)",
+      "M16 ATR data gate is not actually an issue — daily context already loaded",
+      "L6 historical_5m_lookback_days correctly on leaf classes only",
+      "All filter-until-zero thresholds respected (trade counts healthy on broad eval)",
+      "max_first_close_pos edge cases handled defensively",
+      "split_guard correctly implemented (even if ~no-op for d-family)",
+      "d15 min_gap_pct inheritance works correctly through D01Release.build_candidates",
+      "d14 correctly stacks d11 regime gate + d13 geometry gate via inheritance chain",
+      "All releases registered in parent __init__.py RELEASES dict"
+    ]
+  }
+}

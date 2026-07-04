@@ -1,0 +1,13 @@
+name: eval_q2_2024_sample
+description: P0 evaluation sample over Q2 2024 using a small point-in-time universe.
+universe: sp500_sample_pit
+universe_policy: point_in_time
+candidate_limit: 20
+date_ranges:
+  - start: "2024-04-01"
+    end: "2024-06-28"
+    label: q2_2024_eval
+    role: eval
+notes: >
+  Placeholder evaluation set. Replace sample universe with real PIT constituents for serious validation.
+

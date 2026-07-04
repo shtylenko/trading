@@ -1,0 +1,14 @@
+name: eval_2026_h1_broad
+description: True out-of-sample evaluation over H1 2026 on the rule-based liquid PIT universe.
+universe: liquid_pit
+universe_policy: point_in_time
+candidate_limit: 10
+date_ranges:
+  - start: "2026-01-02"
+    end: "2026-06-05"
+    label: h1_2026_eval
+    role: eval
+notes: >
+  TRUE OUT-OF-SAMPLE, same status as eval_2025_broad. End date stops a few
+  days before the present because the data subscription rejects queries into
+  the most recent SIP window.

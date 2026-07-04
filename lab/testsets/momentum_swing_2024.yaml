@@ -1,0 +1,17 @@
+name: momentum_swing_2024
+description: >-
+  In-sample 2024 engine cross-check for the residual-momentum swing release (x03).
+  Daily-rebalanced, multi-day-hold (runner/swing_pipeline.py), split-adjusted bars +
+  SPY (requires_spy_daily). Confirms the engine reproduces the offline residual-momentum
+  result (validation/multiday_x03_residmom_preregistration.md): beta-trimmed momentum.
+universe: liquid_pit
+universe_policy: point_in_time
+candidate_limit: 50
+date_ranges:
+  - start: "2024-01-02"
+    end: "2024-12-31"
+    label: y2024_momentum_swing
+    role: is
+notes: >
+  In-sample (NOT a sealed year). 2024 is a strong-trend year; the cross-check verifies
+  the engine path for x03 (residual momentum vs SPY), not a fresh validation query.

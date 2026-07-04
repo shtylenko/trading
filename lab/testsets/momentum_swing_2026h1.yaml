@@ -1,0 +1,19 @@
+name: momentum_swing_2026h1
+description: >-
+  2026-H1 EARLY-PARTIAL engine cross-check for the cross-sectional momentum swing
+  release (x01). Daily-rebalanced, multi-day-hold — run by the additive swing runner
+  (runner/swing_pipeline.py), split-adjusted bars. The engine reproduction of the
+  sealed 2026-H1 confirmation (validation/multiday_2026h1_preregistration.md, CONFIRM).
+universe: liquid_pit
+universe_policy: point_in_time
+candidate_limit: 50
+date_ranges:
+  - start: "2026-01-02"
+    end: "2026-06-16"
+    label: y2026h1_momentum_swing
+    role: oos
+notes: >
+  2026-H1 is the second sealed confirmation, spent EARLY and PARTIAL (~5 non-overlapping
+  20-day periods through ~mid-May; the last complete hold ends inside the window). This
+  is the engine reproduction of that already-spent offline query, NOT a new query. Data
+  through 2026-06-16; the swing runner's final complete 20-day hold ends ~mid-May.

@@ -1,0 +1,15 @@
+# strategy_lab core dependencies
+pandas>=2.0
+numpy>=1.24
+duckdb>=0.10
+exchange_calendars>=4.5
+pyarrow>=14.0
+
+# Providers
+alpaca-py>=0.30
+yfinance>=0.2
+
+# ML (o03 release and research scripts)
+# Install these ONLY if running o03 or the research pipeline:
+# lightgbm>=4.3
+# scikit-learn>=1.3

@@ -1,0 +1,8 @@
+TITLE: 22.4 Non-conservative Forces
+URL: https://youtube.com/watch?v=OwNr82QgkP8
+CHANNEL: MIT OpenCourseWare
+VIEWS: 18319
+KEYWORD: momentum path-dependent momentum smoothness
+======================================================================
+
+so we saw that a conservative force is path independent and we also had examples of forces which are path dependent if you have path two and path one and the work done is path dependent so that means for each path we would get a different answer then we call this Force F we denote it by NC is called nonconservative and again we see that friction is the best example of a non-conservative force and if we go again for non-conservative work if we integrate from the initial point to the final point for instance on our path one of this non-conservative Force so if we integrate this way and if we reverse the interval and so we go back from the final point to the initial point on path two that these integrals will not be equal to the negative of each other because the quantities are different for the different paths in general and so this is nonzero and in fact um that's the property of non-conservative forces that the work done around the closed path for a non-conservative force is is not equal to zero in general there may be one specific closed path in which that answer is zero but in general it's non zero

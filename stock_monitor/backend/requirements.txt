@@ -1,0 +1,8 @@
+# Minimal path uses only stdlib (receiver.py).
+# If you ever run the FastAPI version:
+# pip install -r requirements.txt
+fastapi>=0.111
+uvicorn[standard]>=0.30
+pydantic>=2.7
+python-dotenv>=1.0
+# For future: pandas for exports, aiosqlite if async needed

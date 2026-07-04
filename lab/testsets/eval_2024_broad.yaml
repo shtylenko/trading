@@ -1,0 +1,21 @@
+name: eval_2024_broad
+description: Regime-diversity evaluation over full-year 2024 (trend year) on the rule-based liquid PIT universe.
+universe: liquid_pit
+universe_policy: point_in_time
+candidate_limit: 10
+date_ranges:
+  - start: "2024-01-02"
+    end: "2024-12-31"
+    label: y2024_eval
+    role: eval
+notes: >
+  Full-year 2024 on liquid_pit so 2022/2023/2024/2025 evals are all
+  apples-to-apples on the SAME point-in-time universe (the existing
+  eval_2024_h2_broad runs on cached_1min_2024_pit, a DIFFERENT universe,
+  so the two 2024 halves are not poolable — this testset is the
+  consistent-universe alternative for cross-year sign-consistency checks).
+  Caveats inherited from the other liquid_pit evals: (1) run ORB releases
+  with O03_DISABLE_ML=1 (the lgbm_orb_v2 model was trained on 2024, so it
+  would be fit on these very dates — RV ranking only). (2) The universe is
+  built from Alpaca's current asset list, so since-delisted names are
+  missing (survivorship bias) — treat results as upper bounds.

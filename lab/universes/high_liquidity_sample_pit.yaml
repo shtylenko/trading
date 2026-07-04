@@ -1,0 +1,17 @@
+name: high_liquidity_sample_pit
+description: High-liquidity point-in-time sample for opening-drive experiments.
+policy: point_in_time
+snapshots:
+  - effective_date: "2024-01-01"
+    tickers:
+      - AAPL
+      - AMD
+      - AMZN
+      - GOOGL
+      - META
+      - MSFT
+      - NVDA
+      - QQQ
+      - SMH
+      - TSLA
+

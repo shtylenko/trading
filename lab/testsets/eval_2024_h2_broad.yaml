@@ -1,0 +1,14 @@
+name: eval_2024_h2_broad
+description: Phase v2 out-of-sample evaluation over H2 2024 on the broad cached-data universe.
+universe: cached_1min_2024_pit
+universe_policy: point_in_time
+candidate_limit: 10
+date_ranges:
+  - start: "2024-07-01"
+    end: "2024-12-31"
+    label: h2_2024_eval
+    role: eval
+notes: >
+  Matches the research walk-forward OOS period (research/train_and_simulate.py).
+  Requires 5min RTH + daily bars for ~330 tickers; first run will fetch heavily
+  from providers (1min RTH is already cached).

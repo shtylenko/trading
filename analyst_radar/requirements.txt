@@ -1,0 +1,13 @@
+# Core dependencies
+sqlite3  # stdlib — no install needed
+
+# YouTube search + transcripts: via ytmcp (/Users/shtylenko/Projects/ytmcp).
+#   Uses ytapi.YouTubeAPI (RapidAPI yt-api). Requires RAPIDAPI_KEY in env.
+#   No yt-dlp.
+
+# Ticker validation: via trading.marketdata (in-repo, no extra install).
+
+# LLM interaction: the LLM (Hermes) drives the pipeline — no LLM SDK here.
+
+# Data validation
+pydantic>=2.0

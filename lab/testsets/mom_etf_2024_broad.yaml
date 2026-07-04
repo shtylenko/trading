@@ -1,0 +1,17 @@
+name: mom_etf_2024_broad
+description: >-
+  Stage-0 baseline for the intraday-momentum (m) family: full-year 2024 on the
+  liquid-ETF universe. Honest unfiltered baseline R for the first-half-hour →
+  hold-to-close rule before any feature capture.
+universe: etf_liquid_pit
+universe_policy: point_in_time
+candidate_limit: 10
+date_ranges:
+  - start: "2024-01-02"
+    end: "2024-12-31"
+    label: y2024_mom_etf
+    role: eval
+notes: >
+  ETF universe (not single stocks), so the survivorship caveat that applies to
+  liquid_pit does not materially apply here. Stage-0 triage only — no filters;
+  the finding (if any) happens in the pre-registered systematic search.

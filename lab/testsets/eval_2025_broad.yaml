@@ -1,0 +1,15 @@
+name: eval_2025_broad
+description: True out-of-sample evaluation over 2025 on the rule-based liquid PIT universe.
+universe: liquid_pit
+universe_policy: point_in_time
+candidate_limit: 10
+date_ranges:
+  - start: "2025-01-02"
+    end: "2025-12-31"
+    label: y2025_eval
+    role: eval
+notes: >
+  TRUE OUT-OF-SAMPLE: o03 (model + parameters) was tuned entirely on 2024
+  data, so nothing in 2025 was seen during research. The static lgbm_orb_v2
+  model is legitimate here (trained strictly on the past). This is the
+  highest-value verdict on whether the o03 edge is real.

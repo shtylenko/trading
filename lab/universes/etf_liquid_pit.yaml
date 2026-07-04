@@ -1,0 +1,41 @@
+name: etf_liquid_pit
+description: >-
+  Liquid US-listed ETFs for the intraday-momentum family (Gao et al. market
+  intraday momentum is documented strongest at the index/sector-ETF level).
+  Broad index + SPDR sector + a few high-volume thematic/bond/commodity ETFs.
+  All names listed well before 2022, so unlike the single-stock liquid_pit this
+  universe is NOT materially survivorship-biased (ETF closures in this liquid
+  set are rare). Single snapshot — ETF membership is stable over the window.
+policy: point_in_time
+snapshots:
+  - effective_date: "2022-01-01"
+    tickers:
+      # broad index
+      - "SPY"
+      - "QQQ"
+      - "IWM"
+      - "DIA"
+      # SPDR sectors
+      - "XLK"
+      - "XLF"
+      - "XLE"
+      - "XLV"
+      - "XLY"
+      - "XLP"
+      - "XLI"
+      - "XLB"
+      - "XLRE"
+      - "XLU"
+      - "XLC"
+      # high-volume thematic / international / fixed income / commodity
+      - "SMH"
+      - "XBI"
+      - "XOP"
+      - "KRE"
+      - "ARKK"
+      - "EEM"
+      - "EFA"
+      - "TLT"
+      - "HYG"
+      - "GLD"
+      - "SLV"

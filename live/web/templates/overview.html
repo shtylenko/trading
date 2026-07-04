@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>trading.live — {{ env.env }}</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; margin: 0; background:#0f1115; color:#e6e6e6; }
+    header { display:flex; align-items:center; gap:1rem; padding:.8rem 1.2rem;
+             background:#171a21; border-bottom:1px solid #262b36; }
+    header h1 { font-size:1rem; margin:0; font-weight:600; }
+    a { color:#5b9dff; text-decoration:none; } a:hover { text-decoration:underline; }
+    .badge { padding:.15rem .5rem; border-radius:999px; font-size:.72rem; font-weight:600; }
+    .env-dev{background:#1d4ed8;} .env-testing{background:#b45309;} .env-prod{background:#15803d;}
+    .kill-on{background:#dc2626;} .kill-off{background:#374151;}
+    main { padding:1.2rem; max-width:1100px; margin:0 auto; }
+    .card { background:#171a21; border:1px solid #262b36; border-radius:10px;
+            padding:1rem 1.2rem; margin-bottom:1.1rem; }
+    .card h2 { font-size:.82rem; text-transform:uppercase; letter-spacing:.04em;
+               color:#9aa4b2; margin:0 0 .7rem; }
+    table { width:100%; border-collapse:collapse; font-size:.86rem; }
+    th,td { text-align:left; padding:.4rem .5rem; border-bottom:1px solid #21262f; }
+    th { color:#9aa4b2; font-weight:600; }
+    td.num { text-align:right; font-variant-numeric:tabular-nums; }
+    .muted { color:#7c8696; } .dot{height:.6rem;width:.6rem;border-radius:50%;display:inline-block;}
+    .ok{background:#15803d;} .warn{background:#b45309;} .bad{background:#dc2626;}
+    button { font:inherit; padding:.4rem .8rem; border-radius:8px; border:0; cursor:pointer;
+             color:#fff; font-weight:600; } .btn-kill{background:#dc2626;} .btn-reset{background:#15803d;}
+    input,select{font:inherit;padding:.35rem .5rem;border-radius:6px;border:1px solid #2a3140;
+                 background:#0f1115;color:#e6e6e6;}
+    form.inline{display:inline;margin:0;}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>trading.live</h1>
+    <span class="badge env-{{ env.env }}">{{ env.env }}</span>
+    <span style="flex:1"></span>
+    <form class="inline" method="post" action="/kill">
+      <input type="hidden" name="active" value="on">
+      <button class="btn-kill">⛔ Global kill</button>
+    </form>
+    <form class="inline" method="post" action="/kill">
+      <input type="hidden" name="active" value="off">
+      <button class="btn-reset">Reset global</button>
+    </form>
+  </header>
+
+  <main>
+    <div class="card">
+      <h2>Portfolios ({{ portfolios|length }})</h2>
+      {% if portfolios %}
+      <table>
+        <thead><tr><th></th><th>Portfolio</th><th>Release</th><th>Mode</th><th>Status</th>
+          <th class="num">Capital</th><th class="num">Positions</th><th>Kill</th></tr></thead>
+        <tbody>
+        {% for v in portfolios %}
+          <tr>
+            <td><span class="dot {{ 'bad' if v.kill else ('warn' if v.cfg.status!='active' else 'ok') }}"></span></td>
+            <td><a href="/portfolio/{{ v.cfg.portfolio_id }}">{{ v.cfg.portfolio_id }}</a></td>
+            <td>{{ v.cfg.release_id }}</td>
+            <td>{{ v.cfg.mode }}</td>
+            <td>{{ v.cfg.status }}</td>
+            <td class="num">${{ '{:,.0f}'.format(v.cfg.capital) }}</td>
+            <td class="num">{{ v.n_positions }}</td>
+            <td>
+              {% if v.kill %}
+                <form class="inline" method="post" action="/kill">
+                  <input type="hidden" name="portfolio_id" value="{{ v.cfg.portfolio_id }}">
+                  <input type="hidden" name="active" value="off">
+                  <button class="btn-reset">reset</button></form>
+              {% else %}
+                <form class="inline" method="post" action="/kill">
+                  <input type="hidden" name="portfolio_id" value="{{ v.cfg.portfolio_id }}">
+                  <input type="hidden" name="active" value="on">
+                  <button class="btn-kill">kill</button></form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="muted">No portfolios yet — onboard one below.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Onboard a portfolio</h2>
+      <form method="post" action="/onboard">
+        <input name="portfolio_id" placeholder="x03-pf1" required>
+        <input name="release_id" placeholder="x03" required>
+        <input name="universe" value="liquid_pit">
+        <input name="capital" type="number" step="1000" value="25000">
+        <select name="mode" title="account mode">
+          <option value="paper" selected>paper</option>
+          <option value="live">live</option>
+        </select>
+        <label style="font-size:.8rem"><input type="checkbox" name="fractional" value="true"> fractional shares</label>
+        <button class="btn-reset">Onboard</button>
+      </form>
+      <p class="muted" style="font-size:.74rem;margin:.6rem 0 0">
+        Fully manual approval; pins the release code hash. Live mode is refused outside the
+        prod environment. Fractional lets a small account hold the full equal-weight book.</p>
+    </div>
+
+    <div class="card">
+      <h2>Platform denylist ({{ denylist|length }})</h2>
+      {% if denylist %}
+        <table><thead><tr><th>Symbol</th><th>Reason</th><th>Expires</th></tr></thead><tbody>
+        {% for d in denylist %}<tr><td>{{ d.symbol }}</td><td class="muted">{{ d.reason }}</td>
+          <td>{{ d.expires or '—' }}</td></tr>{% endfor %}</tbody></table>
+      {% else %}<p class="muted">Empty — edit <code>denylist.yml</code> to block buys.</p>{% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Recent audit</h2>
+      <table><tbody>
+      {% for a in audit %}<tr><td class="muted">{{ a.ts[:19] }}</td><td>{{ a.actor }}</td>
+        <td>{{ a.action }}</td><td class="muted">{{ a.detail }}</td></tr>{% endfor %}
+      </tbody></table>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "Webull Stock Monitor",
+  "version": "0.1.0",
+  "description": "Captures candle data from Webull charts on app.webull.com and sends to local backend.",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://app.webull.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://app.webull.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js"],
+      "matches": ["https://app.webull.com/*"]
+    }
+  ],
+  "action": {
+    "default_title": "Webull Chart Monitor",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-gray-16.png",
+      "32": "icons/icon-gray-32.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-gray-16.png",
+    "32": "icons/icon-gray-32.png",
+    "128": "icons/icon-gray-128.png"
+  }
+}

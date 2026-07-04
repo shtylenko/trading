@@ -1,0 +1,134 @@
+"""Shared indicator calculations.
+
+Central place for common technical computations used by the scanner (patterns)
+and replay tooling. This eliminates duplication of VWAP, time-zone handling,
+and session enrichment logic.
+
+All functions are pure where possible and work on pandas DataFrames with
+OHLCV data (any tz on index; functions normalize to ET internally when needed).
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from typing import Optional
+
+import pandas as pd
+
+
+def session_vwap(df: pd.DataFrame) -> pd.Series:
+    """Typical-price volume-weighted average price over the whole frame.
+
+    Uses (H+L+C)/3 * volume, cumulative. Handles zero-volume bars gracefully.
+    """
+    typical = (df["high"] + df["low"] + df["close"]) / 3.0
+    cum_pv = (typical * df["volume"]).cumsum()
+    cum_v = df["volume"].cumsum().replace(0, pd.NA)
+    return cum_pv / cum_v
+
+
+def normalize_to_et(df: pd.DataFrame, day: Optional[date] = None) -> pd.DataFrame:
+    """Return a copy with DatetimeIndex localized/converted to America/New_York.
+
+    If ``day`` is provided, filter to rows whose .date() == day (after tz conversion).
+    The input may have tz-naive or any tz.
+    """
+    out = df.sort_index().copy()
+    if out.index.tz is None:
+        out.index = out.index.tz_localize("America/New_York")
+    else:
+        out.index = out.index.tz_convert("America/New_York")
+    if day is not None:
+        out = out[out.index.date == day]
+    return out
+
+
+def add_volume_average(
+    df: pd.DataFrame,
+    window: int = 5,
+    min_periods: int = 1,
+    out_col: str = "vol_avg",
+) -> pd.DataFrame:
+    """Add a column with rolling mean of prior volume (shifted to avoid lookahead)."""
+    out = df.copy()
+    out[out_col] = out["volume"].shift(1).rolling(window, min_periods=min_periods).mean()
+    return out
+
+
+def macd(
+    close: pd.Series,
+    *,
+    fast: int = 12,
+    slow: int = 26,
+    signal: int = 9,
+) -> pd.DataFrame:
+    """Standard MACD on a close series (all backward-looking EMAs, no look-ahead).
+
+    Returns a frame with columns ``macd`` (fast EMA − slow EMA), ``macd_signal``
+    (EMA of the MACD line), and ``macd_hist`` (macd − signal). Cameron uses this as
+    a trend-confirmation filter (§4.6): MACD line above signal + expanding histogram
+    = momentum intact; never enter against it.
+    """
+    ema_fast = close.ewm(span=fast, adjust=False).mean()
+    ema_slow = close.ewm(span=slow, adjust=False).mean()
+    line = ema_fast - ema_slow
+    sig = line.ewm(span=signal, adjust=False).mean()
+    return pd.DataFrame({"macd": line, "macd_signal": sig, "macd_hist": line - sig})
+
+
+def enrich_1min_for_replay(
+    df: pd.DataFrame,
+    *,
+    rvol_bar_window: int = 20,
+    rvol_min_periods: int = 5,
+) -> pd.DataFrame:
+    """Enrich a 1-minute RTH (or session) frame with the indicators the replay
+    and simulator use:
+
+    - vwap (session)
+    - ema9, ema20 (on close)
+    - macd, macd_signal, macd_hist (12/26/9 trend-confirmation filter)
+    - cum_vol
+    - session_high (running high)
+    - new_high (True when high > all prior highs)
+    - rvol_bar (current vol / trailing N-bar avg, shifted)
+    - above_vwap (bool)
+
+    Returns a new DataFrame. Expects df to already be filtered/sorted for the day
+    in ET if desired by caller.
+    """
+    out = df.copy()
+    out["vwap"] = session_vwap(out)
+    out["ema9"] = out["close"].ewm(span=9, adjust=False).mean()
+    out["ema20"] = out["close"].ewm(span=20, adjust=False).mean()
+    macd_df = macd(out["close"])
+    out["macd"] = macd_df["macd"]
+    out["macd_signal"] = macd_df["macd_signal"]
+    out["macd_hist"] = macd_df["macd_hist"]
+    out["cum_vol"] = out["volume"].cumsum()
+    prev_max = out["high"].cummax().shift(1)
+    out["session_high"] = out["high"].cummax()
+    out["new_high"] = out["high"] > prev_max.fillna(float("-inf"))
+    vol_base = out["volume"].shift(1).rolling(
+        rvol_bar_window, min_periods=rvol_min_periods
+    ).mean()
+    out["rvol_bar"] = out["volume"] / vol_base
+    out["above_vwap"] = out["close"] >= out["vwap"]
+    return out
+
+
+def prepare_detection_frame(
+    df: pd.DataFrame, day: date, vol_avg_window: int = 5
+) -> pd.DataFrame:
+    """Prepare a day's frame for detect_from_frame style logic.
+
+    - Normalizes to ET and filters to the day
+    - Adds 'vwap' and 'vol_avg' (using the window for breakout volume baseline)
+    Returns the enriched frame (or empty).
+    """
+    day_df = normalize_to_et(df, day=day)
+    if day_df.empty:
+        return day_df
+    day_df = day_df.assign(vwap=session_vwap(day_df))
+    day_df = add_volume_average(day_df, window=vol_avg_window, out_col="vol_avg")
+    return day_df

@@ -1,0 +1,129 @@
+{% extends "portfolio_base.html" %}
+{% from "_insights.html" import sector_panel, concentration_panel, conviction_panel,
+   capital_panel, composition_panel %}
+{% block title %} — manage{% endblock %}
+
+{% macro insight_block(s) %}
+  {% if s.n %}
+    {{ sector_panel(s) }}
+    <div class="grid" style="margin-top:1rem">
+      {{ capital_panel(s) }}{{ concentration_panel(s) }}
+      {{ conviction_panel(s) }}{{ composition_panel(s) }}
+    </div>
+  {% else %}<p class="muted">Nothing here.</p>{% endif %}
+{% endmacro %}
+
+{% block content %}
+    <div class="card">
+      <h2>Pending approvals ({{ pending|length }})</h2>
+      {% if pending %}
+      <table id="approvals" class="sortable">
+        <thead><tr>
+          <th data-type="text">Side</th><th data-type="text">Ticker</th>
+          <th class="num" data-type="num" data-dir="asc">Rank<span class="arr">▲</span></th><th class="num" data-type="num">Qty</th>
+          <th class="num" data-type="num">Price</th><th class="num" data-type="num">Notional</th>
+          <th class="num" data-type="num">Weight</th><th class="num" data-type="num">Score</th>
+          <th class="num" data-type="num">Held</th><th data-type="text">Why</th>
+          <th data-nosort>Decision</th>
+        </tr></thead>
+        <tbody>
+        {% for a in pending %}
+          {% set side = a.get('side', '?') %}
+          {% set price = a.get('price') %}{% set notional = a.get('notional') %}
+          {% set weight = a.get('weight_pct') %}{% set score = a.get('score') %}
+          <tr>
+            <td data-sort="{{ side }}"><span class="side-{{ side }}">{{ side|upper }}</span></td>
+            <td data-sort="{{ a.ticker }}">{{ a.ticker }}</td>
+            <td class="num" data-sort="{{ a.get('rank') if a.get('rank') is not none else '' }}">{{ a.get('rank') if a.get('rank') is not none else '—' }}</td>
+            <td class="num" data-sort="{{ a.get('qty', 0) }}">{{ a.get('qty', 0) }}</td>
+            <td class="num" data-sort="{{ price if price else '' }}">{{ '$%.2f'|format(price) if price else '—' }}</td>
+            <td class="num" data-sort="{{ notional if notional else '' }}">{{ '$%s'|format('{:,.0f}'.format(notional)) if notional else '—' }}</td>
+            <td class="num" data-sort="{{ weight if weight is not none else '' }}">{{ '%.1f%%'|format(weight) if weight is not none else '—' }}</td>
+            <td class="num" data-sort="{{ score if score is not none else '' }}">{{ '%+.3f'|format(score) if score is not none else '—' }}</td>
+            <td class="num" data-sort="{{ a.get('held_qty') or 0 }}">{{ a.get('held_qty') or '—' }}</td>
+            <td class="muted" data-sort="{{ a.get('reason', '') }}">{{ a.get('reason', '') }}</td>
+            <td style="white-space:nowrap">
+              <form class="inline" method="post" action="/approve">
+                <input type="hidden" name="approval_id" value="{{ a.approval_id }}">
+                <input type="hidden" name="portfolio_id" value="{{ p.portfolio_id }}">
+                <input type="hidden" name="decision" value="approve">
+                <button class="ok">approve</button></form>
+              <form class="inline" method="post" action="/approve">
+                <input type="hidden" name="approval_id" value="{{ a.approval_id }}">
+                <input type="hidden" name="portfolio_id" value="{{ p.portfolio_id }}">
+                <input type="hidden" name="decision" value="reject">
+                <button class="no">reject</button></form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:.74rem;margin:.6rem 0 0">
+        Weight = order notional ÷ configured capital{% if p.capital %} (${{ '{:,.0f}'.format(p.capital) }}){% endif %}.
+        Score is the strategy's rank signal. "Held" is your current share count.</p>
+      {% else %}<p class="muted">None pending — nothing to approve right now.</p>{% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Approved — execution queue ({{ approved|length }})</h2>
+      {% if approved %}
+      <table id="execqueue" class="sortable">
+        <thead><tr>
+          <th data-type="text">State</th><th data-type="text">Side</th><th data-type="text">Ticker</th>
+          <th class="num" data-type="num" data-dir="asc">Rank<span class="arr">▲</span></th>
+          <th class="num" data-type="num">Qty</th><th class="num" data-type="num">Price</th>
+          <th class="num" data-type="num">Notional</th><th class="num" data-type="num">Weight</th>
+          <th>Why</th>
+        </tr></thead>
+        <tbody>
+        {% for a in approved %}
+          {% set side = a.get('side', '?') %}{% set price = a.get('price') %}
+          {% set notional = a.get('notional') %}{% set weight = a.get('weight_pct') %}
+          {% set st = a.get('exec_state', 'queued') %}
+          <tr>
+            <td data-sort="{{ st }}"><span class="st st-{{ st }}">{{ st }}</span></td>
+            <td data-sort="{{ side }}"><span class="side-{{ side }}">{{ side|upper }}</span></td>
+            <td data-sort="{{ a.ticker }}">{{ a.ticker }}</td>
+            <td class="num" data-sort="{{ a.get('rank') if a.get('rank') is not none else '' }}">{{ a.get('rank') if a.get('rank') is not none else '—' }}</td>
+            <td class="num" data-sort="{{ a.get('qty', 0) }}">{{ a.get('qty', 0) }}</td>
+            <td class="num" data-sort="{{ price if price else '' }}">{{ '$%.2f'|format(price) if price else '—' }}</td>
+            <td class="num" data-sort="{{ notional if notional else '' }}">{{ '$%s'|format('{:,.0f}'.format(notional)) if notional else '—' }}</td>
+            <td class="num" data-sort="{{ weight if weight is not none else '' }}">{{ '%.1f%%'|format(weight) if weight is not none else '—' }}</td>
+            <td class="muted">{{ a.get('reason', '') }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:.74rem;margin:.6rem 0 0">
+        Approved orders wait here until you run <code>execute</code>. "queued" = not yet
+        submitted; once executed, state shows filled / partially_filled / rejected.</p>
+      {% else %}<p class="muted">Nothing approved yet — approve items above, then run execute.</p>{% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Rebalance insights — pending ({{ n_pending }})</h2>
+      {{ insight_block(pending_stats) }}
+    </div>
+
+    <div class="card">
+      <h2>Rebalance insights — execution queue ({{ n_queue }})</h2>
+      {{ insight_block(queue_stats) }}
+    </div>
+
+    <div class="card">
+      <h2>Strategy target ({{ book|length }})</h2>
+      <p class="muted" style="font-size:.78rem;margin:0 0 .6rem">
+        The top-{{ book|length }} names the strategy wants to hold this period, ranked by its
+        score. This is the model's wish-list — what you actually hold can differ (pending
+        approvals, denylist, time-in-hold). Higher score = stronger signal.</p>
+      {% if book %}
+      <table class="sortable"><thead><tr>
+        <th class="num" data-type="num" data-dir="asc">#<span class="arr">▲</span></th>
+        <th data-type="text">Ticker</th><th class="num" data-type="num">Score</th></tr></thead><tbody>
+      {% for e in book %}<tr><td class="num" data-sort="{{ e.rank }}">{{ e.rank }}</td>
+        <td data-sort="{{ e.ticker }}">{{ e.ticker }}</td>
+        <td class="num" data-sort="{{ e.score if e.score is not none else '' }}">{{ '%+.4f'|format(e.score) if e.score is not none else '—' }}</td></tr>{% endfor %}
+      </tbody></table>
+      {% else %}<p class="muted">No run yet.</p>{% endif %}
+    </div>
+{% endblock %}

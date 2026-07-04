@@ -1,0 +1,13 @@
+name: gap_drive_smoke_april_2024
+description: Small smoke test biased toward high-liquidity gap-drive candidates.
+universe: high_liquidity_sample_pit
+universe_policy: point_in_time
+candidate_limit: 10
+date_ranges:
+  - start: "2024-04-01"
+    end: "2024-04-05"
+    label: april_2024_gap_smoke
+    role: smoke
+notes: >
+  Designed for d01 mechanics. P0 d01 uses daily gap detection only; extended-hours filters arrive in P1.
+

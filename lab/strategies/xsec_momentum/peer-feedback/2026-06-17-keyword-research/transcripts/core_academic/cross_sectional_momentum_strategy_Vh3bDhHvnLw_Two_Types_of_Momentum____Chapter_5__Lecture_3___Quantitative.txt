@@ -1,0 +1,9 @@
+TITLE: Two Types of Momentum  | Chapter 5, Lecture 3 | Quantitative Trading & Factor Investing
+URL: https://youtube.com/watch?v=Vh3bDhHvnLw
+CHANNEL: Quant Alpha
+VIEWS: 132
+PUBLISHED: 3 years ago
+KEYWORD: cross-sectional momentum strategy
+=======================================================================
+
+foreign [Music] two types of momentum the academic literature says two different types of momentum exist cross-sectional and Time series cross-sectional momentum measures relative performance by comparing the returns of an asset with those of other Assets in the same asset class a strategy based on cross-sectional momentum in the same asset class might buy the 30 of stocks with the best relative performance and short sell the 30 stocks with the worst such a strategy would still short the assets with the lowest returns even if all assets have risen in value time series momentum which we explore fully later measures and assets Trend against its own performance sometimes referred to as Trend following time series momentum depicts the absolute performance and not relative performance a strategy based on Trend following would buy the assets that have been rising in value and short the assets that have been falling it would short none of the assets if all had risen in value we shall now examine the cross-sectional momentum Factor against our criteria and determine if it qualifies for allocation foreign [Music]

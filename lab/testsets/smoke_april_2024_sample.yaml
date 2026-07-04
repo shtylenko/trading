@@ -1,0 +1,13 @@
+name: smoke_april_2024_sample
+description: Small P0 smoke test for strategy_lab release mechanics.
+universe: sp500_sample_pit
+universe_policy: point_in_time
+candidate_limit: 10
+date_ranges:
+  - start: "2024-04-01"
+    end: "2024-04-05"
+    label: april_2024_smoke
+    role: smoke
+notes: >
+  Tiny sample intended for fast local iteration only. Do not use for promotion decisions.
+

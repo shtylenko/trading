@@ -260,14 +260,32 @@ Save what you learn so future runs improve automatically.
   non-finance content (Chinese drama, K-pop, gaming, sports, etc.), flag them for
   deactivation in the report.
 - **Commentary channels discovered?** If a new commentary/aggregator channel keeps
-  appearing (e.g. "Nvidia Investor", "Stocks Galore"), add it to the skip list in
-  your mental model so you auto-skip it next run.
+  appearing (e.g. "Nvidia Investor", "Stocks Galore", "Stock Market Analyst"),
+  add it to the skip list in step 2 so you auto-skip it next run.
 - **Channel scan gaps?** If a tracked channel has zero hit rate after several runs,
   consider removing it. If a major financial channel isn't tracked, add it.
+- **"Investor Center" archive clips** — this channel reposts historical footage
+  (Buffett, Dalio, Howard Marks, Peter Lynch). Most are NOT new interviews.
+  Skip titles that sound like archive clips ("How to Turn $1,000 into $2.2
+  Billion", "Warning You (Most Won't Listen)", etc.). Only extract if there's
+  clear new content or current-news framing.
 - **Pipeline:**
-  - Did `--phase-1` time out? May need background mode.
+  - `--phase-1` is SLOW (~5+ min for 96 analysts). Run in background with
+    `notify_on_complete=True` so you can do other work while it searches.
+    Or batch analysts in groups of 10-20.
+  - Phase 1 picks up massive noise (WWE, gaming, local news, non-English,
+    cooking shows). The search is purely keyword-based — it finds anything
+    matching the analyst's name. **Post-filter when reading the worklist:**
+    skip obvious non-finance content by title before reading transcripts.
   - Did `scan_channel_feed` find duplicates? Check youtube_id dedup.
-  - Did ticker validation fail for legit tickers? Fix Alpaca/marketdata provider.
+  - Did ticker validation fail for legit tickers? Check the DB for the
+    analyst's actual ID — IDs drift as more analysts get seeded (e.g.
+    Gene Munster was seed #26 but actual DB ID 69).
+- **Prioritise extractions:** 815+ pending is a large backlog. Focus on:
+  1. Trusted channels first (CNBC, Bloomberg, Fundstrat, etc.)
+  2. Newest interviews first
+  3. Clearly named analysts in the title (you can match before reading)
+  4. Skip obvious archive clips, non-finance, and commentary
 - **Predictions stored this run:** if 3+ new predictions were stored, run the TRADE_IDEAS
   skill (`/Users/shtylenko/Hermes/projects/trading/analyst_radar/skills/TRADE_IDEAS.md`)
   immediately after to update bull/bear scores for affected tickers.
@@ -286,13 +304,29 @@ If you discovered a shortcut, pitfall, or recurring pattern during this run,
 ### Always skip (commentary / noise)
 - CTV News — Canadian local news, never analyst interviews
 - NBC News — general news broadcasts
-- ABC News — general news broadcasts  
+- ABC News — general news broadcasts
+- ABC21 — local news, never analyst interviews
 - "Nvidia Investor", "Stocks Galore", "Wolf of Dubai", "Blue Cloud Trading" — aggregator farms
+- "Stock Market Analyst", "Market Insider" (generic) — aggregator/commentary channels
 - Korean/Japanese/Telugu/Chinese channels — non-English content
+- "Pablo Farkuh", "Neto Invest" — non-English (Portuguese)
+- "Max Cents" — non-finance content creator
+- "Certain POV Media" — non-finance (politics/entertainment, not market analysis)
+- "InferVods" — gaming VODs
+- "Rons Basement" — non-finance channel
+- "Ministério Intimidade" — non-English religious content
+- "tastylive and Slope of Hope" — commentary/entertainment, not primary source
+
+### Archive clips (sometimes skip — check title before reading)
+- Investor Center — predominantly reposts historical archive footage from famous
+  investors (Buffett, Dalio, Howard Marks, Peter Lynch, Bill Ackman). Most clips
+  are **not new interviews**. Only extract if the title signals current news or
+  a genuine recent appearance.
 
 ### Always trust as primary source
 - CNBC Television — primary source, major interviews
 - Bloomberg Television — primary source, major interviews
+- Bloomberg Podcasts — long-form interviews (Ives, Munster, etc.)
 - Bloomberg Originals — long-form business/finance interviews
 - Fundstrat — Tom Lee's own channel
 - Charles Schwab — Liz Ann Sonders appearances
@@ -301,11 +335,11 @@ If you discovered a shortcut, pitfall, or recurring pattern during this run,
 - David Lin — analyst interviews on gold, macro, equities
 - Real Vision — professional macro market interviews
 - Wealthion — macro analyst interview channel
+- Adam Taggart | Thoughtful Money® — macro analyst interview channel
 - Investor's Business Daily — financial news, stock analysis
 - Steve Eisman — tracked analyst's own channel
 - Odds on Open — hedge fund manager interviews
 - Verified Investing — daily technical market analysis
-- Investor Center — curated clips from top investors
 - The Motley Fool — stock picks and market commentary
 - Zacks Investment Research — analyst stock calls
 - MarketWatch — financial news with market analysis

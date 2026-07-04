@@ -10,6 +10,9 @@ Usage:
   python3 query.py -i                                        # stats
   python3 query.py "icebreaker rule" --json                  # JSON output
   python3 query.py "VWAP" --min-views 50000 --limit 5        # filtered
+  python3 query.py --full abc123 --topic ross_cameron        # full transcript text
+  python3 query.py "VWAP" --show 1                          # show full transcript for result #1
+  python3 query.py "VWAP" --cat 1                            # raw text for piping
 """
 
 import sqlite3, os, sys, re, argparse, json
@@ -58,7 +61,7 @@ def discover_topics(strict=False):
 
 
 def search_db(db_path, query, min_views=0, limit=40):
-    """FTS5 search on a single per-topic DB. Returns results grouped by video_id."""
+    """FTS5 search on a single per-topic DB. Returns results grouped by source_id."""
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA busy_timeout=3000")
     conn.execute("PRAGMA query_only=1")
@@ -66,7 +69,7 @@ def search_db(db_path, query, min_views=0, limit=40):
 
     try:
         c.execute("""
-            SELECT t.id, t.video_id, t.chunk_index, t.title, t.url, t.view_count,
+            SELECT t.id, t.source_id, t.chunk_index, t.title, t.url, t.view_count, t.file_path,
                    snippet(transcripts_fts, 1, '\x01', '\x02', '...', 40)
             FROM transcripts_fts
             JOIN transcripts t ON t.id = transcripts_fts.rowid
@@ -76,12 +79,12 @@ def search_db(db_path, query, min_views=0, limit=40):
             LIMIT ?
         """, (query, min_views, limit))
 
-        # Group by video_id, keep the best chunk per video
+        # Group by source_id, keep the best chunk per document
         groups = {}
         for row in c.fetchall():
-            vid = row[1]
-            if vid not in groups:
-                groups[vid] = row
+            sid = row[1]
+            if sid not in groups:
+                groups[sid] = row
         results = list(groups.values())
     except sqlite3.OperationalError:
         results = []
@@ -104,7 +107,13 @@ if __name__ == '__main__':
     parser.add_argument('--min-views', type=int, default=0, help='Minimum view count filter')
     parser.add_argument('--json', action='store_true', help='Output as JSON')
     parser.add_argument('--no-color', action='store_true', help='Disable color highlighting')
+    parser.add_argument('--full', metavar='SOURCE_ID', help='Print full document text (needs --topic)')
+    parser.add_argument('--show', metavar='SOURCE_ID', help='Alias for --full')
     args = parser.parse_args()
+
+    # --show is an alias for --full
+    if args.show and not args.full:
+        args.full = args.show
 
     # Use strict mode when the user explicitly asked for particular topics.
     # This makes missing/corrupt topics fail loudly instead of being silently dropped.
@@ -121,15 +130,15 @@ if __name__ == '__main__':
 
     if args.list_topics:
         for name, display, count, _ in topics:
-            print(f"{name:20s}  {display:30s}  {count} videos")
+            print(f"{name:20s}  {display:30s}  {count} documents")
         sys.exit(0)
 
     if args.info:
         total_vids = sum(t[2] for t in topics)
         total_bytes = sum(os.path.getsize(t[3]) for t in topics)
-        print(f"Topics:      {len(topics)}")
-        print(f"Unique videos: {total_vids}")
-        print(f"DB size:     {total_bytes/1024/1024:.1f}MB")
+        print(f"Topics:          {len(topics)}")
+        print(f"Total documents: {total_vids}")
+        print(f"DB size:         {total_bytes/1024/1024:.1f}MB")
         for name, display, count, db_path in topics:
             extra = ""
             try:
@@ -142,10 +151,10 @@ if __name__ == '__main__':
                 conn.close()
             except Exception:
                 pass
-            print(f"  {display}: {count} videos{extra} ({os.path.getsize(db_path)/1024/1024:.1f}MB)")
+            print(f"  {display}: {count} docs{extra} ({os.path.getsize(db_path)/1024/1024:.1f}MB)")
         sys.exit(0)
 
-    if not args.query:
+    if not args.query and not args.full:
         print("Usage:")
         print("  python3 query.py <query>               # search all topics")
         print("  python3 query.py <q> -t <topic>        # one topic")
@@ -154,6 +163,47 @@ if __name__ == '__main__':
         print("  python3 query.py -i                    # stats")
         print("  python3 query.py <q> --json            # JSON output")
         print("  python3 query.py <q> --min-views 50000")
+        print("  python3 query.py --full <id> -t <topic>  # full transcript")
+        sys.exit(0)
+
+    # --full / --show mode: print the source file for a source_id
+    if args.full:
+        if not args.topic:
+            # Search all topics for this source_id
+            for name, display, count, db_path in topics:
+                conn = sqlite3.connect(db_path)
+                conn.execute("PRAGMA query_only=1")
+                c = conn.cursor()
+                exists = c.execute("SELECT 1 FROM transcripts WHERE source_id=? LIMIT 1", (args.full,)).fetchone()
+                conn.close()
+                if exists:
+                    args.topic = [name]
+                    break
+            if not args.topic:
+                print(f"ERROR: --show requires --topic, or the source_id must exist in a known topic", file=sys.stderr)
+                sys.exit(1)
+        target = [(n, d, c, db) for n, d, c, db in topics if n in args.topic]
+        if not target:
+            print(f"Topic '{args.topic}' not found.", file=sys.stderr)
+            sys.exit(1)
+
+        db_path = target[0][3]
+        conn = sqlite3.connect(db_path)
+        conn.execute("PRAGMA query_only=1")
+        c = conn.cursor()
+
+        fpath = c.execute(
+            "SELECT file_path FROM transcripts WHERE source_id=? AND chunk_index=0 LIMIT 1",
+            (args.full,)
+        ).fetchone()
+        conn.close()
+
+        if not fpath or not os.path.isfile(fpath[0]):
+            print(f"Source file not found for source_id: {args.full}", file=sys.stderr)
+            sys.exit(1)
+
+        with open(fpath[0], 'r', encoding='utf-8', errors='ignore') as f:
+            print(f.read().rstrip())
         sys.exit(0)
 
     if args.topic:
@@ -212,15 +262,16 @@ if __name__ == '__main__':
     if args.json:
         output = []
         for display, topic_name, row in all_results:
-            _, vid, ci, title, url, views, snippet = row
+            _, sid, ci, title, url, views, fpath, snippet = row
             output.append({
                 'title': title,
                 'topic': display,
                 'topic_slug': topic_name,
                 'url': url,
                 'views': views,
-                'video_id': vid,
+                'source_id': sid,
                 'chunk': ci,
+                'file_path': fpath,
                 'snippet': snippet.replace('\x01', '').replace('\x02', ''),
             })
         print(json.dumps(output, indent=2))
@@ -238,13 +289,11 @@ if __name__ == '__main__':
     print(f"{'='*60}\n")
 
     for i, (display, topic_name, row) in enumerate(all_results):
-        _, vid, ci, title, url, views, snippet = row
+        _, sid, ci, title, url, views, fpath, snippet = row
         snippet = snippet if args.no_color else format_snippet(snippet)
 
         print(f"  [{i+1}] {title}")
         print(f"      Topic: {display}")
-        print(f"      URL:   {url}")
-        if views:
-            print(f"      Views: {views:,}")
+        print(f"      File:  {fpath}")
         print(f"      {snippet}")
         print()

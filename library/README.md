@@ -7,10 +7,10 @@ Searchable transcript archive. One SQLite FTS5 database per topic.
 ```
 library/
   query.py                # search tool
-  import_topic.py         # create/update topic DBs from transcript .txt files
+  import_topic.py         # create/update topic DBs from source files
   <topic_name>/
     library.db            # self-contained: meta + transcripts + FTS5
-    transcripts/          # source .txt files (one per video)
+    content/              # source .txt and .md files
 ```
 
 ## Query
@@ -39,7 +39,7 @@ query.py auto-discovers every `*/library.db` under the library root. Results are
 
 ## Import a New Topic
 
-Transcript files must contain a header and body separated by `=======`:
+Source files (`.txt` or `.md`) must contain a header and body separated by `=======` for YouTube transcripts:
 
 ```
 Title: Video Title
@@ -66,20 +66,34 @@ python3 import_topic.py \
     --name short_name \
     --display "Display Name" \
     --desc "One-line description" \
-    --dir /path/to/transcripts
+    --dir /path/to/content
 
 # Re-process existing files (replaces old data)
 python3 import_topic.py --name short_name --dir /path --update
 ```
 
-Re-import without `--update` is idempotent — existing video_ids are skipped.
+Re-import without `--update` is idempotent — existing source_ids are skipped.
+
+## Re-index an Existing Topic
+
+After adding or editing files in an existing topic's `content/` folder:
+
+```bash
+# Add new files only (skips unchanged)
+python3 import_topic.py --name ross_cameron --dir ross_cameron/content
+
+# Rebuild everything from scratch (deletes old, re-indexes all)
+python3 import_topic.py --name ross_cameron --dir ross_cameron/content --update
+```
+
+`--update` is safe to run repeatedly — it deletes all existing rows for each file and re-inserts fresh. The full rebuild is also the recommended way to migrate if the DB schema changes in a future update.
 
 ## Per-Topic Directory Layout
 
 ```
 <topic_name>/
   library.db              # auto-generated
-  transcripts/            # source .txt files
+  content/                # source .txt and .md files
   <analysis>.md           # optional human-written reports
 ```
 

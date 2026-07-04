@@ -4,7 +4,7 @@ Import a topic into its own per-topic library database.
 
 Usage:
   python3 import_topic.py --name my_trader --display "My Trader" \
-      --desc "Description" --dir /path/to/transcripts
+      --desc "Description" --dir /path/to/source_files
   python3 import_topic.py --name my_trader --update --dir /path/to/new_files
 """
 
@@ -13,23 +13,36 @@ import sqlite3, os, sys, re, argparse
 LIB = os.path.dirname(os.path.abspath(__file__))
 
 YAML_RE = re.compile(r'^---\s*$', re.MULTILINE)
-VIDEO_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{11}$')
+YT_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{11}$')
+YT_URL_RE = re.compile(r'(?:v=|youtu\.be/|shorts/)([a-zA-Z0-9_-]{11})')
+YT_FNAME_RE = re.compile(r'transcript_([a-zA-Z0-9_-]{11})')
 CHUNK_SIZE = 5000
 
-def safe_int(val, default=0):
-    if not val: return default
-    val = str(val).strip().replace(',', '').replace('"', '').replace("'", '')
-    try: return int(float(val))
-    except (ValueError, TypeError): return default
 
-def parse_transcript(content):
-    """Parse a transcript file. Returns dict + body text.
-    Supports YAML frontmatter (--- delimited) and legacy header format."""
-    meta = {'title': '', 'views': 0, 'url': '', 'video_id': '',
+def safe_int(val, default=0):
+    if not val:
+        return default
+    val = str(val).strip().replace(',', '').replace('"', '').replace("'", '')
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return default
+
+
+def parse_file(content, fname):
+    """Parse a source file. Returns (meta dict, body text).
+
+    Supports:
+    - YAML frontmatter (--- delimited) with any metadata keys
+    - Legacy YouTube header format (Title:/Views:/URL:/=======)
+    - Plain .md with # title
+    - Plain .txt (filename-derived title)
+    """
+    meta = {'title': '', 'views': 0, 'url': '', 'source_id': '',
             'duration': 0, 'published': ''}
     body = content
 
-    # Try YAML frontmatter
+    # --- YAML frontmatter ---
     m = YAML_RE.match(content)
     if m:
         end = m.end()
@@ -39,18 +52,26 @@ def parse_transcript(content):
             body = content[end_m.end():].strip()
             for line in raw.split('\n'):
                 line = line.strip()
-                if ':' not in line: continue
+                if ':' not in line:
+                    continue
                 k, v = line.split(':', 1)
                 k, v = k.strip().lower(), v.strip().strip('"').strip("'")
-                if k == 'title':       meta['title'] = v
-                elif k == 'views':     meta['views'] = safe_int(v)
-                elif k == 'url':       meta['url'] = v
-                elif k == 'video_id':  meta['video_id'] = v
-                elif k == 'duration':  meta['duration'] = safe_int(v)
-                elif k == 'published': meta['published'] = v
+                if k == 'title':
+                    meta['title'] = v
+                elif k in ('views', 'view_count'):
+                    meta['views'] = safe_int(v)
+                elif k == 'url':
+                    meta['url'] = v
+                elif k in ('source_id', 'video_id'):
+                    meta['source_id'] = v
+                elif k == 'duration':
+                    meta['duration'] = safe_int(v)
+                elif k == 'published':
+                    meta['published'] = v
             return meta, body
+        # no closing --- : treat as plain text, not YAML
 
-    # Legacy header format
+    # --- Legacy YouTube header ---
     for line in content.split('\n')[:10]:
         if line.startswith('Title:'):
             meta['title'] = line.replace('Title:', '', 1).strip()
@@ -69,27 +90,55 @@ def parse_transcript(content):
     return meta, body
 
 
-def extract_video_id(meta, fname, url):
-    """Extract and validate 11-char YouTube video_id."""
-    if VIDEO_ID_RE.match(meta.get('video_id', '')):
-        return meta['video_id']
-    m = re.search(r'(?:v=|youtu\.be/|shorts/)([a-zA-Z0-9_-]{11})', url or '')
-    if m: return m.group(1)
-    m = re.match(r'transcript_([a-zA-Z0-9_-]{11})', os.path.basename(fname))
-    if m: return m.group(1)
-    return None
+def extract_source_id(meta, fname, url):
+    """Derive a unique source_id for this document.
+
+    Priority:
+    1. Explicit source_id / video_id from metadata
+    2. YouTube ID from URL
+    3. YouTube ID from transcript_XXXXXXXXXXX filename pattern
+    4. Filename stem (for .md, plain .txt, etc.)
+    """
+    if meta.get('source_id'):
+        return meta['source_id']
+
+    m = YT_URL_RE.search(url or '')
+    if m:
+        return m.group(1)
+    m = YT_FNAME_RE.match(os.path.basename(fname))
+    if m:
+        return m.group(1)
+
+    # Fallback: filename stem
+    stem = os.path.splitext(fname)[0]
+    for prefix in ('transcript_',):
+        if stem.startswith(prefix):
+            stem = stem[len(prefix):]
+            break
+    # Take first 64 chars max as source_id
+    return stem[:64]
+
+
+def infer_title(fname, content):
+    """Derive title from file content or name."""
+    # .md files: first # heading
+    if fname.endswith('.md'):
+        m = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+        if m:
+            return m.group(1).strip()[:200]
+    # Fallback: filename → title
+    stem = os.path.splitext(fname)[0]
+    for prefix in ('transcript_',):
+        if stem.startswith(prefix):
+            stem = stem[len(prefix):]
+            break
+    return stem.replace('_', ' ').replace('-', ' ').title()[:200]
 
 
 def chunk_text(text, max_chars=CHUNK_SIZE):
-    """Split text into chunks at sentence/paragraph boundaries.
-
-    Tries hard to respect natural breaks (paragraphs, sentences, clauses).
-    Includes a guard to avoid tiny non-final chunks when substantial
-    text remains (better than pure fixed-byte splits in most spoken cases).
-    """
+    """Split text at sentence/paragraph boundaries."""
     if len(text) <= max_chars:
         return [text]
-
     chunks = []
     start = 0
     while start < len(text):
@@ -97,7 +146,6 @@ def chunk_text(text, max_chars=CHUNK_SIZE):
             chunks.append(text[start:])
             break
         end = start + max_chars
-        # Walk back to nearest sentence end or paragraph break
         best = -1
         for sep in ['\n\n', '. ', '.\n', '! ', '? ', ', ']:
             pos = text.rfind(sep, start, end)
@@ -108,24 +156,19 @@ def chunk_text(text, max_chars=CHUNK_SIZE):
         if best == -1 or best <= start:
             best = end
         else:
-            best += 1  # include the separator
-
-        # Guard: avoid creating tiny non-final chunks when lots of text remains.
-        # This prevents pathological cases (early break + long remainder)
-        # that are sometimes worse than a simple fixed split.
+            best += 1
         chunk_len = best - start
         remaining = len(text) - best
         if chunk_len < 800 and remaining > 1500:
             best = min(end + 1500, len(text))
             if best - start > max_chars * 1.5:
                 best = min(end + 500, len(text))
-
         chunks.append(text[start:best])
         start = best
     return chunks
 
 
-def import_topic(name, display_name, description, transcripts_dir, update=False):
+def import_topic(name, display_name, description, source_dir, update=False):
     topic_dir = os.path.join(LIB, name)
     db_path = os.path.join(topic_dir, "library.db")
     os.makedirs(topic_dir, exist_ok=True)
@@ -142,21 +185,21 @@ def import_topic(name, display_name, description, transcripts_dir, update=False)
         );
         CREATE TABLE IF NOT EXISTS transcripts (
             id INTEGER PRIMARY KEY,
-            video_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
             chunk_index INTEGER NOT NULL DEFAULT 0,
             title TEXT NOT NULL,
             view_count INTEGER DEFAULT 0,
-            url TEXT NOT NULL,
+            url TEXT DEFAULT '',
             duration INTEGER DEFAULT 0,
             published TEXT DEFAULT '',
             file_path TEXT,
             char_count INTEGER,
             indexed_at TEXT DEFAULT (datetime('now')),
-            UNIQUE(video_id, chunk_index)
+            UNIQUE(source_id, chunk_index)
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5(
             title, transcript_text,
-            tokenize='porter unicode61',   -- good recall for "trade/trading/trader" etc. in spoken content
+            tokenize='porter unicode61',
             prefix='2 3'
         );
     """)
@@ -166,44 +209,39 @@ def import_topic(name, display_name, description, transcripts_dir, update=False)
         c.execute("INSERT OR REPLACE INTO meta VALUES ('display_name', ?)", (display_name,))
         c.execute("INSERT OR REPLACE INTO meta VALUES ('description', ?)", (description,))
 
-    files = sorted(os.listdir(transcripts_dir))
-    txt_files = [f for f in files if f.endswith('.txt')]
-    print(f"Found {len(txt_files)} .txt files in {transcripts_dir}")
+    files = sorted(os.listdir(source_dir))
+    src_files = [f for f in files if f.endswith(('.txt', '.md'))]
+    print(f"Found {len(src_files)} .txt/.md files in {source_dir}")
 
     inserted = processed = skipped = 0
-    for i, fname in enumerate(txt_files):
-        fpath = os.path.join(transcripts_dir, fname)
+    for i, fname in enumerate(src_files):
+        fpath = os.path.join(source_dir, fname)
         with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
 
-        meta, body = parse_transcript(content)
-        url = meta['url'] or ''
-        video_id = extract_video_id(meta, fname, url)
-        if not video_id:
-            print(f"  SKIP {fname}: could not extract valid video_id")
+        if not content.strip():
+            print(f"  SKIP {fname}: empty")
+            skipped += 1
+            continue
+
+        meta, body = parse_file(content, fname)
+        source_id = extract_source_id(meta, fname, meta['url'])
+        if not source_id:
+            print(f"  SKIP {fname}: could not derive source_id")
             skipped += 1
             continue
 
         if not meta['title']:
-            meta['title'] = (os.path.splitext(fname)[0]
-                             .replace('transcript_', '', 1)
-                             .split('_', 1)[-1].replace('_', ' ').title()[:200])
-        if not url:
-            url = f"https://youtube.com/watch?v={video_id}"
+            meta['title'] = infer_title(fname, content)
 
         chunks = chunk_text(body)
 
-        # Per-video transaction for atomicity: either all chunks (and deletes) succeed
-        # for this video, or none do. This is the key reliability improvement over
-        # relying solely on every-50 commits.
-        c.execute("BEGIN IMMEDIATE")
-        video_inserted = 0
+        doc_inserted = 0
         try:
             if update:
-                # Delete ALL rows for this video_id (base + all chunks) atomically
                 c.execute("DELETE FROM transcripts_fts WHERE rowid IN "
-                          "(SELECT id FROM transcripts WHERE video_id=?)", (video_id,))
-                c.execute("DELETE FROM transcripts WHERE video_id=?", (video_id,))
+                          "(SELECT id FROM transcripts WHERE source_id=?)", (source_id,))
+                c.execute("DELETE FROM transcripts WHERE source_id=?", (source_id,))
 
             for ci, chunk in enumerate(chunks):
                 title = meta['title'][:200]
@@ -213,25 +251,22 @@ def import_topic(name, display_name, description, transcripts_dir, update=False)
                 before = conn.total_changes
                 c.execute("""
                     INSERT OR IGNORE INTO transcripts
-                    (video_id, chunk_index, title, view_count, url, duration, published, file_path, char_count)
+                    (source_id, chunk_index, title, view_count, url, duration, published, file_path, char_count)
                     VALUES (?,?,?,?,?,?,?,?,?)
-                """, (video_id, ci, title, meta['views'], url,
+                """, (source_id, ci, title, meta['views'], meta['url'],
                       meta['duration'], meta['published'], fpath, len(chunk)))
                 if conn.total_changes > before:
                     rowid = c.lastrowid
                     c.execute("INSERT INTO transcripts_fts(rowid, title, transcript_text) VALUES (?,?,?)",
                               (rowid, title, chunk))
                     if ci == 0:
-                        video_inserted = 1
+                        doc_inserted = 1
 
-            c.execute("COMMIT")
-            inserted += video_inserted
+            if doc_inserted or update:
+                conn.commit()
+            inserted += doc_inserted
             processed += 1
         except Exception as e:
-            try:
-                c.execute("ROLLBACK")
-            except Exception:
-                pass  # best effort
             print(f"  Error {fname}: {e}")
             skipped += 1
 
@@ -240,16 +275,18 @@ def import_topic(name, display_name, description, transcripts_dir, update=False)
 
     conn.commit()
 
-    unique_videos = c.execute("SELECT COUNT(DISTINCT video_id) FROM transcripts").fetchone()[0]
+    unique_docs = c.execute("SELECT COUNT(DISTINCT source_id) FROM transcripts").fetchone()[0]
     total_rows = c.execute("SELECT COUNT(*) FROM transcripts").fetchone()[0]
-    c.execute("INSERT OR REPLACE INTO meta VALUES ('video_count', ?)", (str(unique_videos),))
+    c.execute("INSERT OR REPLACE INTO meta VALUES ('doc_count', ?)", (str(unique_docs),))
     c.execute("INSERT OR REPLACE INTO meta VALUES ('chunk_count', ?)", (str(total_rows),))
+    # Keep legacy key for backward compat
+    c.execute("INSERT OR REPLACE INTO meta VALUES ('video_count', ?)", (str(unique_docs),))
     conn.commit()
     conn.close()
 
     action = "Updated" if update else "Imported"
-    print(f"\n{action}: {inserted} new videos, {processed - inserted} unchanged, {skipped} skipped")
-    print(f"  Unique videos in DB: {unique_videos}")
+    print(f"\n{action}: {inserted} new documents, {processed - inserted} unchanged, {skipped} skipped")
+    print(f"  Unique documents in DB: {unique_docs}")
     print(f"  Total rows (including chunks): {total_rows}")
     print(f"  DB: {db_path} ({os.path.getsize(db_path)/1024/1024:.1f}MB)")
     return inserted

@@ -85,11 +85,21 @@ SDIR=$(python3 -m trading.llm_trader.recorder init --ticker EVTV --date 2026-01-
 #   … replay --out-file "$SDIR/stream.jsonl";  recorder log … per turn …
 python3 -m trading.llm_trader.recorder finalize --session "$SDIR"
 
+# profitability by skill version (each run is stamped with the driving skill's
+# frontmatter `version:` + a content hash, frozen at init):
+python3 -m trading.llm_trader.recorder report --by-version
+
 # visualize: TradingView-style chart + indicators + entry/exit markers + reasoning timeline
 python3 -m trading.llm_trader.viewer
 # Opens browser to session list (newest first). Click to view live or completed.
 # Supports live SSE updates for running sessions (revealed data only).
 ```
+
+Each run records which **version** of `TRADE_SIMULATOR.md` drove it. Bump the
+`version:` in the skill's frontmatter when you meaningfully change the rules; `init`
+warns if the skill content changed without a bump (tracked in
+`skills/skill_versions.json`). `recorder report --by-version` then attributes win
+rate / P&L / avg-R to each version so you can tell whether a rule change helped.
 
 Each session is a self-contained folder under `simulations/{TS}-{TICKER}/`
 (`bars.json`, `actions.json`, `decisions.json`, `pnl.json`, `session.json`,

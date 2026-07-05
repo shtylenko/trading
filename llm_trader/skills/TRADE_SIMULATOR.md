@@ -1,5 +1,6 @@
 ---
 name: trade-simulator
+version: 2.0.0
 description: Paper-trade ONE recorded setup live, minute by minute — stream its 1-min bars at one tick per wall-clock minute and make Ross Cameron momentum long-side entry/management/exit decisions in real time, then write a trade journal. Use when the user wants to "simulate trading", "paper trade", or "trade a setup" from llm_trader.
 ---
 
@@ -88,6 +89,12 @@ SDIR=$(python3 -m trading.llm_trader.recorder init \
     --ticker <TICKER> --date <YYYY-MM-DD> --seed <N> --profile small)
 echo "$SDIR"     # …/simulations/{YYYYMMDDHHMMSS}-{TICKER}
 ```
+
+`init` **stamps this run with the version of this skill** (the `version:` in the
+frontmatter above) plus a content hash, frozen at run start, so profitability can
+later be attributed per version (`recorder report --by-version`, Step 4). If you
+edited the skill's rules without bumping `version:`, `init` prints a drift warning
+to stderr — heed it and bump, or two rule-sets blend under one tag.
 
 Now **seal the day** into that folder. Use the **same `--seed`/`--ticker`/`--date`**
 as `init` (same seed ⇒ same setup as the Step 0 peek):
@@ -368,30 +375,24 @@ file): did the pattern resolve or did you bail? Did you follow the plan or was i
 execution miss? One lesson.
 
 **Cross-session review (5-Step System, steps 2 & 5 — "analyze historical data").**
-After the single-trade post-mortem, aggregate every recorded session and append a
-short stats block to `journal.md`, so lessons compound instead of resetting each day:
+After the single-trade post-mortem, aggregate every recorded session so lessons
+compound instead of resetting each day. Group by **skill version** — this is how
+you tell whether a rule change actually improved profitability:
 
 ```bash
-SDIR="$SDIR" python3 - <<'EOF'
-import json, glob, os
-sims = os.path.dirname(os.environ["SDIR"])   # …/simulations
-rows = []
-for f in sorted(glob.glob(os.path.join(sims, "*", "pnl.json"))):
-    d = json.load(open(f))
-    if d.get("traded"):
-        rows.append(d)
-n = len(rows); wins = [r for r in rows if r["win"]]; losses = [r for r in rows if not r["win"]]
-print(f"sessions traded: {n} | win rate: {len(wins)/n:.0%}")
-print(f"total P&L: ${sum(r['realized_pnl'] for r in rows):.2f} | avg R: {sum(r['r_multiple'] for r in rows)/n:.2f}")
-if wins:   print(f"avg winner: ${sum(r['realized_pnl'] for r in wins)/len(wins):.2f}")
-if losses: print(f"avg loser:  ${sum(r['realized_pnl'] for r in losses)/len(losses):.2f}")
-EOF
+python3 -m trading.llm_trader.recorder report --by-version
+# version         n  win%       P&L   avgR  notes
+# unversioned    10   80%   $179.64   0.45
+# 2.0.0           3   67%    $48.20   0.40
 ```
 
-Report **accuracy, avg winner, avg loser, P/L ratio, and this session's
-MFE-capture** (realized $/share ÷ `mfe_per_share` — how much of the favorable move
-you kept). Then name **one thing to improve tomorrow** — a single concrete rule
-tweak or execution fix, not a vague intention.
+Append that table to `journal.md`, and for **this** session also note its
+**MFE-capture** (realized $/share ÷ `mfe_per_share` — how much of the favorable
+move you kept). Then name **one thing to improve tomorrow** — a single concrete
+rule tweak or execution fix, not a vague intention. If a rule tweak is warranted,
+that is your cue to edit the rules **and bump `version:`** so the next runs are
+measured as a distinct cohort. A `⚠ … distinct hashes (drift)` note means a
+version tag was reused across changed content — the very thing to avoid.
 
 Finally, **(re)start the viewer and hand the user a live URL**. Always kill any
 existing listener on the port first — a long-running viewer keeps serving whatever

@@ -28,11 +28,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from . import skillmeta
 from .config import DATA_DIR
 from .streamio import parse_stream as _parse_stream
 from .streamio import read_jsonl as _read_jsonl
@@ -247,22 +249,42 @@ def init(
     delay: Optional[float] = None,
     risk_budget: Optional[float] = None,
     buying_power: Optional[float] = None,
+    skill: Optional[str | Path] = None,
+    mode: str = "simulated",
     root: Path = SIM_ROOT,
     now: Optional[datetime] = None,
 ) -> Path:
-    """Create the session folder and a provisional ``session.json``; return its path."""
+    """Create the session folder and a provisional ``session.json``; return its path.
+
+    The driving skill's version is read and *frozen* here (at run start) so later
+    edits to the skill never retroactively re-tag this run. Prints a drift warning
+    if the skill content changed without a version bump (see ``skillmeta``).
+    """
     now = now or datetime.now()
     sid = f"{now.strftime('%Y%m%d%H%M%S')}-{ticker.upper()}"
     sdir = Path(root) / sid
     sdir.mkdir(parents=True, exist_ok=True)
+
+    skill_path = skill or skillmeta.DEFAULT_SKILL_PATH
+    try:
+        skill_meta = skillmeta.read_skill_meta(skill_path)
+        warning = skillmeta.check_drift(skill_meta)
+    except FileNotFoundError:
+        skill_meta = {"name": None, "version": None, "content_hash": None,
+                      "path": str(skill_path)}
+        warning = f"skill file not found at {skill_path} — run recorded as unversioned."
+    if warning:
+        print(f"⚠ {warning}", file=sys.stderr)
+
     session = {
         "schema_version": SCHEMA_VERSION,
         "id": sid,
-        "mode": "simulated",   # future: "live" for real-time market sessions
+        "mode": mode,   # "simulated" (paper) or "live" (real-time market session)
         "status": "running",
         "ticker": ticker.upper(),
         "historical_date": date,
         "real_run_ts": now.isoformat(timespec="seconds"),
+        "skill": skill_meta,
         "config": {
             "seed": seed,
             "profile": profile,
@@ -526,6 +548,12 @@ def finalize(session_dir: str | Path, full_day: bool = True) -> dict:
     bars = (_full_day_bars(meta) or stream_bars) if full_day else stream_bars
     actions, timeline, pnl = _run_engine(meta, stream_bars, decisions, risk_budget, end)
 
+    # mirror the frozen skill stamp into pnl.json so `report --by-version` can
+    # group by reading one file per session (not session.json + pnl.json).
+    skill = session.get("skill", {}) or {}
+    pnl["skill_version"] = skill.get("version")
+    pnl["skill_hash"] = skill.get("content_hash")
+
     # enrich session manifest with setup meta + outcome + file index
     session["status"] = "complete"
     session["finalized_ts"] = datetime.now().isoformat(timespec="seconds")
@@ -541,6 +569,7 @@ def finalize(session_dir: str | Path, full_day: bool = True) -> dict:
         "r_multiple": pnl["r_multiple"], "win": pnl["win"],
         "mfe_per_share": pnl["mfe_per_share"], "n_bars": len(bars),
         "n_decisions": len(timeline), "n_fills": len(actions),
+        "skill_version": skill.get("version"),
     }
     session["files"] = {
         "bars": "bars.json", "actions": "actions.json", "decisions": "decisions.json",
@@ -746,6 +775,80 @@ def list_sessions() -> list[dict]:
     return out
 
 
+# ───────────────────────────── reporting ────────────────────────────────────
+
+
+def report_by_version(mode: Optional[str] = None) -> list[dict]:
+    """Aggregate finalized sessions by skill version → profitability rows.
+
+    One row per ``skill_version`` (versionless sessions bucket as
+    ``"unversioned"``), newest-version-ish order left to the caller. Stats are
+    computed over *traded* sessions only; stood-down runs are counted separately
+    in ``stood_down``. ``hashes`` carries the distinct content hashes seen for the
+    version so the caller can flag drift (>1 hash under one version tag).
+    """
+    if not SIM_ROOT.exists():
+        return []
+    buckets: dict[str, dict] = {}
+    for d in sorted(SIM_ROOT.iterdir()):
+        pnl = _load_json(d / "pnl.json")
+        session = _load_json(d / "session.json", {}) or {}
+        if pnl is None or session.get("status") != "complete":
+            continue  # skip running/abandoned/unfinalized sessions
+        if mode is not None and session.get("mode", "simulated") != mode:
+            continue
+
+        ver = pnl.get("skill_version") or session.get("skill", {}).get("version") \
+            or "unversioned"
+        b = buckets.setdefault(ver, {
+            "version": ver, "n": 0, "wins": 0, "stood_down": 0,
+            "pnl": 0.0, "r_sum": 0.0, "hashes": set(),
+        })
+        h = pnl.get("skill_hash") or session.get("skill", {}).get("content_hash")
+        if h:
+            b["hashes"].add(h)
+        if not pnl.get("traded"):
+            b["stood_down"] += 1
+            continue
+        b["n"] += 1
+        b["wins"] += 1 if pnl.get("win") else 0
+        b["pnl"] += pnl.get("realized_pnl") or 0.0
+        b["r_sum"] += pnl.get("r_multiple") or 0.0
+
+    rows = []
+    for b in buckets.values():
+        n = b["n"]
+        rows.append({
+            "version": b["version"],
+            "n": n,
+            "stood_down": b["stood_down"],
+            "win_pct": round(100 * b["wins"] / n) if n else None,
+            "pnl": round(b["pnl"], 2),
+            "avg_r": round(b["r_sum"] / n, 2) if n else None,
+            "hashes": sorted(b["hashes"]),
+        })
+    rows.sort(key=lambda r: r["version"])
+    return rows
+
+
+def _print_report(rows: list[dict]) -> None:
+    if not rows:
+        print("no finalized sessions to report")
+        return
+    print(f"{'version':<14}{'n':>4}{'win%':>6}{'P&L':>10}{'avgR':>7}  notes")
+    for r in rows:
+        win = f"{r['win_pct']}%" if r["win_pct"] is not None else "—"
+        avg = f"{r['avg_r']:.2f}" if r["avg_r"] is not None else "—"
+        pnl = f"${r['pnl']:.2f}"
+        notes = []
+        if r["stood_down"]:
+            notes.append(f"{r['stood_down']} stood down")
+        if len(r["hashes"]) > 1:
+            notes.append(f"⚠ {len(r['hashes'])} distinct hashes (drift)")
+        print(f"{r['version']:<14}{r['n']:>4}{win:>6}{pnl:>10}{avg:>7}  "
+              f"{', '.join(notes)}")
+
+
 # ───────────────────────────── CLI ──────────────────────────────────────────
 
 
@@ -764,6 +867,10 @@ def build_parser() -> argparse.ArgumentParser:
     pi.add_argument("--delay", type=float)
     pi.add_argument("--risk-budget", type=float)
     pi.add_argument("--buying-power", type=float)
+    pi.add_argument("--skill", help="path to the driving skill .md "
+                    "(default: bundled TRADE_SIMULATOR.md)")
+    pi.add_argument("--mode", default="simulated", choices=["simulated", "live"],
+                    help="simulated paper run (default) or a real-time live session")
 
     pl = sub.add_parser("log", help="append one decision record")
     pl.add_argument("--session", required=True)
@@ -773,6 +880,12 @@ def build_parser() -> argparse.ArgumentParser:
     pf.add_argument("--session", required=True)
 
     sub.add_parser("list", help="list sessions")
+
+    pr = sub.add_parser("report", help="aggregate profitability by skill version")
+    pr.add_argument("--by-version", action="store_true", default=True,
+                    help="group by skill version (default)")
+    pr.add_argument("--mode", choices=["simulated", "live"],
+                    help="restrict to simulated or live sessions")
     return p
 
 
@@ -781,7 +894,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.cmd == "init":
         sdir = init(args.ticker, args.date, seed=args.seed, profile=args.profile,
                     delay=args.delay, risk_budget=args.risk_budget,
-                    buying_power=args.buying_power)
+                    buying_power=args.buying_power, skill=args.skill, mode=args.mode)
         print(str(sdir))
     elif args.cmd == "log":
         log(args.session, json.loads(args.record))
@@ -795,6 +908,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             status = s["status"]
             mode = s.get("mode", "simulated")
             print(f"{s['id']}  {s['ticker']}  {s['historical_date']}  {mode} {status}")
+    elif args.cmd == "report":
+        _print_report(report_by_version(mode=args.mode))
     return 0
 
 

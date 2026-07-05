@@ -109,6 +109,32 @@ Each session is a self-contained folder under `simulations/{TS}-{TICKER}/`
 (`bars.json`, `actions.json`, `decisions.json`, `pnl.json`, `session.json`,
 `journal.md`, raw `stream.jsonl`). See `SIMULATION_VIEWER_SPEC.md`.
 
+### Batch backtesting a skill version (`batchsim`)
+
+To measure whether a rule change actually helped, run a **fixed set of setups**
+against a **pinned skill version** and compare. Each setup is traded by a headless
+`hermes` agent following the archived rules for that version; every session is
+version + batch stamped, so comparison is apples-to-apples.
+
+```bash
+# one-time: build a stratified, version-controlled holdout (~30 setups from entries.db)
+python3 -m trading.llm_trader.batchsim build-set --n 30      # → llm_trader/batch/testset.json
+
+# run the holdout against a pinned version (spawns local-model agents, then audits + reports)
+python3 -m trading.llm_trader.batchsim run \
+    --version 2.0.2 --model <local-model> --parallel 6 --repeats 2 --tag v2.0.2
+
+# --dry-run prints the per-setup hermes commands without spawning anything
+```
+
+`run` pins the archived `skills/archive/TRADE_SIMULATOR@<version>.md` (via
+`recorder init --pin-version … --batch …`, which stamps read-only — no version bump),
+runs a **post-hoc `audit`** that voids any session whose transcript shows look-ahead
+(read `_sealed.jsonl`, called `replay`, re-ran `step start`), and prints
+`recorder report --batch <tag>` (win% / P&L / avg-R / MFE-capture, with voided runs
+excluded). Change a rule → skill auto-bumps to `2.0.3` → run the **same holdout** on
+`2.0.3` → the report tells you whether it helped, net of luck.
+
 ## Tests
 
 ```bash

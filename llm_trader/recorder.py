@@ -74,6 +74,9 @@ class PositionEngine:
         # $ risked at the initial entry (entry shares × per-share stop distance),
         # captured on the first buy — the denominator for a true R multiple.
         self.initial_risk: Optional[float] = None
+        # shares bought on the very first ENTER — the base size the MFE (best price
+        # since entry) is measured against for the capture ratio.
+        self.entry_shares: Optional[int] = None
 
     def _validate_action(
         self, i: int, action: str, has_fill: bool, dq: Optional[int]
@@ -118,6 +121,8 @@ class PositionEngine:
                         self.entry_i = i
                     if self.entry_avg is None:
                         self.entry_avg = fill
+                    if self.entry_shares is None:
+                        self.entry_shares = dq
                     # first buy: record the $ risk implied by the stop, if given
                     if self.initial_risk is None and stop is not None and fill > stop:
                         self.initial_risk = round(dq * (fill - stop), 2)
@@ -251,16 +256,24 @@ def init(
     buying_power: Optional[float] = None,
     skill: Optional[str | Path] = None,
     mode: str = "simulated",
+    pin_version: Optional[str] = None,
+    batch: Optional[str] = None,
     root: Path = SIM_ROOT,
     now: Optional[datetime] = None,
 ) -> Path:
     """Create the session folder and a provisional ``session.json``; return its path.
 
     The driving skill's version is read and *frozen* here (at run start) so later
-    edits to the skill never retroactively re-tag this run. If the skill's rules
-    changed since its version was last recorded, the version is **auto-bumped**
-    (written into the skill frontmatter and the registry) before stamping — see
-    ``skillmeta.resolve_version``.
+    edits to the skill never retroactively re-tag this run. Normally the version is
+    resolved (and auto-bumped on drift) via ``skillmeta.resolve_version``.
+
+    **Backtest mode (``pin_version``).** When replaying a *specific* archived version
+    for a batch, pass ``pin_version="2.0.2"`` with ``skill`` pointing at the archived
+    file (``skills/archive/TRADE_SIMULATOR@2.0.2.md``). The session is stamped exactly
+    with that version + the archived file's hash, and ``resolve_version`` is **skipped
+    entirely** — a backtest must never bump the version or mutate the registry/archive.
+    ``batch`` tags the session so re-runs of one version stay distinguishable
+    (``report --batch <tag>``).
     """
     now = now or datetime.now()
     sid = f"{now.strftime('%Y%m%d%H%M%S')}-{ticker.upper()}"
@@ -268,12 +281,23 @@ def init(
     sdir.mkdir(parents=True, exist_ok=True)
 
     skill_path = skill or skillmeta.DEFAULT_SKILL_PATH
-    try:
-        skill_meta, note = skillmeta.resolve_version(skill_path)
-    except FileNotFoundError:
-        skill_meta = {"name": None, "version": None, "content_hash": None,
-                      "path": str(skill_path)}
-        note = f"skill file not found at {skill_path} — run recorded as unversioned."
+    note = None
+    if pin_version is not None:
+        # backtest: stamp the pinned version read-only — no resolve/bump/archive.
+        try:
+            m = skillmeta.read_skill_meta(skill_path)
+            content_hash = m["content_hash"]
+        except FileNotFoundError:
+            content_hash = None
+        skill_meta = {"name": "trade-simulator", "version": pin_version,
+                      "content_hash": content_hash, "path": str(skill_path)}
+    else:
+        try:
+            skill_meta, note = skillmeta.resolve_version(skill_path)
+        except FileNotFoundError:
+            skill_meta = {"name": None, "version": None, "content_hash": None,
+                          "path": str(skill_path)}
+            note = f"skill file not found at {skill_path} — run recorded as unversioned."
     if note:
         print(f"• {note}", file=sys.stderr)
 
@@ -286,6 +310,7 @@ def init(
         "historical_date": date,
         "real_run_ts": now.isoformat(timespec="seconds"),
         "skill": skill_meta,
+        "batch": batch,   # backtest cohort tag (None for ad-hoc/live runs)
         "config": {
             "seed": seed,
             "profile": profile,
@@ -455,6 +480,15 @@ def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
 
     mfe_ps = engine.mfe_per_share(bars)
     entry_avg = engine.blended_entry
+    entry_shares = engine.entry_shares
+    # capture ratio: realized $ ÷ the best-case dollars had you sold the whole entry
+    # size at the high (mfe_per_share × entry_shares). ≈ "how much of the favorable
+    # move you kept". >0 and ≤~1 for a normal win; negative if the trade lost.
+    mfe_dollars = (mfe_ps * entry_shares) if (mfe_ps and entry_shares) else None
+    mfe_capture = (
+        round(engine.realized / mfe_dollars, 3)
+        if (mfe_dollars and mfe_dollars > 0) else None
+    )
 
     pnl = {
         "realized_pnl": engine.realized_pnl,
@@ -473,8 +507,10 @@ def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
         "n_fills": len(actions),
         "entry_index": engine.entry_i,
         "entry_avg": entry_avg,   # blended cost basis across all buys
+        "entry_shares": entry_shares,
         "mfe_per_share": mfe_ps,
         "mfe_pct": round(mfe_ps / entry_avg * 100, 2) if (mfe_ps and entry_avg) else None,
+        "mfe_capture": mfe_capture,
         "forced_exit": forced is not None,
         "assumptions": "fills at reported price; no slippage/fees/Level-2; avg-cost basis.",
     }
@@ -554,6 +590,7 @@ def finalize(session_dir: str | Path, full_day: bool = True) -> dict:
     skill = session.get("skill", {}) or {}
     pnl["skill_version"] = skill.get("version")
     pnl["skill_hash"] = skill.get("content_hash")
+    pnl["batch"] = session.get("batch")
 
     # enrich session manifest with setup meta + outcome + file index
     session["status"] = "complete"
@@ -779,14 +816,18 @@ def list_sessions() -> list[dict]:
 # ───────────────────────────── reporting ────────────────────────────────────
 
 
-def report_by_version(mode: Optional[str] = None) -> list[dict]:
+def report_by_version(
+    mode: Optional[str] = None, batch: Optional[str] = None
+) -> list[dict]:
     """Aggregate finalized sessions by skill version → profitability rows.
 
-    One row per ``skill_version`` (versionless sessions bucket as
-    ``"unversioned"``), newest-version-ish order left to the caller. Stats are
-    computed over *traded* sessions only; stood-down runs are counted separately
-    in ``stood_down``. ``hashes`` carries the distinct content hashes seen for the
-    version so the caller can flag drift (>1 hash under one version tag).
+    One row per ``skill_version`` (versionless sessions bucket as ``"unversioned"``).
+    Stats are over *traded, non-void* sessions; stood-down runs are counted in
+    ``stood_down`` and audit-voided runs in ``n_void`` (both excluded from win%/P&L/R).
+    ``hashes`` carries the distinct content hashes seen for the version, to flag drift.
+
+    ``mode`` restricts to simulated/live. ``batch`` restricts to one backtest cohort
+    (matched against ``session.batch`` / ``pnl.batch``) — the apples-to-apples view.
     """
     if not SIM_ROOT.exists():
         return []
@@ -798,16 +839,22 @@ def report_by_version(mode: Optional[str] = None) -> list[dict]:
             continue  # skip running/abandoned/unfinalized sessions
         if mode is not None and session.get("mode", "simulated") != mode:
             continue
+        sbatch = session.get("batch") or pnl.get("batch")
+        if batch is not None and sbatch != batch:
+            continue
 
         ver = pnl.get("skill_version") or session.get("skill", {}).get("version") \
             or "unversioned"
         b = buckets.setdefault(ver, {
-            "version": ver, "n": 0, "wins": 0, "stood_down": 0,
-            "pnl": 0.0, "r_sum": 0.0, "hashes": set(),
+            "version": ver, "n": 0, "wins": 0, "stood_down": 0, "n_void": 0,
+            "pnl": 0.0, "r_sum": 0.0, "cap_sum": 0.0, "cap_n": 0, "hashes": set(),
         })
         h = pnl.get("skill_hash") or session.get("skill", {}).get("content_hash")
         if h:
             b["hashes"].add(h)
+        if session.get("void") or pnl.get("void"):
+            b["n_void"] += 1          # audit-tainted → excluded from stats
+            continue
         if not pnl.get("traded"):
             b["stood_down"] += 1
             continue
@@ -815,6 +862,10 @@ def report_by_version(mode: Optional[str] = None) -> list[dict]:
         b["wins"] += 1 if pnl.get("win") else 0
         b["pnl"] += pnl.get("realized_pnl") or 0.0
         b["r_sum"] += pnl.get("r_multiple") or 0.0
+        cap = pnl.get("mfe_capture")
+        if cap is not None:
+            b["cap_sum"] += cap
+            b["cap_n"] += 1
 
     rows = []
     for b in buckets.values():
@@ -823,9 +874,11 @@ def report_by_version(mode: Optional[str] = None) -> list[dict]:
             "version": b["version"],
             "n": n,
             "stood_down": b["stood_down"],
+            "n_void": b["n_void"],
             "win_pct": round(100 * b["wins"] / n) if n else None,
             "pnl": round(b["pnl"], 2),
             "avg_r": round(b["r_sum"] / n, 2) if n else None,
+            "avg_capture": round(b["cap_sum"] / b["cap_n"], 2) if b["cap_n"] else None,
             "hashes": sorted(b["hashes"]),
         })
     rows.sort(key=lambda r: r["version"])
@@ -836,17 +889,20 @@ def _print_report(rows: list[dict]) -> None:
     if not rows:
         print("no finalized sessions to report")
         return
-    print(f"{'version':<14}{'n':>4}{'win%':>6}{'P&L':>10}{'avgR':>7}  notes")
+    print(f"{'version':<14}{'n':>4}{'win%':>6}{'P&L':>10}{'avgR':>7}{'capt':>6}  notes")
     for r in rows:
         win = f"{r['win_pct']}%" if r["win_pct"] is not None else "—"
         avg = f"{r['avg_r']:.2f}" if r["avg_r"] is not None else "—"
+        cap = f"{r['avg_capture']:.2f}" if r.get("avg_capture") is not None else "—"
         pnl = f"${r['pnl']:.2f}"
         notes = []
         if r["stood_down"]:
             notes.append(f"{r['stood_down']} stood down")
+        if r.get("n_void"):
+            notes.append(f"⚠ {r['n_void']} void")
         if len(r["hashes"]) > 1:
             notes.append(f"⚠ {len(r['hashes'])} distinct hashes (drift)")
-        print(f"{r['version']:<14}{r['n']:>4}{win:>6}{pnl:>10}{avg:>7}  "
+        print(f"{r['version']:<14}{r['n']:>4}{win:>6}{pnl:>10}{avg:>7}{cap:>6}  "
               f"{', '.join(notes)}")
 
 
@@ -872,6 +928,10 @@ def build_parser() -> argparse.ArgumentParser:
                     "(default: bundled TRADE_SIMULATOR.md)")
     pi.add_argument("--mode", default="simulated", choices=["simulated", "live"],
                     help="simulated paper run (default) or a real-time live session")
+    pi.add_argument("--pin-version", help="backtest: stamp this exact version "
+                    "read-only (skip resolve/bump); pair with --skill = the archived "
+                    "TRADE_SIMULATOR@<version>.md")
+    pi.add_argument("--batch", help="backtest cohort tag for this run")
 
     pl = sub.add_parser("log", help="append one decision record")
     pl.add_argument("--session", required=True)
@@ -887,6 +947,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="group by skill version (default)")
     pr.add_argument("--mode", choices=["simulated", "live"],
                     help="restrict to simulated or live sessions")
+    pr.add_argument("--batch", help="restrict to one backtest cohort tag")
+    pr.add_argument("--format", choices=["table", "json"], default="table",
+                    help="table (default) or json for programmatic diffing")
     return p
 
 
@@ -895,7 +958,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.cmd == "init":
         sdir = init(args.ticker, args.date, seed=args.seed, profile=args.profile,
                     delay=args.delay, risk_budget=args.risk_budget,
-                    buying_power=args.buying_power, skill=args.skill, mode=args.mode)
+                    buying_power=args.buying_power, skill=args.skill, mode=args.mode,
+                    pin_version=args.pin_version, batch=args.batch)
         print(str(sdir))
     elif args.cmd == "log":
         log(args.session, json.loads(args.record))
@@ -910,7 +974,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             mode = s.get("mode", "simulated")
             print(f"{s['id']}  {s['ticker']}  {s['historical_date']}  {mode} {status}")
     elif args.cmd == "report":
-        _print_report(report_by_version(mode=args.mode))
+        rows = report_by_version(mode=args.mode, batch=args.batch)
+        if args.format == "json":
+            print(json.dumps(rows, indent=2))
+        else:
+            _print_report(rows)
     return 0
 
 

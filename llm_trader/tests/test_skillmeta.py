@@ -42,32 +42,67 @@ def test_versionless_skill_reads_as_none(tmp_path):
     assert skillmeta.read_skill_meta(p)["version"] is None
 
 
-def test_drift_first_seen_records_then_matches(tmp_path):
-    reg = tmp_path / "registry.json"
-    meta = skillmeta.read_skill_meta(_write_skill(tmp_path))
-    # first sighting: recorded, no warning
-    assert skillmeta.check_drift(meta, reg) is None
+def test_resolve_first_sighting_records_then_matches(tmp_path):
+    p = _write_skill(tmp_path)
+    reg = skillmeta.registry_for(p)
+    # first sighting: recorded, no note, version unchanged
+    meta, note = skillmeta.resolve_version(p, reg)
+    assert meta["version"] == "1.4.2" and note is None
     assert "1.4.2" in json.loads(reg.read_text())
-    # same content, same version: still no warning
-    assert skillmeta.check_drift(meta, reg) is None
+    # same content, same version: still a no-op
+    meta2, note2 = skillmeta.resolve_version(p, reg)
+    assert meta2["version"] == "1.4.2" and note2 is None
 
 
-def test_drift_same_version_changed_content_warns(tmp_path):
-    reg = tmp_path / "registry.json"
-    meta = skillmeta.read_skill_meta(_write_skill(tmp_path))
-    skillmeta.check_drift(meta, reg)  # record 1.4.2
-    drifted = dict(meta, content_hash="sha256:ffffffff")
-    w = skillmeta.check_drift(drifted, reg)
-    assert w is not None and "1.4.2" in w
-    # registry is NOT overwritten, so the nag persists
-    assert json.loads(reg.read_text())["1.4.2"]["content_hash"] == meta["content_hash"]
-    assert skillmeta.check_drift(drifted, reg) is not None
+def test_resolve_autobumps_on_changed_content(tmp_path):
+    p = _write_skill(tmp_path)
+    reg = skillmeta.registry_for(p)
+    skillmeta.resolve_version(p, reg)  # record 1.4.2
+
+    # change a RULE (hash changes) but leave version:1.4.2 in the file
+    p.write_text(_SKILL.replace("rules go here", "different rules"))
+    meta, note = skillmeta.resolve_version(p, reg)
+
+    assert meta["version"] == "1.4.3"          # auto-bumped patch
+    assert note and "auto-bumped" in note
+    # the bump was persisted into the skill file itself
+    assert skillmeta.read_skill_meta(p)["version"] == "1.4.3"
+    # registry records the POST-write hash (so it round-trips)
+    r = json.loads(reg.read_text())
+    assert r["1.4.3"]["content_hash"] == skillmeta.read_skill_meta(p)["content_hash"]
+    assert r["1.4.3"]["bumped_from"] == "1.4.2"
 
 
-def test_versionless_skill_warns(tmp_path):
-    reg = tmp_path / "registry.json"
-    meta = {"name": "x", "version": None, "content_hash": "sha256:1", "path": "x"}
-    assert skillmeta.check_drift(meta, reg) is not None
+def test_resolve_autobump_terminates(tmp_path):
+    """The run right after an auto-bump must NOT bump again (hash round-trips)."""
+    p = _write_skill(tmp_path)
+    reg = skillmeta.registry_for(p)
+    skillmeta.resolve_version(p, reg)
+    p.write_text(_SKILL.replace("rules go here", "different rules"))
+    skillmeta.resolve_version(p, reg)                      # 1.4.2 → 1.4.3
+    meta, note = skillmeta.resolve_version(p, reg)         # should be a no-op
+    assert meta["version"] == "1.4.3" and note is None
+
+
+def test_resolve_creates_version_when_missing(tmp_path):
+    p = _write_skill(tmp_path, "---\nname: x\n---\nbody\n")
+    reg = skillmeta.registry_for(p)
+    meta, note = skillmeta.resolve_version(p, reg)
+    assert meta["version"] == "0.0.1"
+    assert note and "created" in note
+    assert "version: 0.0.1" in p.read_text()
+
+
+def test_resolve_hand_set_bump_is_first_sighting(tmp_path):
+    p = _write_skill(tmp_path)
+    reg = skillmeta.registry_for(p)
+    skillmeta.resolve_version(p, reg)  # record 1.4.2
+    # a human sets a semantic minor bump AND changes a rule
+    p.write_text(_SKILL.replace("version: 1.4.2", "version: 1.5.0")
+                       .replace("rules go here", "new rules"))
+    meta, note = skillmeta.resolve_version(p, reg)
+    assert meta["version"] == "1.5.0" and note is None      # honoured as-is, no bump
+    assert "1.5.0" in json.loads(reg.read_text())
 
 
 def test_init_stamps_skill_block(tmp_path):

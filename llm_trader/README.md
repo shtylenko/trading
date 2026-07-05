@@ -95,11 +95,13 @@ python3 -m trading.llm_trader.viewer
 # Supports live SSE updates for running sessions (revealed data only).
 ```
 
-Each run records which **version** of `TRADE_SIMULATOR.md` drove it. Bump the
-`version:` in the skill's frontmatter when you meaningfully change the rules; `init`
-warns if the skill content changed without a bump (tracked in
-`skills/skill_versions.json`). `recorder report --by-version` then attributes win
-rate / P&L / avg-R to each version so you can tell whether a rule change helped.
+Each run records which **version** of `TRADE_SIMULATOR.md` drove it, and versioning
+is **automatic**: when the skill's content changes, the next `init` detects the new
+content hash, **auto-bumps the patch** `version:` (writing it into the frontmatter
+and `skills/skill_versions.json`), and stamps the run with it. Set `version:` by
+hand only for a bigger semantic jump (minor/major) — a hand-set version is honoured
+as-is. `recorder report --by-version` then attributes win rate / P&L / avg-R to each
+version so you can tell whether a rule change helped.
 
 Each session is a self-contained folder under `simulations/{TS}-{TICKER}/`
 (`bars.json`, `actions.json`, `decisions.json`, `pnl.json`, `session.json`,

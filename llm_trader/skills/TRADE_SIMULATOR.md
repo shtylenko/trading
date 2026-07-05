@@ -6,6 +6,18 @@ description: Paper-trade ONE recorded setup live, minute by minute — stream it
 
 # TRADE_SIMULATOR — live paced paper-trading of one recorded setup
 
+> **⚙️ Versioning is automatic.** Each run is stamped with this skill's `version:`
+> so profitability is tracked per rule-set (`recorder report --by-version`). You do
+> **not** have to bump it by hand: whenever this file's content changes, the next
+> `recorder init` detects it (the content hash no longer matches the one recorded
+> for `version:` in `skills/skill_versions.json`) and **auto-bumps the patch**
+> (`2.0.0→2.0.1`), writing the new number into this frontmatter *and* the registry
+> before stamping the run. Note this also fires on pure prose edits — any byte
+> change is a new version. If you want a **semantically larger** jump — **minor**
+> (`2.0.0→2.1.0`) for a real behavioural rule change, **major** (`2.0.0→3.0.0`) for
+> a strategy rethink — set `version:` by hand in the same edit; a hand-set version
+> is honoured as-is (no auto-bump on top of it).
+
 You are the **trader**. A setup recorded by `llm_trader` (a gap-up,
 low-float, high-RVOL small cap that broke out in the morning) is replayed to you
 **one 1-minute bar at a time**. As each bar arrives you decide — using **Ross
@@ -92,9 +104,10 @@ echo "$SDIR"     # …/simulations/{YYYYMMDDHHMMSS}-{TICKER}
 
 `init` **stamps this run with the version of this skill** (the `version:` in the
 frontmatter above) plus a content hash, frozen at run start, so profitability can
-later be attributed per version (`recorder report --by-version`, Step 4). If you
-edited the skill's rules without bumping `version:`, `init` prints a drift warning
-to stderr — heed it and bump, or two rule-sets blend under one tag.
+later be attributed per version (`recorder report --by-version`, Step 4). If the
+skill's content changed since its version was last recorded, `init` **auto-bumps
+the patch version** (writing it into the frontmatter and the registry) and prints
+`• auto-bumped skill version …` to stderr — no manual step needed.
 
 Now **seal the day** into that folder. Use the **same `--seed`/`--ticker`/`--date`**
 as `init` (same seed ⇒ same setup as the Step 0 peek):
@@ -390,9 +403,8 @@ Append that table to `journal.md`, and for **this** session also note its
 **MFE-capture** (realized $/share ÷ `mfe_per_share` — how much of the favorable
 move you kept). Then name **one thing to improve tomorrow** — a single concrete
 rule tweak or execution fix, not a vague intention. If a rule tweak is warranted,
-that is your cue to edit the rules **and bump `version:`** so the next runs are
-measured as a distinct cohort. A `⚠ … distinct hashes (drift)` note means a
-version tag was reused across changed content — the very thing to avoid.
+just edit the rules — the next `init` auto-versions the change, so those runs land
+in a fresh cohort automatically.
 
 Finally, **(re)start the viewer and hand the user a live URL**. Always kill any
 existing listener on the port first — a long-running viewer keeps serving whatever

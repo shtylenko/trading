@@ -257,8 +257,10 @@ def init(
     """Create the session folder and a provisional ``session.json``; return its path.
 
     The driving skill's version is read and *frozen* here (at run start) so later
-    edits to the skill never retroactively re-tag this run. Prints a drift warning
-    if the skill content changed without a version bump (see ``skillmeta``).
+    edits to the skill never retroactively re-tag this run. If the skill's rules
+    changed since its version was last recorded, the version is **auto-bumped**
+    (written into the skill frontmatter and the registry) before stamping — see
+    ``skillmeta.resolve_version``.
     """
     now = now or datetime.now()
     sid = f"{now.strftime('%Y%m%d%H%M%S')}-{ticker.upper()}"
@@ -267,14 +269,13 @@ def init(
 
     skill_path = skill or skillmeta.DEFAULT_SKILL_PATH
     try:
-        skill_meta = skillmeta.read_skill_meta(skill_path)
-        warning = skillmeta.check_drift(skill_meta)
+        skill_meta, note = skillmeta.resolve_version(skill_path)
     except FileNotFoundError:
         skill_meta = {"name": None, "version": None, "content_hash": None,
                       "path": str(skill_path)}
-        warning = f"skill file not found at {skill_path} — run recorded as unversioned."
-    if warning:
-        print(f"⚠ {warning}", file=sys.stderr)
+        note = f"skill file not found at {skill_path} — run recorded as unversioned."
+    if note:
+        print(f"• {note}", file=sys.stderr)
 
     session = {
         "schema_version": SCHEMA_VERSION,

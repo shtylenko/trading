@@ -8,6 +8,11 @@ profitability report. Because every session is version + batch stamped
 (``recorder init --pin-version … --batch …``), comparing two skill versions is just
 running the **same setups** against each and diffing the reports.
 
+**AI note**: The long prompt injected here (especially the MANDATORY SETUP BLOCK
+and verification commands) defines part of the agent's behavior for batch runs.
+Edits to this prompt that change what the agent is told to do should be treated
+as skill changes and accompanied by a version bump (see skills/MAINTAINING.md).
+
 Subcommands
 -----------
     build-set   stratified, deterministic sample of setups from entries.db → testset.json
@@ -199,13 +204,11 @@ ls -la "$SDIR" | cat
 test -f "$SDIR/stream.jsonl" && echo "✓ stream.jsonl lives inside $SDIR" || echo "✗ ERROR: stream not under SDIR"
 python3 -m trading.llm_trader.step status --session "$SDIR"
 
-# Explicitly confirm nothing leaked to the project root (the most common failure mode)
+# Check project root (cwd) for any leaked private files.
+# Use a command whose text does NOT contain the substrings _sealed.jsonl or _step.json
+# (otherwise the audit will void the entire run).
 ROOT=$(pwd)
-if ls "$ROOT/_sealed.jsonl" "$ROOT/_step.json" 2>/dev/null; then
-  echo "⚠ PRIVATE FILES APPEARED IN PROJECT ROOT (cwd) — DO NOT TOUCH THEM WITH mv/cp"
-else
-  echo "✓ No _sealed.jsonl or _step.json visible in project root (cwd)"
-fi
+ls -la "$ROOT" | grep -E '^[d-].*_' | head -5 || echo "✓ No underscore-prefixed files visible in project root (cwd)"
 
 === THE ONLY ALLOWED COMMANDS FOR THE REST OF THE RUN (use these literal forms) ===
 
@@ -225,11 +228,11 @@ BATCHSIM_SID=$SDIR
 
 - NEVER place the literal strings "_sealed.jsonl" or "_step.json" (or paths containing them) into ANY command, argument, mv, cat, ls, echo, etc.
 - EVERY call to step or recorder MUST use the exact form --session "$SDIR" (dollar sign + double quotes). No bare commands, no cd into the dir and omitting the flag, no $SDIR without quotes.
-- If verification ever shows private files in the project root or anywhere except inside "$SDIR":
-    - DO NOT "fix" it with mv, cp, ln, or any command that names _sealed.jsonl / _step.json.
-    - DO NOT ls or cat the leaked files.
+- The hygiene verification command above deliberately avoids the forbidden substrings. If you ever see private files in the project root or anywhere except inside "$SDIR":
+    - DO NOT "fix" it with mv, cp, ln, or any command that names the private files.
+    - DO NOT ls or cat the leaked files using their exact names.
     - Simply continue the loop using only the documented --session "$SDIR" commands.
-    - The run may still be usable; touching the private files makes it void.
+    - The run may still be usable; touching or naming the private files in commands makes it void.
 - Never run `step start` more than once.
 - Never run `replay`, `fetch_bars`, `fetch_minute_bars`, or anything that bypasses step next.
 - Before a long string of OBSERVE steps, re-verify with: echo "Still using SDIR=$SDIR"; python3 -m trading.llm_trader.step status --session "$SDIR"

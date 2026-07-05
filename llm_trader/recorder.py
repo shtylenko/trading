@@ -803,6 +803,7 @@ def _session_entry(d: Path, s: dict) -> dict:
         "ticker": s.get("ticker"),
         "historical_date": s.get("historical_date"),
         "real_run_ts": s.get("real_run_ts"),
+        "finalized_ts": s.get("finalized_ts"),
         "mode": s.get("mode", "simulated"),
         "status": status,
         "stale": stale,

@@ -22,10 +22,13 @@ connection doesn't block other requests. Private step internals (``_sealed.jsonl
 from __future__ import annotations
 
 import argparse
+import errno
 import http.server
 import json
+import os
 import queue
 import socketserver
+import subprocess
 import threading
 import time
 import webbrowser
@@ -316,9 +319,58 @@ def _resolve_session(arg: Optional[str]) -> Optional[str]:
     return sess[-1] if sess else None
 
 
+def _pids_listening_on_port(port: int) -> list[int]:
+    """Return PIDs currently listening on the given TCP port (only Python ones)."""
+    try:
+        # Get PID + command for listeners on the port
+        out = subprocess.check_output(
+            ["lsof", "-i", f":{port}", "-sTCP:LISTEN", "-Fpc"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        pids = []
+        current_pid = None
+        for line in out.splitlines():
+            if line.startswith("p"):
+                current_pid = int(line[1:])
+            elif line.startswith("c") and current_pid:
+                cmd = line[1:].lower()
+                if "python" in cmd:
+                    pids.append(current_pid)
+                current_pid = None
+        return pids
+    except Exception:
+        return []
+
+
+def _kill_listeners_on_port(port: int) -> None:
+    """Kill any *Python* processes listening on the port (SIGTERM then SIGKILL)."""
+    pids = _pids_listening_on_port(port)
+    if not pids:
+        return
+    print(f"Port {port} was in use. Killing previous Python listener(s) {pids} and restarting...")
+    for pid in pids:
+        try:
+            os.kill(pid, 15)  # SIGTERM
+        except ProcessLookupError:
+            pass
+    time.sleep(0.5)
+    # Force kill leftovers
+    for pid in _pids_listening_on_port(port):
+        try:
+            os.kill(pid, 9)
+        except ProcessLookupError:
+            pass
+    time.sleep(0.3)
+
+
 def serve(session: Optional[str], port: int = 8765, open_browser: bool = True) -> None:
     # Start the FS monitor early so SSE works immediately
     _start_monitor()
+
+    # Proactively take the port: if something else is listening, kill it.
+    # This makes `python -m ...viewer` "just work" without Address already in use errors.
+    _kill_listeners_on_port(port)
 
     with _Server(("127.0.0.1", port), _Handler) as httpd:
         url = f"http://127.0.0.1:{port}/viewer/index.html"

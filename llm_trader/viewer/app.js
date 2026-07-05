@@ -301,13 +301,19 @@ function renderBatchDetail(v) {
     else if (s.stale) { res = "idle — may be abandoned"; }
     else { res = s.live_pnl ? `running · realized ${fmtMoney(s.live_pnl.realized_pnl || 0)}` : "running"; }
     const stb = statusBadge(s.status === "complete" ? "complete" : (s.stale ? "stale" : "running"));
+    const ver = s.skill_version || s.version || "—";
+    const init = s.real_run_ts || "";
+    const done = s.finalized_ts || (s.status === "complete" ? s.last_activity : "");
     return `<tr class="run" data-id="${escapeHtml(s.id)}">
       <td><b>${escapeHtml(s.ticker || "?")}</b></td>
       <td>${escapeHtml(s.historical_date || "")}</td>
+      <td>${escapeHtml(ver)}</td>
+      <td class="muted small">${escapeHtml(init)}</td>
+      <td class="muted small">${escapeHtml(done)}</td>
       <td><span class="badge ${stb.cls}">${stb.label}</span></td>
       <td class="${cls}">${res}</td>
     </tr>`;
-  }).join("") : `<tr><td colspan="4" class="muted">no runs yet</td></tr>`;
+  }).join("") : `<tr><td colspan="7" class="muted">no runs yet</td></tr>`;
 
   bd.innerHTML = `
     <div class="bd-head">
@@ -323,7 +329,7 @@ function renderBatchDetail(v) {
     </table>
     <div class="bd-section">Runs (${ss.length}) <span class="muted small">— click a row to open it</span></div>
     <table class="bd-table">
-      <thead><tr><th>ticker</th><th>date</th><th>status</th><th>result</th></tr></thead>
+      <thead><tr><th>ticker</th><th>date</th><th>version</th><th>initiated</th><th>completed</th><th>status</th><th>result</th></tr></thead>
       <tbody>${runRows}</tbody>
     </table>`;
 

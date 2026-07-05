@@ -4,6 +4,23 @@
 > trade.** If you are running a simulation, ignore this — versioning is fully
 > automatic and requires nothing from you. Go back to `TRADE_SIMULATOR.md`.
 
+## For AI assistants and automated code editors (IMPORTANT)
+
+**Any modification to the content of `TRADE_SIMULATOR.md` (including examples,
+hygiene instructions, command blocks, or explanatory text that the agent will
+read or be told to follow) changes the skill.**
+
+You **MUST** ensure a version bump happens:
+
+- Preferred: edit the file, then run a normal `python -m trading.llm_trader.recorder init ...` (without `--pin-version`) so `resolve_version` auto-bumps the patch and updates the registry + archive.
+- Or: manually set a new `version:` in the frontmatter in the same edit (use the next patch unless you intend a larger jump).
+- Never edit the text of an archived `archive/TRADE_SIMULATOR@X.Y.Z.md` file.
+- Changes to the *injected prompt* in `batchsim.py` that affect agent behavior on a pinned version should also be accompanied by a version bump (or documented as only affecting new versions).
+
+Failing to bump mixes different agent instructions under the same version number, making `report --by-version` and batch comparisons meaningless.
+
+Log new rules or incidents in this file under "AI / Tooling Rules".
+
 ## Versioning is automatic
 
 Each run is stamped with the skill's `version:` (frontmatter) so profitability is

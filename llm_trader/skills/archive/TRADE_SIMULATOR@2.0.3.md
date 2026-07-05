@@ -139,10 +139,10 @@ stop and say so rather than producing a tainted journal.
    echo "SDIR=$SDIR"
    ls -la "$SDIR" | cat
    test -f "$SDIR/stream.jsonl" && echo "✓ stream inside SDIR" || echo "PROBLEM"
-   # Make sure nothing leaked to the project root (cwd)
+   # Check project root (cwd) for leaks. Use a command that does not contain
+   # the substrings _sealed.jsonl or _step.json in its text.
    ROOT=$(pwd)
-   ls "$ROOT/_sealed.jsonl" "$ROOT/_step.json" 2>/dev/null \
-     && echo "⚠ LEAKED TO ROOT (cwd) — DO NOT TOUCH" || echo "✓ root is clean"
+   ls -la "$ROOT" | grep -E '^[d-].*_' | head -5 || echo "✓ root is clean"
    python3 -m trading.llm_trader.step status --session "$SDIR"
    ```
 

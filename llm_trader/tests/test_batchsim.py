@@ -92,6 +92,25 @@ def test_scan_commands_flags_real_peek_but_not_prose():
     assert batchsim._scan_commands("step next\nrecorder log\nfinalize") is None  # clean
 
 
+def test_parse_export_ignores_planning_tool_mentions():
+    # the agent's todo/planning tool quotes the plan ("run step start", "don't read
+    # _sealed.jsonl"). Scanning it was a LIVE false-positive void — must be ignored;
+    # only the real terminal command counts.
+    export = json.dumps({"messages": [
+        {"role": "assistant", "tool_calls": [
+            {"function": {"name": "todos", "arguments": json.dumps({"todos": [
+                {"id": "1", "content": "run step start to seal the day"},
+                {"id": "2", "content": "never open _sealed.jsonl"}]})}},
+            {"function": {"name": "terminal",
+                          "arguments": '{"command": "python3 -m trading.llm_trader.step start --session X"}'}},
+        ]},
+    ]})
+    cmds = batchsim._parse_export(export)
+    assert cmds.count("step start") == 1          # only the real command, not the todo
+    assert "_sealed.jsonl" not in cmds            # planning mention excluded
+    assert batchsim._scan_commands(cmds) is None  # not voided
+
+
 def _audit_with_commands(tmp_path, monkeypatch, tag, commands):
     monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
     monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")

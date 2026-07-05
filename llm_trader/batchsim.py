@@ -408,12 +408,41 @@ def _tool_calls_in(message: dict):
                 yield part.get("name"), part.get("input") or part.get("arguments")
 
 
+# tool-call argument keys that carry an actual action — a shell command or a file
+# path. We scan ONLY these, never a planning/todo tool's arguments: those quote the
+# plan ("run step start", "do NOT read _sealed.jsonl") and would false-positive exactly
+# like scanning prose would (the bug this whole audit exists to avoid).
+_ACTION_KEYS = ("command", "cmd", "script", "code", "path", "file",
+                "filename", "file_path", "paths", "files")
+_SHELL_TOOL_HINT = ("terminal", "bash", "shell", "sh", "exec", "run", "command")
+
+
+def _command_text(name: Optional[str], args) -> str:
+    """The actionable text of one tool call: its shell command / file path(s), or ""
+    for a non-action tool (todos, thinking, …) whose args carry no action key."""
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except (json.JSONDecodeError, TypeError):
+            nm = (name or "").lower()          # unparseable: trust only a shell tool
+            return args if any(h in nm for h in _SHELL_TOOL_HINT) else ""
+    if isinstance(args, dict):
+        vals = []
+        for k in _ACTION_KEYS:
+            v = args.get(k)
+            if v is not None:
+                vals.append(v if isinstance(v, str) else json.dumps(v))
+        return "\n".join(vals)
+    return ""
+
+
 def _parse_export(export_text: str) -> Optional[str]:
-    """Extract *only the executed tool-call commands* from a `hermes sessions export`
-    dump — never the assistant's prose. The prose quotes the rules (which name
-    `_sealed.jsonl`, `step start`, …) on every compliant run, so scanning it would
-    false-positive; the tool-call arguments are what the agent actually executed.
-    Returns None if no tool calls were found (the session is then unverifiable)."""
+    """Extract *only the executed shell commands / file accesses* from a `hermes
+    sessions export` dump — never the assistant's prose, and never a planning tool's
+    arguments. Both quote the rules (which name `_sealed.jsonl`, `step start`, …) on
+    every compliant run, so scanning them would false-positive; only a tool call's
+    action fields (`command`, `path`, …) are what the agent actually did.
+    Returns None if no action tool calls were found (session is then unverifiable)."""
     parts: list[str] = []
     for line in export_text.splitlines():
         line = line.strip()
@@ -425,10 +454,9 @@ def _parse_export(export_text: str) -> Optional[str]:
             continue
         for m in obj.get("messages", []):
             for name, args in _tool_calls_in(m):
-                if name is not None:
-                    parts.append(str(name))
-                if args is not None:
-                    parts.append(str(args))
+                txt = _command_text(name, args)
+                if txt:
+                    parts.append(txt)
     return "\n".join(parts) if parts else None
 
 

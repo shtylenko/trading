@@ -84,6 +84,24 @@ def test_resolve_autobump_terminates(tmp_path):
     assert meta["version"] == "1.4.3" and note is None
 
 
+def test_resolve_archives_each_version(tmp_path):
+    p = _write_skill(tmp_path)
+    reg = skillmeta.registry_for(p)
+    skillmeta.resolve_version(p, reg)                       # record 1.4.2
+    p.write_text(_SKILL.replace("rules go here", "different rules"))
+    skillmeta.resolve_version(p, reg)                       # 1.4.2 → 1.4.3
+
+    arch = skillmeta.archive_dir_for(p)
+    a142 = arch / "SKILL@1.4.2.md"
+    a143 = arch / "SKILL@1.4.3.md"
+    assert a142.exists() and a143.exists()
+    # each archived snapshot declares its own version and hashes to the registry entry
+    assert "version: 1.4.2" in a142.read_text()
+    assert "version: 1.4.3" in a143.read_text()
+    r = json.loads(reg.read_text())
+    assert skillmeta.read_skill_meta(a143)["content_hash"] == r["1.4.3"]["content_hash"]
+
+
 def test_resolve_creates_version_when_missing(tmp_path):
     p = _write_skill(tmp_path, "---\nname: x\n---\nbody\n")
     reg = skillmeta.registry_for(p)

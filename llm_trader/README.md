@@ -100,8 +100,10 @@ is **automatic**: when the skill's content changes, the next `init` detects the 
 content hash, **auto-bumps the patch** `version:` (writing it into the frontmatter
 and `skills/skill_versions.json`), and stamps the run with it. Set `version:` by
 hand only for a bigger semantic jump (minor/major) — a hand-set version is honoured
-as-is. `recorder report --by-version` then attributes win rate / P&L / avg-R to each
-version so you can tell whether a rule change helped.
+as-is. Every version also gets an immutable snapshot in
+`skills/archive/TRADE_SIMULATOR@<version>.md`, so you can read or diff the exact
+rule-set behind any run. `recorder report --by-version` then attributes win rate /
+P&L / avg-R to each version so you can tell whether a rule change helped.
 
 Each session is a self-contained folder under `simulations/{TS}-{TICKER}/`
 (`bars.json`, `actions.json`, `decisions.json`, `pnl.json`, `session.json`,

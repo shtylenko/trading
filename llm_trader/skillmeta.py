@@ -27,8 +27,12 @@ Termination note: the version is written into the frontmatter *before* the hash
 is recorded, so the recorded hash reflects the post-write bytes — a subsequent run
 sees a match and does not bump again.
 
-The registry lives in git alongside the skill (NOT in the gitignored
-``simulations/`` tree) because it is the source of truth for "hash X is v2.0.0".
+Each time a version is recorded, an immutable snapshot of the skill is written to
+``skills/archive/<stem>@<version>.md`` — a browsable history of every rule-set,
+whose bytes hash to exactly what the registry records for that version.
+
+The registry (and archive) live in git alongside the skill (NOT in the gitignored
+``simulations/`` tree) because they are the source of truth for "hash X is v2.0.0".
 """
 
 from __future__ import annotations
@@ -50,6 +54,25 @@ def registry_for(skill_path: str | Path) -> Path:
     """The version registry lives next to its skill, so a custom ``--skill``
     (or a test's temp skill) tracks into its own file — never the bundled one."""
     return Path(skill_path).resolve().parent / "skill_versions.json"
+
+
+def archive_dir_for(skill_path: str | Path) -> Path:
+    """Where per-version snapshots of the skill are kept (next to the skill)."""
+    return Path(skill_path).resolve().parent / "archive"
+
+
+def _archive_path(skill_path: Path, version: str) -> Path:
+    return archive_dir_for(skill_path) / f"{skill_path.stem}@{version}.md"
+
+
+def _archive_snapshot(skill_path: Path, version: str) -> Path:
+    """Save an immutable copy of the *current* skill bytes as
+    ``archive/<stem>@<version>.md``. Called at the moment a version is recorded,
+    so the snapshot's hash equals the hash the registry stores for that version."""
+    dest = _archive_path(skill_path, version)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(skill_path.read_bytes())
+    return dest
 
 
 # the bundled skill's registry (the common case)
@@ -208,6 +231,7 @@ def resolve_version(
         reg[new_version] = {"content_hash": meta["content_hash"],
                             "first_seen": now.isoformat(timespec="seconds")}
         _save_registry(reg_path, reg)
+        _archive_snapshot(skill_path, new_version)
         return meta, f"skill had no version — created {new_version}."
 
     entry = reg.get(version)
@@ -217,6 +241,7 @@ def resolve_version(
         reg[version] = {"content_hash": current,
                         "first_seen": now.isoformat(timespec="seconds")}
         _save_registry(reg_path, reg)
+        _archive_snapshot(skill_path, version)
         return meta, None
 
     if entry.get("content_hash") == current:  # unchanged
@@ -234,4 +259,5 @@ def resolve_version(
                         "first_seen": now.isoformat(timespec="seconds"),
                         "bumped_from": version}
     _save_registry(reg_path, reg)
+    _archive_snapshot(skill_path, new_version)
     return meta, f"auto-bumped skill version {version} → {new_version} (rules changed)."

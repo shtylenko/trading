@@ -56,6 +56,23 @@ _REPLAY_RE = "trading.llm_trader.replay"
 _STEP_START_RE = "step start"
 
 
+def _latest_version() -> str:
+    """Return the highest semver key from the skill registry (e.g. '2.0.3')."""
+    reg_path = skillmeta.registry_for(skillmeta.DEFAULT_SKILL_PATH)
+    reg = skillmeta._load_registry(reg_path)
+    if not reg:
+        raise RuntimeError(f"no versions in skill registry at {reg_path}")
+    def parse(v: str):
+        try:
+            nums = [int(x) for x in v.split(".")]
+            while len(nums) < 3:
+                nums.append(0)
+            return tuple(nums)
+        except Exception:
+            return (0, 0, 0)
+    return max(reg.keys(), key=parse)
+
+
 # ───────────────────────────── build-set ────────────────────────────────────
 
 
@@ -344,11 +361,14 @@ def _run_one(work: dict) -> dict:
 
 
 def run(
-    version: str, *, model: str, testset: Path = TESTSET_DEFAULT, parallel: int = 4,
+    version: Optional[str] = None, *, model: str, testset: Path = TESTSET_DEFAULT, parallel: int = 4,
     repeats: int = 1, tag: Optional[str] = None, timeout: int = 900,
     resume: bool = False, dry_run: bool = False,
 ) -> str:
     """Run the batch: spawn agents for every (setup × repeat), then audit + report."""
+    if not version:
+        version = _latest_version()
+        print(f"no --version provided; using latest: {version}", file=sys.stderr)
     skill_path = _archived_skill(version)
     setups = load_testset(testset)
     tag = tag or f"{version}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -705,7 +725,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pb.add_argument("--db", default=str(ENTRIES_DB))
 
     pr = sub.add_parser("run", help="spawn agents for one version/batch")
-    pr.add_argument("--version", required=True, help="skill version to pin (archived)")
+    pr.add_argument("--version", help="skill version to pin (archived); defaults to latest in registry")
     pr.add_argument("--model", required=True, help="hermes model id (the local executor)")
     pr.add_argument("--set", dest="testset", default=str(TESTSET_DEFAULT))
     pr.add_argument("--parallel", type=int, default=4)

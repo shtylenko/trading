@@ -179,6 +179,12 @@ the current (closed) bar before committing:
 - **volume expansion** — `rvol_bar` is clearly elevated (**≳1.5–2×**; the breakout
   bar should show participation, not drift), and the recent **green bars carry more
   volume than the red bars** (buyers in control, not distribution — §9), **and**
+- **clean candle shape — the bar held its break** ("let it break, hold, then enter"
+  — §18). The breakout bar must **close in the upper portion of its range** (upper
+  wick < ~⅓ of the bar's range, i.e. `h − c < (h − l)/3`). A **topping tail /
+  shooting star** on the breakout bar means sellers rejected the high — that is a
+  failed confirmation even if every other criterion fires: **stand down** and wait
+  for the next clean bar. Never rationalize past a topping tail, **and**
 - **not extended (don't chase)** — you are entering the **first** clean new high out
   of a consolidation/micro-pullback, *not* the 3rd–4th green bar of a vertical spike.
   If price is already stretched far above VWAP after a parabolic run (a stack of big
@@ -202,13 +208,17 @@ positive MACD *alone* pull you into a trade; it only confirms a pattern already 
 If all hold → **GO LONG**, fill at this bar's `c` — **this close is your `avg_entry`**
 (not `anchor_px`). Set the initial **stop**:
 
-- **default:** just below the breakout/consolidation low — `anchor_px − a few cents`
-  — *but only if that sits below your fill.*
+- **default — the structural low** ("my stop is the low of that pullback, it's as
+  simple as that"): just below the **pullback/consolidation low** that the breakout
+  cleared — `anchor_px − a few cents` — *but only if that sits below your fill.*
 - **if your fill is below `anchor_px`** (common — see the anchor note: you entered on
   a 1-min bar inside the 5-min candle), an anchor-based stop would be *above* your
-  entry, which is nonsensical. **Use a fixed small stop below your fill instead:
-  `avg_entry − $0.10…$0.30`** (low end for low float), or just under the entry bar's
-  own low if tighter.
+  entry, which is nonsensical. **Fall back to the next structural low below your
+  fill: just under the entry bar's own low**, or the low of the 1–2 bar micro
+  pullback that preceded it. Do **not** place the stop at an arbitrary cent offset
+  from your fill — a stop inside one bar's ordinary noise is a donation. The
+  $0.10–$0.30/share range is a **sizing cap**, not a placement rule: if the
+  structural stop is wider than ~$0.30, cut shares (Step 3) or skip the trade.
 
 Then `stop_distance = avg_entry − stop`, size the position (Step 3), and journal the
 entry with the rule that fired.
@@ -242,15 +252,27 @@ Evaluate every tick, in this priority order:
    back through entry takes you out flat instead of at a full stop. This is *before*
    any scale-out and is the single biggest cut to average-loss size. Never move the
    stop back down.
-4. **SCALE OUT** into strength — on a **touch** (`h ≥`) of the first clear resistance
-   (e.g. `pm_high`, prior-day level, a round number) or about **+1R**
-   (`avg_entry + stop_distance`): sell **1/3–1/2** filled at that level, and (if not
-   already there) **move the stop on the remainder to break-even**. Bank the win; let
-   the rest work risk-free. Scale out **slowly into strength** — sell into the up-move,
-   don't dump the whole position on one bar.
-5. **TRAIL** the remainder once up ≳1R: ratchet the stop up to just under the most
-   recent swing low or a moving average (`ema9` for a tight trail, `ema20` for a
-   looser one on a strong runner; ≈10–20¢). Never loosen a stop.
+4. **SCALE OUT in thirds** into strength (§4/§10 — his standard exit plan, all
+   three tiers):
+   - **First 1/3 at ~+1R** (`avg_entry + stop_distance`) or the first clear
+     resistance (e.g. `pm_high`, prior-day level, a round number) — touch-filled
+     (`h ≥` level). Move the stop on the remainder to **break-even** if not
+     already there.
+   - **Second 1/3 on the extended move** — ~+2R or the *next* marked resistance /
+     a retest of `session_high`, again touch-filled into strength.
+   - **Final 1/3 is the runner** — it rides with the break-even hard stop and
+     exits only on the red-candle rule (step 5) or a hard-stop/soft-bailout hit.
+   Scale out **slowly into strength** — sell into the up-move, don't dump the whole
+   position on one bar, and don't collapse the three tiers into one exit.
+5. **RUNNER EXIT (close-confirmed) + TRAIL.** The runner's exit signal is Cameron's
+   final-exit rule: the **first red candle that closes below the prior green
+   candle's low** → sell the remainder at that bar's close. This is a *structure*
+   signal judged on the closed bar — do **not** trail a hard intra-bar stop a few
+   cents under every swing low (that gets wicked out of runners for pennies; the
+   only hard stop on the runner is break-even, or higher once real structure
+   forms). On a strong runner you may ratchet the hard stop up under a *major*
+   completed swing low or the `ema20` once price is multiple R above it — but the
+   working exit is the red-candle close, not the wick-stop. Never loosen a stop.
 6. **ADD / SCALE IN (pyramiding — optional, only with conviction, §10)**. Add to a
    *winner*, never a loser. The three-step pyramid:
    - **Starter** = your 1/3 entry position (already on).
@@ -263,9 +285,11 @@ Evaluate every tick, in this priority order:
    risk stays inside `risk_budget`. **Never add to a red bar, into an extended/parabolic
    bar, into a negative MACD, and never average down.** Skip pyramiding entirely if the
    tape is choppy or volume is thin — one clean entry/exit beats a bad pyramid.
-7. **TARGET**: aim for **2:1** as a ceiling but accept the realized **~1:1**; the
-   primary target is a retest/break of the day's high or the next marked resistance.
-   Scaling out (step 4) is how you bank it.
+7. **TARGET**: aim for **2:1** as a ceiling but accept the realized **~1:1** — the
+   blended average lands near 1:1 because the first third banks at 1R and losers
+   bail small; the edge is win rate, not R:R. The primary target is a retest/break
+   of the day's high or the next marked resistance. Scaling out in thirds (step 4)
+   is how you bank it while still giving the runner a chance at the outsized move.
 
 Always be **flat by session end** — never hold overnight. If the `end` line arrives
 while still long, exit at the `end` line's `close`.
@@ -342,6 +366,32 @@ position open it is auto-flattened at the session close and flagged.
 Then **enrich `journal.md`** with a short Cameron-style post-mortem (append to the
 file): did the pattern resolve or did you bail? Did you follow the plan or was it an
 execution miss? One lesson.
+
+**Cross-session review (5-Step System, steps 2 & 5 — "analyze historical data").**
+After the single-trade post-mortem, aggregate every recorded session and append a
+short stats block to `journal.md`, so lessons compound instead of resetting each day:
+
+```bash
+SDIR="$SDIR" python3 - <<'EOF'
+import json, glob, os
+sims = os.path.dirname(os.environ["SDIR"])   # …/simulations
+rows = []
+for f in sorted(glob.glob(os.path.join(sims, "*", "pnl.json"))):
+    d = json.load(open(f))
+    if d.get("traded"):
+        rows.append(d)
+n = len(rows); wins = [r for r in rows if r["win"]]; losses = [r for r in rows if not r["win"]]
+print(f"sessions traded: {n} | win rate: {len(wins)/n:.0%}")
+print(f"total P&L: ${sum(r['realized_pnl'] for r in rows):.2f} | avg R: {sum(r['r_multiple'] for r in rows)/n:.2f}")
+if wins:   print(f"avg winner: ${sum(r['realized_pnl'] for r in wins)/len(wins):.2f}")
+if losses: print(f"avg loser:  ${sum(r['realized_pnl'] for r in losses)/len(losses):.2f}")
+EOF
+```
+
+Report **accuracy, avg winner, avg loser, P/L ratio, and this session's
+MFE-capture** (realized $/share ÷ `mfe_per_share` — how much of the favorable move
+you kept). Then name **one thing to improve tomorrow** — a single concrete rule
+tweak or execution fix, not a vague intention.
 
 Finally, **(re)start the viewer and hand the user a live URL**. Always kill any
 existing listener on the port first — a long-running viewer keeps serving whatever

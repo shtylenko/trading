@@ -2,5 +2,10 @@
   "2.0.0": {
     "content_hash": "sha256:37d6ea91",
     "first_seen": "2026-07-04T22:30:19"
+  },
+  "2.0.1": {
+    "bumped_from": "2.0.0",
+    "content_hash": "sha256:dc96d3b3",
+    "first_seen": "2026-07-04T22:42:23"
   }
 }

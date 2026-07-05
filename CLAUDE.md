@@ -15,7 +15,8 @@ same data the backtest used; never a re-implementation).
 
 ## Commands
 
-Run from the **monorepo root** (`/Users/shtylenko/Hermes/projects`) so `trading` imports:
+Run from the **monorepo root** — the directory that contains `trading/`
+(`/Users/shtylenko/Projects`) — so `trading` imports:
 
 ```bash
 python3 -m pytest trading/lab/tests -q                       # lab test suite

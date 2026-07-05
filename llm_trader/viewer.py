@@ -38,8 +38,8 @@ import re
 PKG_DIR = Path(__file__).resolve().parent
 SIM_ROOT = PKG_DIR / "simulations"
 
-# session ids are ``{YYYYMMDDHHMMSS}-{TICKER}`` — restrict to that character set so
-# a crafted id can never escape SIM_ROOT (e.g. ``../../etc``).
+# session ids are ``{YYYYMMDDHHMMSS}-{TICKER}-{hex}`` — restrict to that character set
+# so a crafted id can never escape SIM_ROOT (e.g. ``../../etc``).
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 

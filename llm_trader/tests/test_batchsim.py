@@ -129,9 +129,71 @@ def test_audit_passes_clean_commands(tmp_path, monkeypatch):
     assert rows and rows[0]["n"] == 1 and rows[0]["n_void"] == 0
 
 
-def test_extract_sid_from_agent_echo():
-    out = "some log\nfinalized ok\nSDIR=/x/simulations/20250102153000-BQ-9f3a1c\ndone"
+def test_extract_sid_prefers_anchor_over_stray_path():
+    # a stray/earlier path must NOT win over the anchored final marker
+    out = ("... init printed /x/simulations/20250101090000-OLD-000000 ...\n"
+           "finalized ok\n"
+           "BATCHSIM_SID=/x/simulations/20250102153000-BQ-9f3a1c\n")
     assert batchsim._extract_sid(out) == "20250102153000-BQ-9f3a1c"
+
+
+def test_extract_sid_falls_back_to_bare_id():
+    out = "no anchor here, just /x/simulations/20250102153000-BQ-9f3a1c/pnl.json"
+    assert batchsim._extract_sid(out) == "20250102153000-BQ-9f3a1c"
+
+
+def test_parse_export_handles_content_array_tool_use():
+    # a schema where tool calls live in a content array (not top-level tool_calls)
+    export = json.dumps({"messages": [
+        {"role": "assistant", "content": [
+            {"type": "text", "text": "I will not read _sealed.jsonl"},
+            {"type": "tool_use", "name": "bash",
+             "input": {"cmd": "python3 -m trading.llm_trader.step next"}},
+        ]},
+    ]})
+    cmds = batchsim._parse_export(export)
+    assert "step next" in cmds and "_sealed.jsonl" not in cmds
+
+
+def test_parse_export_returns_none_when_no_tool_calls():
+    # prose-only session (schema mismatch or truly no commands) → unverifiable, not clean
+    export = json.dumps({"messages": [{"role": "assistant", "content": "just talking"}]})
+    assert batchsim._parse_export(export) is None
+
+
+def test_report_capture_averages_wins_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    tag = "capbatch"
+
+    def _sess(sid, win, cap, realized):
+        d = tmp_path / sid
+        d.mkdir()
+        (d / "session.json").write_text(json.dumps(
+            {"id": sid, "status": "complete", "batch": tag, "skill": {"version": "1.0.0"}}))
+        (d / "pnl.json").write_text(json.dumps(
+            {"traded": True, "win": win, "realized_pnl": realized, "r_multiple": realized / 40,
+             "mfe_capture": cap, "skill_version": "1.0.0", "batch": tag}))
+
+    _sess("s1-TK-aaaaaa", True, 0.80, 40.0)     # winner
+    _sess("s2-TK-bbbbbb", False, -1.50, -20.0)  # loser with negative capture
+    rows = recorder.report_by_version(batch=tag)
+    assert rows[0]["avg_capture"] == 0.80       # loser's -1.5 excluded
+
+
+def test_run_rejects_testset_missing_time(tmp_path):
+    import pytest
+    ts = tmp_path / "ts.json"
+    ts.write_text(json.dumps({"setups": [{"ticker": "TK", "date": "2025-01-02", "time_et": None}]}))
+    with pytest.raises(ValueError, match="time_et"):
+        batchsim.run("2.0.2", model="m", testset=ts, dry_run=True)
+
+
+def test_void_stats_counts_unverifiable(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    tag = "vs"
+    _fake_session(tmp_path, tag, sid="a-TK-111111", void="no agent command log (unverifiable)")
+    _fake_session(tmp_path, tag, sid="b-TK-222222")   # clean
+    assert batchsim._void_stats(tag) == (2, 1)
 
 
 def test_resume_excludes_voided(tmp_path, monkeypatch):

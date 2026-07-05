@@ -176,7 +176,8 @@ python3 -m trading.llm_trader.recorder finalize --session "$SDIR"
 
 HARD RULES (violating any voids the run): never open a file whose name starts with
 `_`; never run `replay` or `fetch_bars` directly; never re-run `step start`. When
-`finalize` prints its summary, print the line `SDIR=$SDIR` and stop.
+`finalize` prints its summary, print — as the very last line, exactly — the anchored
+marker `BATCHSIM_SID=$SDIR` and stop.
 """
 
 
@@ -188,11 +189,20 @@ def _session_name(tag: str, ticker: str, date: str, rep: int) -> str:
 
 # a recorder session id: {14 digits}-{TICKER}-{6 hex} (see recorder.init)
 _SID_RE = re.compile(r"\d{14}-[A-Z0-9]+-[0-9a-f]{6}")
+# the agent is told to print `BATCHSIM_SID=<sdir>` as its last line — prefer that
+# anchored marker so a stray path / error / retry in the output can't mis-map the run.
+_ANCHOR_RE = re.compile(r"BATCHSIM_SID=\S*?(\d{14}-[A-Z0-9]+-[0-9a-f]{6})")
 
 
 def _extract_sid(text: str) -> Optional[str]:
-    """Pull the recorder session id the agent echoed (last match wins)."""
-    hits = _SID_RE.findall(text or "")
+    """Pull the recorder session id from the agent's output. Prefer the anchored
+    ``BATCHSIM_SID=…`` marker (last one wins); fall back to a bare id only if no
+    anchor is present, so we don't silently attribute the wrong session."""
+    text = text or ""
+    anchored = _ANCHOR_RE.findall(text)
+    if anchored:
+        return anchored[-1]
+    hits = _SID_RE.findall(text)
     return hits[-1] if hits else None
 
 
@@ -273,6 +283,15 @@ def run(
     setups = load_testset(testset)
     tag = tag or f"{version}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
+    # exact-setup pinning requires time_et on every row; a missing one would silently
+    # revert to an unseeded same-day pick (the finding-5 bug). Fail loudly instead.
+    missing = [f"{s.get('ticker')} {s.get('date')}" for s in setups if not s.get("time_et")]
+    if missing:
+        raise ValueError(
+            f"testset has {len(missing)} setup(s) with no time_et (e.g. {missing[:3]}). "
+            "Regenerate with `batchsim build-set` — exact-setup pinning needs it."
+        )
+
     done = _completed_counts(tag) if resume else {}
     work: list[dict] = []
     for su in setups:
@@ -293,32 +312,66 @@ def run(
           f"= {len(work)} runs (parallel {parallel}, model {model})"
           f"{' [DRY RUN]' if dry_run else ''}", file=sys.stderr)
 
+    if dry_run:
+        print(json.dumps([_run_one(w) for w in work], indent=2))
+        return tag
+
+    # Persist each run's sid ↔ hermes-session-name mapping **as it finishes** (not in
+    # one write at the end), so a crash mid-batch can't strand finalized sessions with
+    # no manifest entry — which the audit would then void as unverifiable.
     results: list[dict] = []
-    if parallel <= 1 or dry_run:
-        results = [_run_one(w) for w in work]
+    if parallel <= 1:
+        for w in work:
+            r = _run_one(w)
+            _append_manifest(tag, r)
+            results.append(r)
     else:
         with _cf.ThreadPoolExecutor(max_workers=parallel) as ex:
-            for r in ex.map(_run_one, work):
+            for r in ex.map(_run_one, work):     # yielded in the main thread → serial writes
+                _append_manifest(tag, r)
                 results.append(r)
                 print(f"  [{r['status']}] {r['item']}", file=sys.stderr)
 
-    if dry_run:
-        print(json.dumps(results, indent=2))
-        return tag
-
-    # persist the sid ↔ hermes-session-name mapping so audit can attribute per run
-    _manifest_path(tag).parent.mkdir(parents=True, exist_ok=True)
-    with open(_manifest_path(tag), "a") as f:
-        for r in results:
-            f.write(json.dumps({k: r.get(k) for k in
-                     ("item", "sid", "session_name", "ticker", "date", "rep",
-                      "status")}) + "\n")
-
     n_void = audit(tag)
     print(f"\nbatch {tag} done: {sum(r['status']=='ok' for r in results)}/{len(results)} "
-          f"agents ok, {n_void} sessions voided by audit\n", file=sys.stderr)
+          f"agents ok, {n_void} sessions voided by audit", file=sys.stderr)
+
+    # Loud guard: if (nearly) every finalized session voided as *unverifiable*, the
+    # hermes export / --continue contract almost certainly isn't satisfied — the report
+    # below would be meaningless (n≈0). Say so, actionably, instead of printing zeros.
+    n_complete, n_unverif = _void_stats(tag)
+    if n_complete and n_unverif >= n_complete:
+        print(f"\n🛑 ALL {n_complete} finalized sessions voided as UNVERIFIABLE. The "
+              "`hermes sessions export`/`--continue` audit contract is likely not\n"
+              "   satisfied on this hermes build — the report below is meaningless. Run "
+              "the 1-setup smoke test in the README and confirm\n   `hermes sessions "
+              "export --session-id batchsim-… -` returns tool calls before trusting a "
+              "batch.\n", file=sys.stderr)
+
     _print_batch_report(tag)
     return tag
+
+
+def _append_manifest(tag: str, result: dict) -> None:
+    p = _manifest_path(tag)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "a") as f:
+        f.write(json.dumps({k: result.get(k) for k in
+                 ("item", "sid", "session_name", "ticker", "date", "rep",
+                  "status")}) + "\n")
+
+
+def _void_stats(tag: str) -> tuple[int, int]:
+    """(finalized sessions in batch, of which voided as *unverifiable*)."""
+    n_complete = n_unverif = 0
+    for d in _sessions_for_batch(tag):
+        s = recorder._load_json(d / "session.json", {}) or {}
+        if s.get("status") != "complete":
+            continue
+        n_complete += 1
+        if "unverifiable" in (s.get("void") or ""):
+            n_unverif += 1
+    return n_complete, n_unverif
 
 
 # ───────────────────────────── audit ────────────────────────────────────────
@@ -335,11 +388,32 @@ def _sessions_for_batch(tag: str) -> list[Path]:
     return out
 
 
+def _tool_calls_in(message: dict):
+    """Yield (name, args) for every tool call in a message, tolerant of shape.
+
+    Handles the two common layouts so the audit doesn't go blind on a hermes/schema
+    variation: (1) a top-level ``tool_calls: [{function:{name,arguments}}]`` list, and
+    (2) tool calls embedded in a ``content`` array as ``{type: tool_use|function_call,
+    name, input|arguments}``. Anything unrecognized yields nothing (caller treats an
+    empty result as *unverifiable*, not clean)."""
+    for tc in (message.get("tool_calls") or []):
+        fn = tc.get("function", {}) or {}
+        yield fn.get("name") or tc.get("name"), fn.get("arguments") or tc.get("arguments")
+    content = message.get("content")
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict) and part.get("type") in (
+                "tool_use", "function_call", "tool_call"
+            ):
+                yield part.get("name"), part.get("input") or part.get("arguments")
+
+
 def _parse_export(export_text: str) -> Optional[str]:
     """Extract *only the executed tool-call commands* from a `hermes sessions export`
     dump — never the assistant's prose. The prose quotes the rules (which name
     `_sealed.jsonl`, `step start`, …) on every compliant run, so scanning it would
-    false-positive; the tool-call arguments are what the agent actually executed."""
+    false-positive; the tool-call arguments are what the agent actually executed.
+    Returns None if no tool calls were found (the session is then unverifiable)."""
     parts: list[str] = []
     for line in export_text.splitlines():
         line = line.strip()
@@ -350,16 +424,22 @@ def _parse_export(export_text: str) -> Optional[str]:
         except json.JSONDecodeError:
             continue
         for m in obj.get("messages", []):
-            for tc in (m.get("tool_calls") or []):
-                fn = tc.get("function", {}) or {}
-                parts.append(str(fn.get("name", "")))
-                parts.append(str(fn.get("arguments", "")))
+            for name, args in _tool_calls_in(m):
+                if name is not None:
+                    parts.append(str(name))
+                if args is not None:
+                    parts.append(str(args))
     return "\n".join(parts) if parts else None
 
 
 def _agent_commands(session_name: str) -> Optional[str]:
     """The concatenated tool-call commands for one hermes session (None if
-    unavailable — e.g. the session was never created or export failed)."""
+    unavailable — session never created, export failed, or schema not understood).
+
+    If the export *succeeded with content* but yielded no tool calls, that almost
+    always means the `hermes sessions export` schema differs from what ``_parse_export``
+    expects — a silent all-void batch. We print the raw export head to stderr so the
+    contract mismatch is diagnosable rather than invisible (see README smoke test)."""
     try:
         proc = subprocess.run(
             ["hermes", "sessions", "export", "--session-id", session_name, "-"],
@@ -369,7 +449,11 @@ def _agent_commands(session_name: str) -> Optional[str]:
         return None
     if proc.returncode != 0 or not proc.stdout.strip():
         return None
-    return _parse_export(proc.stdout)
+    commands = _parse_export(proc.stdout)
+    if commands is None:
+        print(f"⚠ audit: export for {session_name} had content but no parseable tool "
+              f"calls — schema mismatch? raw head:\n{proc.stdout[:500]}", file=sys.stderr)
+    return commands
 
 
 def _scan_commands(commands: str) -> Optional[str]:

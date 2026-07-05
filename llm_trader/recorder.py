@@ -1,7 +1,8 @@
 """Session recorder — turns a TRADE_SIMULATOR run into web-viewable artifacts.
 
 A simulation session is a folder
-``simulations/{YYYYMMDDHHMMSS}-{TICKER}/`` (real wall-clock ts) holding the raw
+``simulations/{YYYYMMDDHHMMSS}-{TICKER}-{hex}/`` (real wall-clock ts + a random
+suffix so concurrent same-ticker runs can't collide) holding the raw
 replay stream, the agent's per-turn decisions, and — after ``finalize`` — a set of
 JSON files the viewer renders. See ``SIMULATION_VIEWER_SPEC.md`` for the contract.
 
@@ -875,8 +876,11 @@ def report_by_version(
         b["wins"] += 1 if pnl.get("win") else 0
         b["pnl"] += pnl.get("realized_pnl") or 0.0
         b["r_sum"] += pnl.get("r_multiple") or 0.0
+        # capture ("how much of the up-move you kept") is only meaningful on WINS —
+        # a loser has negative capture, which would drag the cohort average into
+        # nonsense. Average it over winners only.
         cap = pnl.get("mfe_capture")
-        if cap is not None:
+        if cap is not None and pnl.get("win"):
             b["cap_sum"] += cap
             b["cap_n"] += 1
 

@@ -9,7 +9,7 @@ TradingView**. There is **no exit / P&L / win-rate simulation** — see `SPEC.md
 
 ## Run
 
-All commands from the monorepo root (`/Users/shtylenko/Hermes/projects`) with the
+All commands from the monorepo root (`/Users/shtylenko/Projects`) with the
 repo-root `.env` loaded (Finnhub key + marketdata provider keys):
 
 ```bash
@@ -129,20 +129,22 @@ python3 -m trading.llm_trader.batchsim run \
 
 `run` pins the archived `skills/archive/TRADE_SIMULATOR@<version>.md` (via
 `recorder init --pin-version … --batch …`, which stamps read-only — no version bump),
-names each agent's hermes session so it's addressable, then runs a **post-hoc `audit`**
-that exports each session's structured **tool-call commands** (`hermes sessions export`)
-and voids any run whose *executed commands* show look-ahead (read `_sealed.jsonl`,
-called `replay`, re-ran `step start`). It scans the commands, **not** the agent's prose
-(which quotes the rules on every compliant run), and voids as *unverifiable* any run
-whose command log can't be retrieved. Finally it prints `recorder report --batch <tag>`
-(win% / P&L / avg-R / MFE-capture, voided runs excluded). Change a rule → skill
-auto-bumps to `2.0.3` → run the **same holdout** on `2.0.3` → the report tells you
-whether it helped, net of luck.
+spawns a headless agent per setup, then runs a **post-hoc `audit`**. hermes assigns
+each `-z` run its own opaque session id (it can't be named or forced), so the audit
+locates each run's session by the **unique recorder SDIR** it contains — scanning
+recent `hermes sessions list` ids and `hermes sessions export`-ing candidates until
+every run is matched. It then voids any run whose *executed tool-call commands* show
+look-ahead (read `_sealed.jsonl`, called `replay`, re-ran `step start`). It scans the
+structured commands, **not** the agent's prose (which quotes the rules on every
+compliant run), and voids as *unverifiable* any run whose session can't be located.
+Finally it prints `recorder report --batch <tag>` (win% / P&L / avg-R / MFE-capture,
+voided runs excluded). Change a rule → skill auto-bumps to `2.0.3` → run the **same
+holdout** on `2.0.3` → the report tells you whether it helped, net of luck.
 
-> First real run: smoke-test with one setup (`--repeats 1`, a 1-line testset) and
-> confirm `hermes sessions export --session-id batchsim-…` returns that agent's tool
-> calls, since the audit's addressability depends on `--continue <name>` creating a
-> retrievable session.
+> First real run: smoke-test with one setup (`--repeats 1`, a 1-line testset). `run`
+> prints a loud warning if it can't locate any session's commands (the `hermes
+> sessions export` contract not holding on your build) instead of silently reporting
+> `n=0`. Confirm the report shows `n=1` and the run is not voided as *unverifiable*.
 
 ## Tests
 

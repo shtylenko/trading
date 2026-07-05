@@ -69,12 +69,6 @@ def _fake_session(root, tag, sid="20250102000000-TK-abc123", ticker="TK",
     return d
 
 
-def _manifest(root, tag, sid, session_name):
-    p = root / "_batch" / tag / "manifest.jsonl"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"sid": sid, "session_name": session_name}) + "\n")
-
-
 # --- the false-positive fix: scan only executed commands, never prose ---
 
 def test_parse_export_extracts_only_tool_call_commands():
@@ -101,10 +95,10 @@ def test_scan_commands_flags_real_peek_but_not_prose():
 def _audit_with_commands(tmp_path, monkeypatch, tag, commands):
     monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
     monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
-    monkeypatch.setattr(batchsim, "_agent_commands", lambda name: commands)
     sid = "20250102000000-TK-abc123"
     d = _fake_session(tmp_path, tag, sid=sid)
-    _manifest(tmp_path, tag, sid, "batchsim-x")
+    # stub the hermes-export correlation with a canned command map for this sid
+    monkeypatch.setattr(batchsim, "_resolve_batch_commands", lambda sids: {sid: commands})
     return d
 
 
@@ -127,6 +121,33 @@ def test_audit_passes_clean_commands(tmp_path, monkeypatch):
     assert "void" not in json.loads((d / "session.json").read_text())
     rows = recorder.report_by_version(batch="b3")
     assert rows and rows[0]["n"] == 1 and rows[0]["n_void"] == 0
+
+
+def test_resolve_batch_commands_matches_session_by_sid(monkeypatch):
+    # two runs; each hermes session's export contains that run's unique SDIR
+    sid_a, sid_b = "20250101090000-AAA-111111", "20250101090100-BBB-222222"
+    exports = {
+        "20250101_090005_aaa": json.dumps({"messages": [
+            {"role": "tool", "content": f"session {sid_a} finalized"},
+            {"role": "assistant", "tool_calls": [{"function": {"name": "terminal",
+             "arguments": '{"command": "step next"}'}}]}]}),
+        "20250101_090105_bbb": json.dumps({"messages": [
+            {"role": "tool", "content": f"session {sid_b} finalized"},
+            {"role": "assistant", "tool_calls": [{"function": {"name": "terminal",
+             "arguments": '{"command": "cat _sealed.jsonl"}'}}]}]}),
+    }
+    monkeypatch.setattr(batchsim, "_recent_session_ids", lambda limit: list(exports))
+    monkeypatch.setattr(batchsim, "_export_session", lambda hid: exports.get(hid))
+    got = batchsim._resolve_batch_commands([sid_a, sid_b])
+    assert "step next" in got[sid_a]
+    assert batchsim._scan_commands(got[sid_a]) is None          # clean
+    assert batchsim._scan_commands(got[sid_b]) is not None      # peeked
+
+
+def test_resolve_batch_commands_unfound_is_none(monkeypatch):
+    monkeypatch.setattr(batchsim, "_recent_session_ids", lambda limit: [])
+    got = batchsim._resolve_batch_commands(["20250101090000-AAA-111111"])
+    assert got["20250101090000-AAA-111111"] is None            # → audited as unverifiable
 
 
 def test_extract_sid_prefers_anchor_over_stray_path():

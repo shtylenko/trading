@@ -241,10 +241,10 @@ def _run_one(work: dict) -> dict:
     name = work["session_name"]
     log_path = log_dir / f"{name}.log"
 
-    # --continue names the hermes session so `sessions export --session-id <name>`
-    # can later retrieve exactly this agent's structured tool calls for the audit.
-    cmd = ["hermes", "-z", work["prompt"], "--yolo", "-m", work["model"],
-           "--continue", name]
+    # hermes assigns its own opaque session id (it can't be forced), so the audit
+    # finds this run's session afterward by the unique recorder SDIR it contains
+    # (see _resolve_batch_commands) rather than by a name here.
+    cmd = ["hermes", "-z", work["prompt"], "--yolo", "-m", work["model"]]
     if work.get("dry_run"):
         return {"item": work["item"], "status": "dry-run", "cmd": cmd,
                 "session_name": name, "sid": None}
@@ -432,28 +432,70 @@ def _parse_export(export_text: str) -> Optional[str]:
     return "\n".join(parts) if parts else None
 
 
-def _agent_commands(session_name: str) -> Optional[str]:
-    """The concatenated tool-call commands for one hermes session (None if
-    unavailable — session never created, export failed, or schema not understood).
+# a hermes cli session id, e.g. 20260705_150340_e347bb
+_HERMES_ID_RE = re.compile(r"\d{8}_\d{6}_[0-9a-f]{6}")
 
-    If the export *succeeded with content* but yielded no tool calls, that almost
-    always means the `hermes sessions export` schema differs from what ``_parse_export``
-    expects — a silent all-void batch. We print the raw export head to stderr so the
-    contract mismatch is diagnosable rather than invisible (see README smoke test)."""
+
+def _recent_session_ids(limit: int) -> list[str]:
+    """Most-recent hermes cli session ids (newest first), parsed from `sessions list`.
+
+    We can't force or predict the id hermes assigns a `-z` run (--continue names
+    nothing, --pass-session-id doesn't set it), so the audit correlates a run to its
+    session by the unique recorder SDIR the session contains — starting from the recent
+    ids here."""
     try:
         proc = subprocess.run(
-            ["hermes", "sessions", "export", "--session-id", session_name, "-"],
+            ["hermes", "sessions", "list", "--source", "cli", "--limit", str(limit)],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return []
+    return _HERMES_ID_RE.findall(proc.stdout or "")
+
+
+def _export_session(session_id: str) -> Optional[str]:
+    try:
+        proc = subprocess.run(
+            ["hermes", "sessions", "export", "--session-id", session_id, "-"],
             capture_output=True, text=True, timeout=60,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return None
-    if proc.returncode != 0 or not proc.stdout.strip():
-        return None
-    commands = _parse_export(proc.stdout)
-    if commands is None:
-        print(f"⚠ audit: export for {session_name} had content but no parseable tool "
-              f"calls — schema mismatch? raw head:\n{proc.stdout[:500]}", file=sys.stderr)
-    return commands
+    return proc.stdout if (proc.returncode == 0 and proc.stdout.strip()) else None
+
+
+def _resolve_batch_commands(sids: list[str]) -> dict[str, Optional[str]]:
+    """Map each recorder session id → its agent's executed tool-call commands (or None
+    if its hermes session can't be found). Finds the session by the SDIR it contains
+    (globally unique, so this is correct even under parallelism), scanning recent
+    hermes sessions and stopping once every sid is matched."""
+    result: dict[str, Optional[str]] = {sid: None for sid in sids}
+    remaining = set(s for s in sids if s)
+    if not remaining:
+        return result
+    saw_content = False
+    for hid in _recent_session_ids(limit=max(20, 3 * len(sids))):
+        if not remaining:
+            break
+        text = _export_session(hid)
+        if not text:
+            continue
+        matched = [s for s in remaining if s in text]
+        if not matched:
+            continue
+        saw_content = True
+        cmds = _parse_export(text)
+        if cmds is None:
+            print(f"⚠ audit: hermes session {hid} matched a run but yielded no parseable "
+                  f"tool calls — export schema mismatch? head:\n{text[:400]}", file=sys.stderr)
+        for s in matched:
+            result[s] = cmds
+            remaining.discard(s)
+    if remaining and not saw_content:
+        print(f"⚠ audit: could not locate hermes sessions for {len(remaining)} run(s) by "
+              "SDIR — `hermes sessions export` contract may not hold (see README smoke "
+              "test); those runs will be voided as unverifiable.", file=sys.stderr)
+    return result
 
 
 def _scan_commands(commands: str) -> Optional[str]:
@@ -473,20 +515,18 @@ def audit(tag: str) -> int:
     """Void any session in the batch whose executed tool-call commands show look-ahead
     or a determinism break, or that can't be verified. Returns the number voided.
 
-    The command source is the structured `hermes sessions export` for the run's named
-    session (mapped by recorder-session-id via the batch manifest) — NOT the free-form
+    The command source is the structured `hermes sessions export` tool calls for each
+    run's session (located by the unique SDIR it contains) — NOT the free-form
     transcript, so the agent quoting its own rules no longer false-positives. A session
     with no retrievable command log is voided as *unverifiable* rather than trusted.
     """
-    name_by_sid = {e["sid"]: e.get("session_name")
-                   for e in _load_manifest(tag) if e.get("sid")}
+    sessions = [d for d in _sessions_for_batch(tag)
+                if (recorder._load_json(d / "session.json", {}) or {}).get("status") == "complete"]
+    cmd_map = _resolve_batch_commands([d.name for d in sessions])
     voided = 0
-    for d in _sessions_for_batch(tag):
+    for d in sessions:
         session = recorder._load_json(d / "session.json", {}) or {}
-        if session.get("status") != "complete":
-            continue
-        session_name = name_by_sid.get(d.name)
-        commands = _agent_commands(session_name) if session_name else None
+        commands = cmd_map.get(d.name)
         reason = (
             "no agent command log to verify (unverifiable)"
             if commands is None else _scan_commands(commands)

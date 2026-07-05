@@ -190,6 +190,28 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
                 self._send_json({"error": str(e)}, 500)
             return
 
+        if path == "/api/batches":
+            try:
+                from . import recorder
+                self._send_json({"batches": recorder.list_batches()})
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
+        if path.startswith("/api/batch/"):
+            # /api/batch/<tag> — tag charset is the same as a session id (no `..`)
+            parts = [p for p in path.split("/") if p]
+            tag = _safe_session_id(parts[2]) if len(parts) >= 3 else None
+            if not tag:
+                self._send_json({"error": "bad batch tag"}, 400)
+                return
+            try:
+                from . import recorder
+                self._send_json(recorder.get_batch_view(tag))
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
         if path.startswith("/api/session/"):
             sid = self._get_session_id(path)
             if not sid:

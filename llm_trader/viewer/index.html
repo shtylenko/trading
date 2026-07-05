@@ -12,15 +12,16 @@
     <!-- Sidebar -->
     <aside id="sidebar">
       <div class="sidebar-header">
-        <div>
-          <strong>Sessions</strong>
-          <span id="session-count" class="muted small"></span>
+        <div class="tabs">
+          <button id="tab-sessions" class="tab active">Sessions <span id="session-count" class="muted small"></span></button>
+          <button id="tab-batches" class="tab">Batches <span id="batch-count" class="muted small"></span></button>
         </div>
         <div class="sidebar-actions">
           <button id="refresh-list-btn" class="small-btn" title="Refresh list">↻</button>
         </div>
       </div>
       <div id="session-list" class="session-list"></div>
+      <div id="batch-list" class="session-list hidden"></div>
       <div class="sidebar-footer muted small">
         Click = open &nbsp; Cmd/Ctrl+Click = new tab
       </div>
@@ -32,6 +33,9 @@
         Select a session from the sidebar.<br>
         Newest sessions are at the top.
       </div>
+
+      <!-- Batch detail (rendered by app.js) -->
+      <div id="batch-detail" class="hidden"></div>
 
       <div id="session-detail" class="hidden">
         <header id="hdr">

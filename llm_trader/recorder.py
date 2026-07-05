@@ -767,12 +767,70 @@ def _live_pnl_snapshot(sdir: Path) -> Optional[dict]:
     return snapshot
 
 
+def _session_newest_mtime(d: Path) -> float:
+    """Newest write to any live file — the session's real wall-clock last activity."""
+    newest = 0.0
+    for name in ("decisions.jsonl", "stream.jsonl", "session.json"):
+        f = d / name
+        if f.exists():
+            newest = max(newest, f.stat().st_mtime)
+    return newest
+
+
+def _session_entry(d: Path, s: dict) -> dict:
+    """Lightweight summary of one session folder (for the list + batch views)."""
+    # Last activity = newest live-file write as real wall-clock time (NOT the last
+    # decision's historical bar clock like "10:23", which would sort nonsensically).
+    newest_mtime = _session_newest_mtime(d)
+    last_ts = (
+        datetime.fromtimestamp(newest_mtime).isoformat(timespec="seconds")
+        if newest_mtime
+        else s.get("finalized_ts") or s.get("real_run_ts")
+    )
+
+    status = s.get("status", "running")
+    # A "running" session whose files haven't changed in a while was almost certainly
+    # abandoned (crash / closed terminal) — flag it so the UI can distinguish it from
+    # a live one instead of showing it green forever.
+    stale = (
+        status != "complete"
+        and newest_mtime > 0
+        and (time.time() - newest_mtime) > _STALE_AFTER_S
+    )
+
+    entry = {
+        "id": s.get("id") or d.name,
+        "ticker": s.get("ticker"),
+        "historical_date": s.get("historical_date"),
+        "real_run_ts": s.get("real_run_ts"),
+        "mode": s.get("mode", "simulated"),
+        "status": status,
+        "stale": stale,
+        "result": s.get("result"),
+        "last_activity": last_ts,
+        # batch attribution (null for ad-hoc sessions) so the UI can group / filter
+        "batch": s.get("batch"),
+        "skill_version": (s.get("skill") or {}).get("version"),
+        "void": s.get("void"),
+    }
+
+    # For running sessions, include a current PnL snapshot (mtime-cached).
+    if status != "complete":
+        snap = _live_pnl_snapshot(d)
+        if snap:
+            entry["live_pnl"] = snap
+
+    return entry
+
+
 def list_sessions() -> list[dict]:
     """Return lightweight info for every session folder (newest first)."""
     if not SIM_ROOT.exists():
         return []
     out = []
     for d in sorted(SIM_ROOT.iterdir(), reverse=True):   # newest first by folder ts
+        if d.name.startswith("_"):
+            continue                                     # skip _batch/ bookkeeping
         sess_file = d / "session.json"
         if not sess_file.exists():
             continue
@@ -780,51 +838,115 @@ def list_sessions() -> list[dict]:
             s = json.loads(sess_file.read_text())
         except Exception:
             continue
-
-        # Last activity = newest write to any live file, as real wall-clock time
-        # (NOT the last decision's historical bar clock like "10:23", which would
-        # sort/display nonsensically next to real timestamps).
-        newest_mtime = 0.0
-        for name in ("decisions.jsonl", "stream.jsonl", "session.json"):
-            f = d / name
-            if f.exists():
-                newest_mtime = max(newest_mtime, f.stat().st_mtime)
-        last_ts = (
-            datetime.fromtimestamp(newest_mtime).isoformat(timespec="seconds")
-            if newest_mtime
-            else s.get("finalized_ts") or s.get("real_run_ts")
-        )
-
-        status = s.get("status", "running")
-        # A "running" session whose files haven't changed in a while was almost
-        # certainly abandoned (crash / closed terminal) — flag it so the UI can
-        # distinguish it from a live one instead of showing it green forever.
-        stale = (
-            status != "complete"
-            and newest_mtime > 0
-            and (time.time() - newest_mtime) > _STALE_AFTER_S
-        )
-
-        entry = {
-            "id": s.get("id") or d.name,
-            "ticker": s.get("ticker"),
-            "historical_date": s.get("historical_date"),
-            "real_run_ts": s.get("real_run_ts"),
-            "mode": s.get("mode", "simulated"),
-            "status": status,
-            "stale": stale,
-            "result": s.get("result"),
-            "last_activity": last_ts,
-        }
-
-        # For running sessions, include a current PnL snapshot (mtime-cached).
-        if entry["status"] != "complete":
-            snap = _live_pnl_snapshot(d)
-            if snap:
-                entry["live_pnl"] = snap
-
-        out.append(entry)
+        out.append(_session_entry(d, s))
     return out
+
+
+# ───────────────────────────── batches ──────────────────────────────────────
+
+BATCH_ROOT = SIM_ROOT / "_batch"
+
+
+def _batch_meta(tag: str) -> dict:
+    """Metadata a `batchsim run` writes at start/finish (planned count, version,
+    model, status). Empty dict if the batch predates metadata or was hand-audited."""
+    return _load_json(BATCH_ROOT / tag / "batch.json", {}) or {}
+
+
+def _iter_batch_members(tag: str):
+    """Yield (dir, session_dict) for every session folder stamped with this batch."""
+    if not SIM_ROOT.exists():
+        return
+    for d in sorted(SIM_ROOT.iterdir(), reverse=True):
+        if d.name.startswith("_"):
+            continue
+        sf = d / "session.json"
+        if not sf.exists():
+            continue
+        try:
+            s = json.loads(sf.read_text())
+        except Exception:
+            continue
+        if s.get("batch") == tag:
+            yield d, s
+
+
+def list_batches() -> list[dict]:
+    """One summary row per batch cohort (newest activity first), for the UI list.
+
+    A batch is enumerated from its member sessions *and* from any `_batch/<tag>/`
+    metadata (so a just-launched batch with no finalized sessions still shows up).
+    Status prefers the run's own metadata; a `running` batch with no recent session
+    activity is downgraded to `stale` (the runner likely died)."""
+    groups: dict[str, list] = {}
+    if SIM_ROOT.exists():
+        for d in sorted(SIM_ROOT.iterdir(), reverse=True):
+            if d.name.startswith("_"):
+                continue
+            sf = d / "session.json"
+            if not sf.exists():
+                continue
+            try:
+                s = json.loads(sf.read_text())
+            except Exception:
+                continue
+            tag = s.get("batch")
+            if tag:
+                groups.setdefault(tag, []).append((d, s))
+    if BATCH_ROOT.exists():
+        for bd in BATCH_ROOT.iterdir():
+            # include a session-less batch dir only if a real run recorded metadata
+            # (batch.json) — this shows a just-launched batch before any session
+            # finalizes, while skipping empty leftover dirs from old dry-runs/tests.
+            if bd.is_dir() and (bd / "batch.json").exists():
+                groups.setdefault(bd.name, [])
+
+    out = []
+    for tag, items in groups.items():
+        meta = _batch_meta(tag)
+        n_total = len(items)
+        n_complete = sum(1 for _, s in items if s.get("status") == "complete")
+        n_void = sum(1 for _, s in items if s.get("void"))
+        newest = max((_session_newest_mtime(d) for d, _ in items), default=0.0)
+        last = (
+            datetime.fromtimestamp(newest).isoformat(timespec="seconds")
+            if newest else meta.get("finished_ts") or meta.get("started_ts")
+        )
+        planned = meta.get("planned") or n_total
+        status = meta.get("status") or (
+            "complete" if (n_total and n_complete == n_total) else "running"
+        )
+        if status == "running" and newest > 0 and (time.time() - newest) > _STALE_AFTER_S:
+            status = "stale"
+        rep = report_by_version(batch=tag)
+        out.append({
+            "tag": tag,
+            "version": meta.get("version") or (rep[0]["version"] if rep else None),
+            "model": meta.get("model"),
+            "status": status,
+            "planned": planned,
+            "n_total": n_total,
+            "n_complete": n_complete,
+            "n_void": n_void,
+            "started_ts": meta.get("started_ts"),
+            "finished_ts": meta.get("finished_ts"),
+            "last_activity": last,
+            "report": rep,
+        })
+    out.sort(key=lambda b: (b.get("last_activity") or b.get("started_ts") or ""), reverse=True)
+    return out
+
+
+def get_batch_view(tag: str) -> dict:
+    """Detail for one batch: its metadata, the by-version aggregate report, and the
+    member runs (each a session summary the UI can link straight into)."""
+    members = [_session_entry(d, s) for d, s in _iter_batch_members(tag)]
+    return {
+        "tag": tag,
+        "meta": _batch_meta(tag),
+        "report": report_by_version(batch=tag),
+        "sessions": members,
+    }
 
 
 # ───────────────────────────── reporting ────────────────────────────────────

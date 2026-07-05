@@ -291,3 +291,36 @@ header {
 
 #error { position: fixed; inset: 16px; padding: 16px; background: #2a1414;
   border: 1px solid var(--red); border-radius: 8px; color: #ffd7d4; white-space: pre-wrap; }
+
+/* Sidebar tabs (Sessions | Batches) */
+.tabs { display: flex; gap: 4px; }
+.tab {
+  font: inherit; font-weight: 600; font-size: 12px;
+  padding: 3px 9px; border: 1px solid var(--line); border-radius: 5px;
+  background: var(--panel); color: var(--muted); cursor: pointer;
+}
+.tab.active { color: var(--txt); border-color: var(--accent); background: #1c2433; }
+.tab:hover { color: var(--txt); }
+
+/* Batch cards in the sidebar (reuse .sess-card) */
+.batch-line { display: flex; justify-content: space-between; gap: 8px;
+  font-size: 11px; margin-top: 3px; color: var(--muted); }
+.batch-prog { font-size: 11px; margin-top: 4px; color: var(--txt); }
+.bar { height: 4px; border-radius: 2px; background: #232a34; overflow: hidden; margin-top: 4px; }
+.bar > span { display: block; height: 100%; background: var(--accent); }
+.bar.done > span { background: var(--green); }
+
+/* Batch detail (main area) */
+#batch-detail { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; }
+.bd-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.bd-head h2 { margin: 0; font-size: 18px; letter-spacing: .3px; }
+.bd-meta { color: var(--muted); font-size: 12px; margin: 6px 0 16px; }
+.bd-section { font-size: 13px; font-weight: 700; margin: 18px 0 6px; }
+.bd-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.bd-table th, .bd-table td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--line); }
+.bd-table th { color: var(--muted); font-weight: 600; }
+.bd-table tr.run { cursor: pointer; }
+.bd-table tr.run:hover { background: #1c2330; }
+.bd-table td.pos { color: var(--green); } .bd-table td.neg { color: var(--red); }
+.bd-table td.void { color: #b98; }
+.bd-back { cursor: pointer; }

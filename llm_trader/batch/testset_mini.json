@@ -1,0 +1,32 @@
+{
+  "created": "2026-07-05T14:07:09",
+  "seed": 13,
+  "n": 30,
+  "setups": [
+    {
+      "ticker": "BNAI",
+      "date": "2026-01-02",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 4060927.0,
+      "gap_pct": 7.76
+    },
+    {
+      "ticker": "POLA",
+      "date": "2026-03-31",
+      "time_et": "09:50",
+      "pattern": "acd_orb",
+      "float_shares": 2830078.0,
+      "gap_pct": 17.44
+    },
+    {
+      "ticker": "AQMS",
+      "date": "2025-10-14",
+      "time_et": "11:55",
+      "pattern": "acd_orb",
+      "float_shares": 3035353.0,
+      "gap_pct": 70.53
+    }
+  ],
+  "note": "mini 3-setup smoke subset of testset.json (early / midday / late)"
+}

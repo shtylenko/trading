@@ -154,30 +154,70 @@ def _prompt(version: str, skill_path: Path, tag: str, ticker: str, date: str,
     passed to the agent verbatim); the exact setup is pinned with `--time` so the agent
     trades the same row the holdout snapshotted, not an unseeded same-day pick."""
     time_flag = f" --time {time_et}" if time_et else ""
-    return f"""You are executing ONE trade simulation as an automated backtest. The current
-working directory is the monorepo root.
+    return f"""You are executing ONE trade simulation as an automated backtest.
+
+CRITICAL: hermes terminal tool calls frequently execute in fresh or semi-fresh shells.
+$VARIABLES DO NOT RELIABLY PERSIST across separate tool invocations. You must capture
+$SDIR once, then use the exact quoted form in EVERY subsequent command. The cwd is
+always the monorepo root (the dir that contains `trading/`).
 
 Read and follow EXACTLY the trading rules in this file (read it fully first). Do NOT
 read any other skill file, and do NOT read the live skills/TRADE_SIMULATOR.md:
   {skill_path}
 
 Setup to trade (do NOT choose your own): ticker={ticker}  date={date}  time={time_et}
+Batch tag: {tag}   pinned skill version: {version}
 
-Run these EXACT commands — copy them as written (do not add indentation). They pin the
-skill version, the exact setup, and the batch cohort:
+=== MANDATORY SETUP BLOCK — RUN THIS EXACTLY (paste as one block) ===
 
 SDIR=$(python3 -m trading.llm_trader.recorder init --ticker {ticker} --date {date} --profile small --skill {skill_path} --pin-version {version} --batch {tag})
+echo "CAPTURED_SDIR=$SDIR"
+
 python3 -m trading.llm_trader.step start --session "$SDIR" --ticker {ticker} --date {date}{time_flag}
 
-Then loop: `step next --session "$SDIR"` -> decide per the skill -> `recorder log
---session "$SDIR" --record '{{...}}'` -> repeat until STATUS end. Then:
+# === MANDATORY VERIFICATION (run these immediately after the above) ===
+echo "=== HYGIENE VERIFICATION ==="
+echo "SDIR=$SDIR"
+ls -la "$SDIR" | cat
+test -f "$SDIR/stream.jsonl" && echo "✓ stream.jsonl lives inside $SDIR" || echo "✗ ERROR: stream not under SDIR"
+python3 -m trading.llm_trader.step status --session "$SDIR"
 
+# Explicitly confirm nothing leaked to the project root (the most common failure mode)
+ROOT=$(pwd)
+if ls "$ROOT/_sealed.jsonl" "$ROOT/_step.json" 2>/dev/null; then
+  echo "⚠ PRIVATE FILES APPEARED IN PROJECT ROOT (cwd) — DO NOT TOUCH THEM WITH mv/cp"
+else
+  echo "✓ No _sealed.jsonl or _step.json visible in project root (cwd)"
+fi
+
+=== THE ONLY ALLOWED COMMANDS FOR THE REST OF THE RUN (use these literal forms) ===
+
+Reveal next bar:
+python3 -m trading.llm_trader.step next --session "$SDIR"
+
+Log your decision for the bar you just saw (do this after every bar):
+python3 -m trading.llm_trader.recorder log --session "$SDIR" --record '{{"i":<i>,"time":"<HH:MM>","thought":"...","action":"OBSERVE|ENTER|...","fill_px":null,"shares_delta":null,"stop":null,"note":"..."}}'
+
+When the stream ends and you are done:
 python3 -m trading.llm_trader.recorder finalize --session "$SDIR"
 
-HARD RULES (violating any voids the run): never open a file whose name starts with
-`_`; never run `replay` or `fetch_bars` directly; never re-run `step start`. When
-`finalize` prints its summary, print — as the very last line, exactly — the anchored
-marker `BATCHSIM_SID=$SDIR` and stop.
+As the very last thing you ever output (after finalize), print exactly this line:
+BATCHSIM_SID=$SDIR
+
+=== ABSOLUTE HARD RULES — ANY VIOLATION VOIDS THE ENTIRE RUN (audit detects this) ===
+
+- NEVER place the literal strings "_sealed.jsonl" or "_step.json" (or paths containing them) into ANY command, argument, mv, cat, ls, echo, etc.
+- EVERY call to step or recorder MUST use the exact form --session "$SDIR" (dollar sign + double quotes). No bare commands, no cd into the dir and omitting the flag, no $SDIR without quotes.
+- If verification ever shows private files in the project root or anywhere except inside "$SDIR":
+    - DO NOT "fix" it with mv, cp, ln, or any command that names _sealed.jsonl / _step.json.
+    - DO NOT ls or cat the leaked files.
+    - Simply continue the loop using only the documented --session "$SDIR" commands.
+    - The run may still be usable; touching the private files makes it void.
+- Never run `step start` more than once.
+- Never run `replay`, `fetch_bars`, `fetch_minute_bars`, or anything that bypasses step next.
+- Before a long string of OBSERVE steps, re-verify with: echo "Still using SDIR=$SDIR"; python3 -m trading.llm_trader.step status --session "$SDIR"
+
+Copy the command text literally. Do not improvise paths or "help" the simulation by moving files. The audit will scan every tool-call command you actually executed.
 """
 
 
@@ -316,6 +356,16 @@ def run(
         print(json.dumps([_run_one(w) for w in work], indent=2))
         return tag
 
+    # record the batch so the viewer's Batches list shows it as *running* with an
+    # accurate planned total (len(setups)×repeats, not len(work) which drops resumed
+    # items) from the moment it starts — before any session finalizes.
+    _write_batch_meta(
+        tag, tag=tag, version=version, model=model,
+        planned=len(setups) * repeats, repeats=repeats,
+        started_ts=datetime.now().isoformat(timespec="seconds"),
+        finished_ts=None, status="running",
+    )
+
     # Persist each run's sid ↔ hermes-session-name mapping **as it finishes** (not in
     # one write at the end), so a crash mid-batch can't strand finalized sessions with
     # no manifest entry — which the audit would then void as unverifiable.
@@ -341,15 +391,38 @@ def run(
     # below would be meaningless (n≈0). Say so, actionably, instead of printing zeros.
     n_complete, n_unverif = _void_stats(tag)
     if n_complete and n_unverif >= n_complete:
-        print(f"\n🛑 ALL {n_complete} finalized sessions voided as UNVERIFIABLE. The "
-              "`hermes sessions export`/`--continue` audit contract is likely not\n"
-              "   satisfied on this hermes build — the report below is meaningless. Run "
-              "the 1-setup smoke test in the README and confirm\n   `hermes sessions "
-              "export --session-id batchsim-… -` returns tool calls before trusting a "
-              "batch.\n", file=sys.stderr)
+        print(f"\n🛑 ALL {n_complete} finalized sessions voided as UNVERIFIABLE — the "
+              "audit could not locate any run's hermes session by its SDIR.\n"
+              "   The `hermes sessions list`/`export` contract likely differs on this "
+              "build; the report below is meaningless. Run the 1-setup\n   smoke test in "
+              "the README and confirm `hermes sessions export` returns tool calls before "
+              "trusting a batch.\n", file=sys.stderr)
 
+    _write_batch_meta(
+        tag, status="complete", n_void=n_void,
+        finished_ts=datetime.now().isoformat(timespec="seconds"),
+    )
     _print_batch_report(tag)
     return tag
+
+
+def _batch_meta_path(tag: str) -> Path:
+    return BATCH_LOGS / tag / "batch.json"
+
+
+def _write_batch_meta(tag: str, **fields) -> None:
+    """Merge fields into the batch's `batch.json` (drives the viewer's Batches list:
+    planned count, version/model, running↔complete status, timestamps)."""
+    p = _batch_meta_path(tag)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    meta = {}
+    if p.exists():
+        try:
+            meta = json.loads(p.read_text())
+        except json.JSONDecodeError:
+            meta = {}
+    meta.update(fields)
+    p.write_text(json.dumps(meta, indent=2))
 
 
 def _append_manifest(tag: str, result: dict) -> None:

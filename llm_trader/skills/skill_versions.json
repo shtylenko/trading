@@ -12,5 +12,9 @@
     "bumped_from": "2.0.1",
     "content_hash": "sha256:e0be2db9",
     "first_seen": "2026-07-04T23:00:56"
+  },
+  "2.0.3": {
+    "content_hash": "sha256:da318bc6",
+    "first_seen": "2026-07-05T16:10:03"
   }
 }

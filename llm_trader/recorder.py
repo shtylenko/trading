@@ -32,6 +32,7 @@ import json
 import secrets
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -263,6 +264,7 @@ def init(
     mode: str = "simulated",
     pin_version: Optional[str] = None,
     batch: Optional[str] = None,
+    session: Optional[str] = None,
     root: Path = SIM_ROOT,
     now: Optional[datetime] = None,
 ) -> Path:
@@ -277,8 +279,8 @@ def init(
     file (``skills/archive/TRADE_SIMULATOR@2.0.2.md``). The session is stamped exactly
     with that version + the archived file's hash, and ``resolve_version`` is **skipped
     entirely** — a backtest must never bump the version or mutate the registry/archive.
-    ``batch`` tags the session so re-runs of one version stay distinguishable
-    (``report --batch <tag>``).
+    ``batch`` or ``session`` tags the run. Use ``session`` for top-level grouping
+    (live trading day or simulation batch). ``batch`` kept for backward compat.
     """
     now = now or datetime.now()
     # A short random suffix makes the id collision-proof: under batch parallelism two
@@ -318,7 +320,8 @@ def init(
         "historical_date": date,
         "real_run_ts": now.isoformat(timespec="seconds"),
         "skill": skill_meta,
-        "batch": batch,   # backtest cohort tag (None for ad-hoc/live runs)
+        "batch": batch,   # legacy
+        "session": session or batch,  # top-level session (live day or batch tag)
         "config": {
             "seed": seed,
             "profile": profile,
@@ -825,21 +828,62 @@ def _session_entry(d: Path, s: dict) -> dict:
 
 
 def list_sessions() -> list[dict]:
-    """Return lightweight info for every session folder (newest first)."""
-    if not SIM_ROOT.exists():
-        return []
+    """Return top-level sessions (live or simulated batches). New primary grouping."""
+    groups: dict[str, list] = defaultdict(list)
+    if SIM_ROOT.exists():
+        for d in sorted(SIM_ROOT.iterdir(), reverse=True):
+            if d.name.startswith("_"):
+                continue
+            sf = d / "session.json"
+            if not sf.exists():
+                continue
+            try:
+                s = json.loads(sf.read_text())
+            except Exception:
+                continue
+            sid = s.get("session") or s.get("batch")
+            if not sid:
+                sid = s.get("id") or d.name  # ungrouped leaf as its own session
+            groups[sid].append((d, s))
     out = []
-    for d in sorted(SIM_ROOT.iterdir(), reverse=True):   # newest first by folder ts
-        if d.name.startswith("_"):
-            continue                                     # skip _batch/ bookkeeping
-        sess_file = d / "session.json"
-        if not sess_file.exists():
-            continue
-        try:
-            s = json.loads(sess_file.read_text())
-        except Exception:
-            continue
-        out.append(_session_entry(d, s))
+    for sid, items in groups.items():
+        modes = {ss.get("mode", "simulated") for _, ss in items}
+        sess_type = "live" if "live" in modes else "simulated"
+        total_pnl = 0.0
+        n_trades = 0
+        n_wins = 0
+        tickers = set()
+        last_activity = None
+        for d, ss in items:
+            res = ss.get("result") or {}
+            tickers.add(ss.get("ticker"))
+            if res.get("traded"):
+                total_pnl += res.get("realized_pnl", 0) or 0.0
+                n_trades += res.get("n_fills", 1) or 0
+                if res.get("win"):
+                    n_wins += 1
+            ts = ss.get("finalized_ts") or ss.get("real_run_ts")
+            if ts and (not last_activity or ts > last_activity):
+                last_activity = ts
+        n_tickers = len(tickers)
+        win_rate = round((n_wins / max(n_trades, 1)) * 100, 1) if n_trades > 0 else None
+        # Use the batch tag as human name if present, else the id
+        name = None
+        for _, ss in items:
+            if ss.get("batch"):
+                name = ss.get("batch")
+                break
+        out.append({
+            "id": sid,
+            "name": name or sid,
+            "type": sess_type,
+            "pnl": round(total_pnl, 2),
+            "n_tickers": n_tickers,
+            "n_trades": n_trades,
+            "win_rate": win_rate,
+            "last_activity": last_activity,
+        })
+    out.sort(key=lambda x: (x.get("last_activity") or ""), reverse=True)
     return out
 
 
@@ -869,6 +913,24 @@ def _iter_batch_members(tag: str):
         except Exception:
             continue
         if s.get("batch") == tag:
+            yield d, s
+
+
+def _iter_session_members(sess_id: str):
+    """Yield leaves belonging to a top-level session (by session or batch field)."""
+    if not SIM_ROOT.exists():
+        return
+    for d in sorted(SIM_ROOT.iterdir(), reverse=True):
+        if d.name.startswith("_"):
+            continue
+        sf = d / "session.json"
+        if not sf.exists():
+            continue
+        try:
+            s = json.loads(sf.read_text())
+        except Exception:
+            continue
+        if (s.get("session") == sess_id) or (s.get("batch") == sess_id):
             yield d, s
 
 
@@ -939,13 +1001,60 @@ def list_batches() -> list[dict]:
 
 
 def get_batch_view(tag: str) -> dict:
-    """Detail for one batch: its metadata, the by-version aggregate report, and the
-    member runs (each a session summary the UI can link straight into)."""
-    members = [_session_entry(d, s) for d, s in _iter_batch_members(tag)]
+    """Legacy. Delegates to get_session_view."""
+    return get_session_view(tag)
+
+
+def get_top_session_view(sess_id: str) -> dict:
+    """Detail for a top-level session (batch or live day): list of tickers with aggregates."""
+    tickers: dict[str, dict] = defaultdict(lambda: {
+        "ticker": None,
+        "n_trades": 0,
+        "pnl": 0.0,
+        "wins": 0,
+        "leaf_id": None,
+    })
+    members = []
+    for d, s in _iter_session_members(sess_id):
+        members.append(_session_entry(d, s))
+        t = s.get("ticker")
+        res = s.get("result") or {}
+        td = tickers[t]
+        td["ticker"] = t
+        if res.get("traded"):
+            td["n_trades"] += res.get("n_fills", 1) or 0
+            td["pnl"] += res.get("realized_pnl", 0) or 0.0
+            if res.get("win"):
+                td["wins"] += 1
+        if not td["leaf_id"]:
+            td["leaf_id"] = s.get("id") or d.name
+    ticker_list = []
+    for t, data in tickers.items():
+        n = data["n_trades"]
+        wr = round((data["wins"] / n * 100), 1) if n > 0 else None
+        ticker_list.append({
+            "ticker": t,
+            "n_trades": n,
+            "pnl": round(data["pnl"], 2),
+            "win_rate": wr,
+            "leaf_id": data["leaf_id"],
+        })
+    ticker_list.sort(key=lambda x: x["ticker"])
+    meta = _batch_meta(sess_id) or {}
+    # Try to find a human name (batch tag)
+    name = meta.get("tag") or meta.get("name") or sess_id
+    if name == sess_id:
+        # fallback from leaves
+        for _, ss in members:  # members have the entries
+            if ss.get("batch"):
+                name = ss.get("batch")
+                break
     return {
-        "tag": tag,
-        "meta": _batch_meta(tag),
-        "report": report_by_version(batch=tag),
+        "id": sess_id,
+        "name": name,
+        "meta": meta,
+        "type": "simulated" if meta else "live",
+        "tickers": ticker_list,
         "sessions": members,
     }
 
@@ -1071,7 +1180,8 @@ def build_parser() -> argparse.ArgumentParser:
     pi.add_argument("--pin-version", help="backtest: stamp this exact version "
                     "read-only (skip resolve/bump); pair with --skill = the archived "
                     "TRADE_SIMULATOR@<version>.md")
-    pi.add_argument("--batch", help="backtest cohort tag for this run")
+    pi.add_argument("--batch", help="legacy backtest cohort tag")
+    pi.add_argument("--session", help="top-level session id (live day or sim batch)")
 
     pl = sub.add_parser("log", help="append one decision record")
     pl.add_argument("--session", required=True)
@@ -1099,7 +1209,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         sdir = init(args.ticker, args.date, seed=args.seed, profile=args.profile,
                     delay=args.delay, risk_budget=args.risk_budget,
                     buying_power=args.buying_power, skill=args.skill, mode=args.mode,
-                    pin_version=args.pin_version, batch=args.batch)
+                    pin_version=args.pin_version, batch=args.batch, session=args.session)
         print(str(sdir))
     elif args.cmd == "log":
         log(args.session, json.loads(args.record))

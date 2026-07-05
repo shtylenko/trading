@@ -36,6 +36,7 @@ import concurrent.futures as _cf
 import json
 import random
 import re
+import secrets
 import sqlite3
 import subprocess
 import sys
@@ -167,7 +168,7 @@ def _archived_skill(version: str) -> Path:
     return p
 
 
-def _prompt(version: str, skill_path: Path, tag: str, ticker: str, date: str,
+def _prompt(version: str, skill_path: Path, tag: str, session_id: str, ticker: str, date: str,
             time_et: Optional[str]) -> str:
     """The per-setup task handed to a headless hermes agent. Thin wrapper: it pins the
     *mechanics* (version, batch tag, exact setup) and defers trading logic to the skill.
@@ -188,11 +189,11 @@ read any other skill file, and do NOT read the live skills/TRADE_SIMULATOR.md:
   {skill_path}
 
 Setup to trade (do NOT choose your own): ticker={ticker}  date={date}  time={time_et}
-Batch tag: {tag}   pinned skill version: {version}
+Batch tag: {tag}   Session ID: {session_id}   pinned skill version: {version}
 
 === MANDATORY SETUP BLOCK — RUN THIS EXACTLY (paste as one block) ===
 
-SDIR=$(python3 -m trading.llm_trader.recorder init --ticker {ticker} --date {date} --profile small --skill {skill_path} --pin-version {version} --batch {tag})
+SDIR=$(python3 -m trading.llm_trader.recorder init --ticker {ticker} --date {date} --profile small --skill {skill_path} --pin-version {version} --batch {tag} --session {session_id})
 echo "CAPTURED_SDIR=$SDIR"
 
 python3 -m trading.llm_trader.step start --session "$SDIR" --ticker {ticker} --date {date}{time_flag}
@@ -375,6 +376,9 @@ def run(
     skill_path = _archived_skill(version)
     setups = load_testset(testset)
     tag = tag or f"{version}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    # Top-level session always gets a long unique ID (like leaf session IDs).
+    # The `tag` is a human-readable name/label.
+    session_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}-BATCH-{secrets.token_hex(3)}"
 
     # exact-setup pinning requires time_et on every row; a missing one would silently
     # revert to an unseeded same-day pick (the finding-5 bug). Fail loudly instead.
@@ -396,12 +400,14 @@ def run(
                 "item": f"{su['ticker']}_{su['date']}#r{rep}",
                 "ticker": su["ticker"], "date": su["date"], "rep": rep,
                 "session_name": _session_name(tag, su["ticker"], su["date"], rep),
-                "tag": tag, "model": model, "timeout": timeout, "dry_run": dry_run,
-                "prompt": _prompt(version, skill_path, tag, su["ticker"], su["date"],
+                "tag": tag,
+                "session": session_id,
+                "model": model, "timeout": timeout, "dry_run": dry_run,
+                "prompt": _prompt(version, skill_path, tag, session_id, su["ticker"], su["date"],
                                   su.get("time_et")),
             })
 
-    print(f"batch {tag}: version {version}, {len(setups)} setups × {repeats} "
+    print(f"batch {tag} (session {session_id}): version {version}, {len(setups)} setups × {repeats} "
           f"= {len(work)} runs (parallel {parallel}, model {model})"
           f"{' [DRY RUN]' if dry_run else ''}", file=sys.stderr)
 

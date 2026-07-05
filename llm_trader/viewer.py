@@ -36,10 +36,31 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
+import logging
 import re
 
 PKG_DIR = Path(__file__).resolve().parent
 SIM_ROOT = PKG_DIR / "simulations"
+
+# Set up logging to both console and file
+logger = logging.getLogger("llm_trader.viewer")
+logger.setLevel(logging.INFO)
+
+# Console handler
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+
+# File handler (append mode, in the package dir)
+log_file = PKG_DIR / "viewer.log"
+fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+fh.setLevel(logging.DEBUG)
+fh.setFormatter(formatter)
+logger.addHandler(fh)
+
+logger.info(f"Viewer logging initialized. Log file: {log_file}")
 
 # session ids are ``{YYYYMMDDHHMMSS}-{TICKER}-{hex}`` — restrict to that character set
 # so a crafted id can never escape SIM_ROOT (e.g. ``../../etc``).
@@ -123,7 +144,7 @@ def _start_monitor():
                         last_mtime[sid] = current
                         _sse_broadcast(sid, {"type": "update", "session": sid, "ts": current})
             except Exception:
-                pass
+                logger.debug("Monitor thread error", exc_info=True)
             time.sleep(0.8)  # poll ~1.25 times/sec is plenty for local use
 
     t = threading.Thread(target=monitor, daemon=True)
@@ -136,8 +157,12 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(PKG_DIR), **kwargs)
 
-    def log_message(self, *args, **kwargs):  # noqa: D401 - silence access log
-        pass
+    def log_message(self, format, *args):
+        # Log access requests at INFO level (client IP, request, etc.)
+        logger.info("%s - - [%s] %s" %
+                    (self.client_address[0],
+                     self.log_date_time_string(),
+                     format % args))
 
     # ---------------- API + SSE support ----------------
 
@@ -190,67 +215,63 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
                 sessions = recorder.list_sessions()
                 self._send_json({"sessions": sessions})
             except Exception as e:
-                self._send_json({"error": str(e)}, 500)
-            return
-
-        if path == "/api/batches":
-            try:
-                from . import recorder
-                self._send_json({"batches": recorder.list_batches()})
-            except Exception as e:
-                self._send_json({"error": str(e)}, 500)
-            return
-
-        if path.startswith("/api/batch/"):
-            # /api/batch/<tag> — tag charset is the same as a session id (no `..`)
-            parts = [p for p in path.split("/") if p]
-            tag = _safe_session_id(parts[2]) if len(parts) >= 3 else None
-            if not tag:
-                self._send_json({"error": "bad batch tag"}, 400)
-                return
-            try:
-                from . import recorder
-                self._send_json(recorder.get_batch_view(tag))
-            except Exception as e:
+                logger.exception("Error handling /api/sessions")
                 self._send_json({"error": str(e)}, 500)
             return
 
         if path.startswith("/api/session/"):
+            parts = [p for p in path.split("/") if p]
             sid = self._get_session_id(path)
             if not sid:
                 self._send_json({"error": "bad session id"}, 400)
                 return
-
-            if path.endswith("/state") or path.endswith("/state/"):
+            if len(parts) > 3 and parts[3] in ("state", "events", "finalize"):
+                # leaf detail endpoints: /api/session/<leaf>/state etc.
+                if path.endswith("/state") or path.endswith("/state/"):
+                    try:
+                        from . import recorder
+                        view = recorder.get_session_view(SIM_ROOT / sid)
+                        self._send_json(view)
+                    except Exception as e:
+                        logger.exception("Error handling leaf /api/session/<id>/state")
+                        self._send_json({"error": str(e)}, 500)
+                    return
+                elif path.endswith("/events") or path.endswith("/events/"):
+                    # Server-Sent Events. This handler thread is the SOLE writer to the
+                    # socket: it drains this client's queue (fed by the monitor thread)
+                    # and emits a heartbeat when idle.
+                    self._send_sse_headers()
+                    self.wfile.write(b"event: connected\ndata: {}\n\n")
+                    self.wfile.flush()
+                    q = _register_sse_client(sid)
+                    try:
+                        while True:
+                            try:
+                                data = q.get(timeout=25)
+                            except queue.Empty:
+                                data = b": keep-alive\n\n"
+                            self.wfile.write(data)
+                            self.wfile.flush()
+                    except Exception:
+                        logger.debug("SSE client error or disconnect", exc_info=True)
+                    finally:
+                        _unregister_sse_client(sid, q)
+                    return
+                else:
+                    self._send_json({"error": "not implemented in new model yet"}, 501)
+                    return
+            else:
+                # top-level session detail: /api/session/<sess-id>
                 try:
                     from . import recorder
-                    view = recorder.get_session_view(SIM_ROOT / sid)
-                    self._send_json(view)
+                    self._send_json(recorder.get_top_session_view(sid))
                 except Exception as e:
+                    logger.exception("Error handling /api/session/<id>")
                     self._send_json({"error": str(e)}, 500)
                 return
 
-            if path.endswith("/events") or path.endswith("/events/"):
-                # Server-Sent Events. This handler thread is the SOLE writer to the
-                # socket: it drains this client's queue (fed by the monitor thread)
-                # and emits a heartbeat when idle.
-                self._send_sse_headers()
-                self.wfile.write(b"event: connected\ndata: {}\n\n")
-                self.wfile.flush()
-                q = _register_sse_client(sid)
-                try:
-                    while True:
-                        try:
-                            data = q.get(timeout=25)
-                        except queue.Empty:
-                            data = b": keep-alive\n\n"
-                        self.wfile.write(data)
-                        self.wfile.flush()
-                except Exception:
-                    pass  # client disconnected
-                finally:
-                    _unregister_sse_client(sid, q)
-                return
+        # /api/batches and /api/batch/* removed — use /api/sessions and /api/session/* instead
+        # (internal batch tag logic in recorder/batchsim is kept for resume + metadata)
 
         # Never serve private simulator internals over HTTP (the sealed full-day
         # stream + step cursor). Exposing them would break no-look-ahead.
@@ -290,6 +311,7 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
             session = recorder.finalize(SIM_ROOT / sid, full_day=False)
             self._send_json({"ok": True, "session": session})
         except Exception as e:
+            logger.exception("Error handling /api/session/.../finalize")
             self._send_json({"error": str(e)}, 500)
 
 
@@ -340,6 +362,7 @@ def _pids_listening_on_port(port: int) -> list[int]:
                 current_pid = None
         return pids
     except Exception:
+        logger.debug("Failed to query lsof for port listeners", exc_info=True)
         return []
 
 
@@ -348,7 +371,7 @@ def _kill_listeners_on_port(port: int) -> None:
     pids = _pids_listening_on_port(port)
     if not pids:
         return
-    print(f"Port {port} was in use. Killing previous Python listener(s) {pids} and restarting...")
+    logger.info(f"Port {port} was in use. Killing previous Python listener(s) {pids} and restarting...")
     for pid in pids:
         try:
             os.kill(pid, 15)  # SIGTERM
@@ -376,14 +399,15 @@ def serve(session: Optional[str], port: int = 8765, open_browser: bool = True) -
         url = f"http://127.0.0.1:{port}/viewer/index.html"
         if session:
             url += f"?session={session}"
-        print(f"serving {PKG_DIR} at {url}")
-        print("Ctrl-C to stop.  Default view = session list (newest first).")
+        logger.info(f"serving {PKG_DIR} at {url}")
+        logger.info("Ctrl-C to stop.  Default view = session list (newest first).")
+        logger.info(f"Requests and errors are logged to {log_file}")
         if open_browser:
             threading.Timer(0.4, lambda: webbrowser.open(url)).start()
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
-            print("\nstopped.")
+            logger.info("stopped.")
 
 
 def build_parser() -> argparse.ArgumentParser:

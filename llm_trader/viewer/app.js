@@ -14,9 +14,7 @@ let currentSessionId = null;
 let currentChart = null;
 let currentEventSource = null;
 let pollFallbackTimer = null;
-let activeTab = "sessions";       // "sessions" | "batches"
-let currentBatchTag = null;
-let batchRefreshTimer = null;
+let activeTab = "sessions";
 
 const fmtMoney = (n) => (n == null ? "—" : (n >= 0 ? "+$" : "-$") + Math.abs(n));
 
@@ -38,7 +36,14 @@ function qs(name) {
 
 async function getJSON(url) {
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`${url} → HTTP ${r.status}`);
+  if (!r.ok) {
+    let msg = `${url} → HTTP ${r.status}`;
+    try {
+      const body = await r.json();
+      if (body && body.error) msg += ` - ${body.error}`;
+    } catch {}
+    throw new Error(msg);
+  }
   return r.json();
 }
 
@@ -53,11 +58,15 @@ const fmtFloat = (f) => (f ? (f / 1e6).toFixed(1) + "M" : "n/a");
 
 async function loadAndRenderList() {
   const listEl = document.getElementById("session-list");
+  listEl.style.display = 'block';
+  listEl.classList.remove('hidden');
+  document.getElementById('no-session').classList.add('hidden');
   listEl.innerHTML = `<div class="muted" style="padding:8px">Loading sessions...</div>`;
 
   try {
     const data = await getJSON("/api/sessions");
     const sessions = data.sessions || [];
+    console.log('Sessions from API:', sessions);
 
     document.getElementById("session-count").textContent = `(${sessions.length})`;
 
@@ -67,41 +76,23 @@ async function loadAndRenderList() {
     }
 
     listEl.innerHTML = sessions.map(s => {
-      const status = s.status || "running";
-      const mode = s.mode || "simulated";
-      const isLive = status !== "complete";
-      // an idle "running" session (flagged stale by the server) gets its own badge
-      // so it doesn't masquerade as live forever
-      const isStale = isLive && s.stale;
-      const badgeClass = !isLive ? "complete" : (isStale ? "stale" : "running");
-      const badgeLabel = !isLive ? status : (isStale ? "stale" : status);
+      const type = s.type || "simulated";
+      const isLive = type === "live";
+      const pnlStr = s.pnl != null ? fmtMoney(s.pnl) : "—";
+      const wr = s.win_rate != null ? `${s.win_rate}%` : "—";
+      const badgeClass = isLive ? "live" : "sim";
+      const badgeLabel = isLive ? "live" : "sim";
 
-      let summary = "";
-      if (s.result) {
-        const r = s.result;
-        summary = `${r.traded ? (r.realized_pnl >= 0 ? "+" : "") + "$" + r.realized_pnl + " · " + r.r_multiple + "R" : "no trade"}`;
-      } else if (isStale) {
-        summary = "idle — may be abandoned";
-      } else if (isLive) {
-        if (s.live_pnl) {
-          const lp = s.live_pnl;
-          summary = `realized $${lp.realized_pnl ?? 0}`;
-          if (lp.unrealized != null) summary += ` · uPnL $${lp.unrealized}`;
-        } else {
-          summary = "in progress";
-        }
-      }
-
-      const last = s.last_activity || s.real_run_ts || "";
-
+      const displayId = s.name && s.name !== s.id ? `${escapeHtml(s.name)} (${escapeHtml(s.id)})` : escapeHtml(s.id);
       return `
-        <div class="sess-card" data-id="${s.id}">
+        <div class="sess-card" data-id="${escapeHtml(s.id)}" data-type="top-session">
           <div class="sess-top">
-            <span class="sess-ticker">${s.ticker || "?"}</span>
-            <span class="badge ${badgeClass}">${mode} ${badgeLabel}</span>
+            <span class="sess-ticker">${displayId}</span>
+            <span class="badge ${badgeClass}">${badgeLabel}</span>
           </div>
-          <div class="sess-meta muted">${s.historical_date || ""} · ${last}</div>
-          <div class="sess-summary">${summary}</div>
+          <div class="sess-meta muted">${pnlStr} · ${s.n_tickers} tickers · ${s.n_trades} trades</div>
+          <div class="sess-summary">win ${wr}</div>
+          <div class="sess-meta muted">last ${s.last_activity || "—"}</div>
         </div>`;
     }).join("");
 
@@ -109,243 +100,132 @@ async function loadAndRenderList() {
     listEl.querySelectorAll(".sess-card").forEach(card => {
       const id = card.dataset.id;
 
+      const isTop = card.dataset.type === "top-session";
       card.addEventListener("click", (e) => {
         if (e.metaKey || e.ctrlKey) {
-          // Open in new tab
           window.open(`/viewer/index.html?session=${encodeURIComponent(id)}`, "_blank");
         } else {
-          // Load in current view (SPA) - highlight immediately for responsiveness
           currentSessionId = id;
           highlightCurrentSession();
-          loadSession(id, true);
-          // update URL without reload
+          if (isTop) {
+            loadSessionTickers(id, true);
+          } else {
+            loadSession(id, true);
+          }
           history.replaceState(null, "", `?session=${encodeURIComponent(id)}`);
         }
       });
 
-      // Also support middle click / auxclick for new tab
       card.addEventListener("auxclick", (e) => {
-        if (e.button === 1) { // middle mouse
+        if (e.button === 1) {
           window.open(`/viewer/index.html?session=${encodeURIComponent(id)}`, "_blank");
-          e.preventDefault();
         }
       });
     });
 
-    // Re-apply highlight after (re)rendering the list
     highlightCurrentSession();
   } catch (e) {
     listEl.innerHTML = `<div class="muted" style="padding:8px;color:#f88">Failed to load list: ${e}</div>`;
+    console.error("Failed to load sessions list", e);
   }
+
+  // Extra safety: ensure the list container is visible
+  listEl.style.display = 'block';
+  listEl.classList.remove('hidden');
 }
 
-// ---------- BATCHES ----------
+// (old batches code removed - everything is now under Sessions)
 
 function setTab(tab) {
   activeTab = tab;
   document.getElementById("tab-sessions").classList.toggle("active", tab === "sessions");
-  document.getElementById("tab-batches").classList.toggle("active", tab === "batches");
   document.getElementById("session-list").classList.toggle("hidden", tab !== "sessions");
-  document.getElementById("batch-list").classList.toggle("hidden", tab !== "batches");
-  if (tab === "batches") loadAndRenderBatches();
-  else loadAndRenderList();
+  loadAndRenderList();
 }
 
-function highlightCurrentBatch() {
-  document.querySelectorAll("#batch-list .batch-card").forEach(c =>
-    c.classList.toggle("selected", c.dataset.tag === currentBatchTag));
+// Default to sessions view on load
+setTab("sessions");
+
+// Force an initial render in case top-level call had timing issues
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => loadAndRenderList());
+} else {
+  loadAndRenderList();
 }
 
-function renderBatchCard(b) {
-  const sb = statusBadge(b.status);
-  const pct = b.planned ? Math.round((100 * b.n_complete) / b.planned) : 0;
-  const rep = (b.report && b.report[0]) || null;
-  const summary = (rep && rep.n)
-    ? `win ${rep.win_pct}% · ${fmtMoney(rep.pnl)} · ${rep.avg_r}R`
-    : "no finalized trades yet";
-  const voidTxt = b.n_void ? ` · ${b.n_void} void` : "";
-  return `
-    <div class="sess-card batch-card" data-tag="${escapeHtml(b.tag)}">
-      <div class="sess-top">
-        <span class="sess-ticker">${escapeHtml(b.tag)}</span>
-        <span class="badge ${sb.cls}">${sb.label}</span>
-      </div>
-      <div class="batch-line">
-        <span>${b.version ? "v" + escapeHtml(b.version) : "—"}</span>
-        <span>${escapeHtml(b.model || "")}</span>
-      </div>
-      <div class="batch-prog">${b.n_complete}/${b.planned} done${voidTxt}</div>
-      <div class="bar ${b.status === "complete" ? "done" : ""}"><span style="width:${pct}%"></span></div>
-      <div class="sess-summary">${summary}</div>
-      <div class="sess-meta muted">last ${b.last_activity || "—"}</div>
-    </div>`;
-}
+async function loadSessionTickers(sessionId, updateUrl = false) {
+  const bd = document.getElementById("session-tickers");
+  bd.innerHTML = `<div class="muted" style="padding:16px">Loading tickers for ${escapeHtml(sessionId)}...</div>`;
+  document.getElementById("session-tickers").classList.remove("hidden");
 
-async function loadAndRenderBatches() {
-  const el = document.getElementById("batch-list");
   try {
-    const data = await getJSON("/api/batches");
-    const batches = data.batches || [];
-    document.getElementById("batch-count").textContent = `(${batches.length})`;
-    if (!batches.length) {
-      el.innerHTML = `<div class="muted" style="padding:12px">No batches yet.<br>Run <code>batchsim run</code>.</div>`;
-      return;
-    }
-    el.innerHTML = batches.map(renderBatchCard).join("");
-    el.querySelectorAll(".batch-card").forEach(card => {
-      card.addEventListener("click", () => openBatch(card.dataset.tag, true));
-    });
-    highlightCurrentBatch();
+    const v = await getJSON(`/api/session/${encodeURIComponent(sessionId)}`);
+    renderSessionTickers(v);
   } catch (e) {
-    el.innerHTML = `<div class="muted" style="padding:8px;color:#f88">Failed to load batches: ${e}</div>`;
+    bd.innerHTML = `<div class="muted" style="padding:16px;color:#f88">Failed to load session: ${e}</div>`;
+  }
+
+  if (updateUrl) {
+    history.replaceState(null, "", `?session=${encodeURIComponent(sessionId)}`);
   }
 }
 
-function inferBatchStatus(v) {
-  const ss = v.sessions || [];
+function renderSessionTickers(v) {
+  const bd = document.getElementById("session-tickers");
+  const tickers = v.tickers || [];
   const meta = v.meta || {};
-  if (meta.status === "complete") return "complete";
-  const complete = ss.filter(s => s.status === "complete").length;
-  const planned = meta.planned || ss.length;
-  if (planned && ss.length >= planned && complete >= planned) return "complete";
-  return "running";
-}
+  const type = v.type || "simulated";
 
-async function openBatch(tag, updateUrl = false) {
-  currentBatchTag = tag;
-  // tear down any open session's live stream — we're leaving the session view
-  if (currentEventSource) { currentEventSource.close(); currentEventSource = null; }
-  if (pollFallbackTimer) { clearInterval(pollFallbackTimer); pollFallbackTimer = null; }
-  currentSessionId = null;
-
-  document.getElementById("no-session").classList.add("hidden");
-  document.getElementById("session-detail").classList.add("hidden");
-  document.getElementById("batch-detail").classList.remove("hidden");
-  if (updateUrl) history.replaceState(null, "", `?batch=${encodeURIComponent(tag)}`);
-  highlightCurrentBatch();
-
-  try {
-    const v = await getJSON(`/api/batch/${encodeURIComponent(tag)}`);
-    renderBatchDetail(v);
-    scheduleBatchRefresh(v);
-  } catch (e) {
-    document.getElementById("batch-detail").innerHTML =
-      `<div class="muted" style="padding:16px;color:#f88">Could not load batch ${escapeHtml(tag)}: ${e}</div>`;
-  }
-}
-
-function scheduleBatchRefresh(v) {
-  if (batchRefreshTimer) { clearInterval(batchRefreshTimer); batchRefreshTimer = null; }
-  if (inferBatchStatus(v) === "complete") return;   // nothing left to poll
-  batchRefreshTimer = setInterval(async () => {
-    if (!currentBatchTag) return;
-    try {
-      const nv = await getJSON(`/api/batch/${encodeURIComponent(currentBatchTag)}`);
-      renderBatchDetail(nv);
-      loadAndRenderBatches();                        // keep the sidebar progress fresh
-      if (inferBatchStatus(nv) === "complete") {
-        clearInterval(batchRefreshTimer);
-        batchRefreshTimer = null;
-      }
-    } catch (_) { /* transient */ }
-  }, 5000);
-}
-
-function closeBatch() {
-  currentBatchTag = null;
-  if (batchRefreshTimer) { clearInterval(batchRefreshTimer); batchRefreshTimer = null; }
-  document.getElementById("batch-detail").classList.add("hidden");
-  history.replaceState(null, "", location.pathname);
-  if (!currentSessionId) document.getElementById("no-session").classList.remove("hidden");
-  highlightCurrentBatch();
-}
-
-function renderBatchDetail(v) {
-  const bd = document.getElementById("batch-detail");
-  const meta = v.meta || {};
-  const ss = v.sessions || [];
-  const status = inferBatchStatus(v);
-  const sb = statusBadge(status);
-  const complete = ss.filter(s => s.status === "complete").length;
-  const nvoid = ss.filter(s => s.void).length;
-  const planned = meta.planned || ss.length;
-
-  const metaBits = [
-    meta.version ? `version <b>${escapeHtml(meta.version)}</b>` : null,
-    meta.model ? `model ${escapeHtml(meta.model)}` : null,
-    `${complete}/${planned} complete`,
-    nvoid ? `${nvoid} void` : null,
-    meta.started_ts ? `started ${meta.started_ts}` : null,
-    meta.finished_ts ? `finished ${meta.finished_ts}` : null,
-  ].filter(Boolean).join(" · ");
-
-  const rep = v.report || [];
-  const repRows = rep.length ? rep.map(r => `
-    <tr>
-      <td>${escapeHtml(r.version || "—")}</td>
-      <td>${r.n}</td>
-      <td>${r.win_pct}%</td>
-      <td class="${r.pnl > 0 ? "pos" : r.pnl < 0 ? "neg" : ""}">${fmtMoney(r.pnl)}</td>
-      <td>${r.avg_r}R</td>
-      <td>${r.avg_capture != null ? r.avg_capture : "—"}</td>
-      <td>${r.n_void || 0}</td>
-    </tr>`).join("") : `<tr><td colspan="7" class="muted">no finalized trades yet</td></tr>`;
-
-  const runRows = ss.length ? ss.map(s => {
-    let res = "", cls = "";
-    if (s.void) { res = "VOID: " + escapeHtml((s.void || "").slice(0, 60)); cls = "void"; }
-    else if (s.result && s.result.traded) {
-      res = `${fmtMoney(s.result.realized_pnl)} · ${s.result.r_multiple}R ${s.result.win ? "WIN" : "LOSS"}`;
-      cls = s.result.realized_pnl > 0 ? "pos" : s.result.realized_pnl < 0 ? "neg" : "";
-    } else if (s.status === "complete") { res = "no trade"; }
-    else if (s.stale) { res = "idle — may be abandoned"; }
-    else { res = s.live_pnl ? `running · realized ${fmtMoney(s.live_pnl.realized_pnl || 0)}` : "running"; }
-    const stb = statusBadge(s.status === "complete" ? "complete" : (s.stale ? "stale" : "running"));
-    const ver = s.skill_version || s.version || "—";
-    const init = s.real_run_ts || "";
-    const done = s.finalized_ts || (s.status === "complete" ? s.last_activity : "");
-    return `<tr class="run" data-id="${escapeHtml(s.id)}">
-      <td><b>${escapeHtml(s.ticker || "?")}</b></td>
-      <td>${escapeHtml(s.historical_date || "")}</td>
-      <td>${escapeHtml(ver)}</td>
-      <td class="muted small">${escapeHtml(init)}</td>
-      <td class="muted small">${escapeHtml(done)}</td>
-      <td><span class="badge ${stb.cls}">${stb.label}</span></td>
-      <td class="${cls}">${res}</td>
-    </tr>`;
-  }).join("") : `<tr><td colspan="7" class="muted">no runs yet</td></tr>`;
-
-  bd.innerHTML = `
+  let html = `
     <div class="bd-head">
-      <span class="small-btn bd-back" id="bd-back">← back</span>
-      <h2>${escapeHtml(v.tag)}</h2>
-      <span class="badge ${sb.cls}">${sb.label}</span>
+      <span class="small-btn bd-back" id="bd-back">← back to sessions</span>
+      <h2>${escapeHtml(v.name || v.id)}</h2>
+      <span class="badge ${type === "live" ? "live" : "sim"}">${type}</span>
     </div>
-    <div class="bd-meta">${metaBits}</div>
-    <div class="bd-section">By skill version</div>
+    <div class="bd-meta">${meta.model ? `model ${escapeHtml(meta.model)}` : ""} ${meta.version ? `v${escapeHtml(meta.version)}` : ""}</div>
+    <div class="bd-section">Tickers (${tickers.length})</div>
     <table class="bd-table">
-      <thead><tr><th>version</th><th>n</th><th>win%</th><th>P&amp;L</th><th>avg R</th><th>capture</th><th>void</th></tr></thead>
-      <tbody>${repRows}</tbody>
-    </table>
-    <div class="bd-section">Runs (${ss.length}) <span class="muted small">— click a row to open it</span></div>
-    <table class="bd-table">
-      <thead><tr><th>ticker</th><th>date</th><th>version</th><th>initiated</th><th>completed</th><th>status</th><th>result</th></tr></thead>
-      <tbody>${runRows}</tbody>
-    </table>`;
+      <thead><tr><th>ticker</th><th>trades</th><th>P&amp;L</th><th>win %</th></tr></thead>
+      <tbody>`;
 
+  if (tickers.length) {
+    html += tickers.map(t => {
+      const pnlCls = t.pnl > 0 ? "pos" : t.pnl < 0 ? "neg" : "";
+      const wr = t.win_rate != null ? `${t.win_rate}%` : "—";
+      return `<tr class="run" data-leaf="${escapeHtml(t.leaf_id)}" data-ticker="${escapeHtml(t.ticker)}">
+        <td><b>${escapeHtml(t.ticker)}</b></td>
+        <td>${t.n_trades}</td>
+        <td class="${pnlCls}">${fmtMoney(t.pnl)}</td>
+        <td>${wr}</td>
+      </tr>`;
+    }).join("");
+  } else {
+    html += `<tr><td colspan="4" class="muted">no tickers</td></tr>`;
+  }
+
+  html += `</tbody></table>`;
+
+  bd.innerHTML = html;
+
+  // back button
+  const back = bd.querySelector("#bd-back");
+  if (back) back.addEventListener("click", () => {
+    bd.classList.add("hidden");
+    // reload main list
+    loadAndRenderList();
+  });
+
+  // click ticker row -> load detail
   bd.querySelectorAll("tr.run").forEach(tr => {
     tr.addEventListener("click", (e) => {
-      const id = tr.dataset.id;
-      if (e.metaKey || e.ctrlKey) {
-        window.open(`/viewer/index.html?session=${encodeURIComponent(id)}`, "_blank");
-      } else {
-        loadSession(id, true);
+      const leaf = tr.dataset.leaf;
+      const ticker = tr.dataset.ticker;
+      if (leaf) {
+        loadSession(leaf, true);
       }
     });
   });
-  const back = document.getElementById("bd-back");
-  if (back) back.onclick = closeBatch;
-}
+}  // close renderSessionTickers
 
 // ---------- DETAIL RENDER ----------
 
@@ -675,10 +555,8 @@ async function loadSession(sessionId, updateUrl = false) {
   placeholder.classList.add("hidden");
   detail.classList.remove("hidden");
 
-  // leaving any open batch view: hide it and stop its poll (but keep the tag
-  // highlighted in the sidebar so the user can get back to it)
-  document.getElementById("batch-detail").classList.add("hidden");
-  if (batchRefreshTimer) { clearInterval(batchRefreshTimer); batchRefreshTimer = null; }
+  // hide the session tickers list when opening a ticker detail
+  document.getElementById("session-tickers").classList.add("hidden");
 
   currentSessionId = sessionId;
 
@@ -824,41 +702,38 @@ function wireDetailButtons(sessionId) {
 
 async function main() {
   const sessionFromUrl = qs("session");
-  const batchFromUrl = qs("batch");
 
   // Always render fresh session list on startup
   await loadAndRenderList();
 
   // Wire sidebar tabs
   document.getElementById("tab-sessions").onclick = () => setTab("sessions");
-  document.getElementById("tab-batches").onclick = () => setTab("batches");
 
-  // Wire global refresh button — refreshes whichever tab is active
+  // Wire global refresh button
   const refreshList = document.getElementById("refresh-list-btn");
   if (refreshList) {
-    refreshList.onclick = () =>
-      activeTab === "batches" ? loadAndRenderBatches() : loadAndRenderList();
+    refreshList.onclick = () => loadAndRenderList();
   }
 
-  if (batchFromUrl) {
-    setTab("batches");
-    await openBatch(batchFromUrl);
-  } else if (sessionFromUrl) {
-    await loadSession(sessionFromUrl);
+  if (sessionFromUrl) {
+    // try top session first
+    try {
+      const resp = await getJSON(`/api/session/${encodeURIComponent(sessionFromUrl)}`);
+      if (resp && resp.tickers) {
+        await loadSessionTickers(sessionFromUrl);
+      } else {
+        await loadSession(sessionFromUrl);
+      }
+    } catch {
+      await loadSession(sessionFromUrl);
+    }
   } else {
-    // Show list + placeholder (user can click)
     document.getElementById("no-session").classList.remove("hidden");
     document.getElementById("session-detail").classList.add("hidden");
   }
 
-  // Light auto-refresh of the active sidebar list every 20s so new sessions /
-  // batches appear and statuses stay current, even while a detail view is open.
-  // (Immediate flips for the session/batch you're watching are handled by
-  // refreshCurrentSession / scheduleBatchRefresh.)
-  setInterval(
-    () => (activeTab === "batches" ? loadAndRenderBatches() : loadAndRenderList()),
-    20000
-  );
+  // Light auto-refresh of the sidebar list
+  setInterval(loadAndRenderList, 20000);
 }
 
 main().catch((e) => fail(e.stack || String(e)));

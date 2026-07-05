@@ -246,6 +246,36 @@ def _extract_sid(text: str) -> Optional[str]:
     return hits[-1] if hits else None
 
 
+def _summarize_session(sid: Optional[str]) -> str:
+    """Compact one-line summary of whether a position was initiated plus entry/exit counts+details."""
+    if not sid:
+        return ""
+    sdir = recorder.SIM_ROOT / sid
+    acts = recorder._load_json(sdir / "actions.json", []) or []
+    if not isinstance(acts, list):
+        acts = []
+    enters = [a for a in acts if a.get("action") == "ENTER"]
+    adds = [a for a in acts if a.get("action") == "ADD"]
+    exits = [a for a in acts if a.get("action") in ("SCALE", "EXIT")]
+    initiated = bool(enters)
+    n_ent = len(enters) + len(adds)
+    n_ex = len(exits)
+    parts = [
+        f"initiated={'yes' if initiated else 'no'}",
+        f"entries={n_ent}",
+        f"exits={n_ex}",
+    ]
+    # brief event list (time + action + price)
+    evs = []
+    for a in enters + adds:
+        evs.append(f"{a.get('time','?')}:{a['action']}@{a.get('price','?')}")
+    for a in exits:
+        evs.append(f"{a.get('time','?')}:{a['action']}@{a.get('price','?')}")
+    if evs:
+        parts.append(" ".join(evs))
+    return "    " + "  ".join(parts)
+
+
 def _completed_counts(tag: str) -> dict[tuple, int]:
     """(ticker, date) → number of **clean** finalized sessions for this batch.
 
@@ -360,7 +390,7 @@ def run(
     # accurate planned total (len(setups)×repeats, not len(work) which drops resumed
     # items) from the moment it starts — before any session finalizes.
     _write_batch_meta(
-        tag, tag=tag, version=version, model=model,
+        tag, version=version, model=model,
         planned=len(setups) * repeats, repeats=repeats,
         started_ts=datetime.now().isoformat(timespec="seconds"),
         finished_ts=None, status="running",
@@ -375,12 +405,21 @@ def run(
             r = _run_one(w)
             _append_manifest(tag, r)
             results.append(r)
+            print(f"  [{r['status']}] {r['item']}", file=sys.stderr)
+            if r.get("status") == "ok":
+                summ = _summarize_session(r.get("sid"))
+                if summ:
+                    print(summ, file=sys.stderr)
     else:
         with _cf.ThreadPoolExecutor(max_workers=parallel) as ex:
             for r in ex.map(_run_one, work):     # yielded in the main thread → serial writes
                 _append_manifest(tag, r)
                 results.append(r)
                 print(f"  [{r['status']}] {r['item']}", file=sys.stderr)
+                if r.get("status") == "ok":
+                    summ = _summarize_session(r.get("sid"))
+                    if summ:
+                        print(summ, file=sys.stderr)
 
     n_void = audit(tag)
     print(f"\nbatch {tag} done: {sum(r['status']=='ok' for r in results)}/{len(results)} "

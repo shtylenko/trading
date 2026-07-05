@@ -15,3 +15,16 @@ python3 -m trading.llm_trader.replay --ticker VIVO  # random VIVO setup
 python3 -m trading.llm_trader.replay --ticker AEHL --date 2025-04-22
 python3 -m trading.llm_trader.replay --delay 0.3    # stream ~live (0.3s/bar)
 python3 -m trading.llm_trader.replay --from-open    # start at 09:30 instead of entry
+
+
+BATCH TESTING
+
+# 1. build the fixed holdout (once) — 30 stratified setups, committed & reused every run
+python3 -m trading.llm_trader.batchsim build-set --n 30
+
+# 2. backtest a pinned version (spawns local-model agents, then audits + reports)
+python3 -m trading.llm_trader.batchsim run --version 2.0.2 --model <your-local-model> \
+    --parallel 6 --repeats 2 --tag v2.0.2
+
+# 3. compare cohorts
+python3 -m trading.llm_trader.recorder report --by-version

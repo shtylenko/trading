@@ -55,6 +55,7 @@ def start(
     from_open: bool = False,
     db: str | Path = DEFAULT_DB,
     force: bool = False,
+    at_time: Optional[str] = None,
     out: TextIO = sys.stdout,
 ) -> int:
     """Seal the full day's stream privately, reveal only the meta line, cursor=0."""
@@ -64,7 +65,8 @@ def start(
     day = datetime.strptime(date, "%Y-%m-%d").date() if date else None
     h, m = (int(x) for x in after.split(":"))
     from datetime import time as dtime
-    setup = replay.pick_setup(db, ticker=ticker, day=day, after=dtime(h, m), seed=seed)
+    setup = replay.pick_setup(db, ticker=ticker, day=day, after=dtime(h, m),
+                              seed=seed, at_time=at_time)
 
     # generate the whole day, instantly, into the sealed (private) file
     replay.replay(setup, from_open=from_open, delay=0, force=force,
@@ -142,6 +144,9 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--ticker")
     ps.add_argument("--date")
     ps.add_argument("--after", default="09:30")
+    ps.add_argument("--time", dest="at_time",
+                    help="pin the EXACT setup at this time_et (HH:MM); "
+                    "disambiguates same-day setups for reproducible backtests")
     ps.add_argument("--from-open", action="store_true")
     ps.add_argument("--db", default=str(DEFAULT_DB))
     ps.add_argument("--force", action="store_true")
@@ -158,7 +163,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     if args.cmd == "start":
         return start(args.session, seed=args.seed, ticker=args.ticker, date=args.date,
-                     after=args.after, from_open=args.from_open, db=args.db, force=args.force)
+                     after=args.after, from_open=args.from_open, db=args.db,
+                     force=args.force, at_time=args.at_time)
     if args.cmd == "next":
         return next_(args.session)
     if args.cmd == "status":

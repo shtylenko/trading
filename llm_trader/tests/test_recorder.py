@@ -40,11 +40,40 @@ def _session(tmp_path, ticks, end_close=3.5, decisions=()):
 def test_init_creates_folder_and_manifest(tmp_path):
     sdir = recorder.init("EVTV", "2026-01-13", seed=7, root=tmp_path,
                          now=datetime(2026, 6, 30, 18, 23, 10))
-    assert sdir.name == "20260630182310-EVTV"
+    # id is {ts}-{ticker}-{random}; the random suffix makes it collision-proof
+    assert sdir.name.startswith("20260630182310-EVTV-")
     s = json.loads((sdir / "session.json").read_text())
     assert s["status"] == "running"
     assert s["config"]["risk_budget"] == 40.0
     assert (sdir / "decisions.jsonl").exists()
+
+
+def test_init_ids_are_unique_for_same_ticker_and_time(tmp_path):
+    """Two runs with the SAME ticker + wall-clock second must not collide (batch parallelism)."""
+    now = datetime(2026, 6, 30, 18, 23, 10)
+    a = recorder.init("EVTV", "2026-01-13", root=tmp_path, now=now)
+    b = recorder.init("EVTV", "2026-01-13", root=tmp_path, now=now)
+    assert a.name != b.name and a != b
+
+
+def test_mfe_capture_uses_peak_size_not_initial_tranche(tmp_path):
+    """A trade that ADDs near the high and sells all at the high = full capture (~1.0),
+    not >1 — the denominator must scale on peak size, not the first tranche."""
+    ticks = [("10:20", 5.0, 5.05, 4.95, 5.00, 9000),
+             ("10:21", 5.0, 5.42, 5.00, 5.40, 9000),
+             ("10:22", 5.4, 5.45, 5.40, 5.45, 9000)]
+    decisions = [
+        {"i": 0, "time": "10:20", "action": "ENTER", "fill_px": 5.00, "shares_delta": 100, "stop": 4.80},
+        {"i": 1, "time": "10:21", "action": "ADD", "fill_px": 5.40, "shares_delta": 100, "stop": 4.80},
+        {"i": 2, "time": "10:22", "action": "EXIT", "fill_px": 5.45, "shares_delta": -200, "stop": 4.80},
+    ]
+    sdir = _session(tmp_path, ticks, end_close=5.45, decisions=decisions)
+    recorder.finalize(sdir, full_day=False)
+    pnl = json.loads((sdir / "pnl.json").read_text())
+    assert pnl["entry_shares"] == 100 and pnl["max_shares"] == 200
+    # blended entry 5.20, peak high 5.45, peak size 200 → best-case $50, realized $50
+    assert pnl["realized_pnl"] == 50.0
+    assert pnl["mfe_capture"] == 1.0     # would be >1 if scaled on the 100-share entry
 
 
 def test_log_rejects_bad_action(tmp_path):

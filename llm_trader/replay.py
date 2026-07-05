@@ -91,11 +91,15 @@ def pick_setup(
     day: Optional[date] = None,
     after: dtime = RTH_OPEN,
     seed: Optional[int] = None,
+    at_time: Optional[str] = None,
 ) -> Setup:
     """Choose a setup row, defaulting to a random RTH (after-09:30) entry.
 
     Filters: optional ``ticker`` / ``day`` exact match, and ``time_et >= after``
-    (so premarket breakouts are excluded by default). Raises if nothing matches.
+    (so premarket breakouts are excluded by default). ``at_time`` ("HH:MM") pins an
+    *exact* setup — the batch harness passes it so the agent trades the same row the
+    holdout snapshotted, not an unseeded pick among same-day setups. Raises if nothing
+    matches.
     """
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
@@ -107,6 +111,9 @@ def pick_setup(
     if day:
         sql += " AND date = ?"
         params.append(day.isoformat())
+    if at_time:
+        sql += " AND time_et = ?"
+        params.append(at_time)
     rows = conn.execute(sql, params).fetchall()
     conn.close()
 

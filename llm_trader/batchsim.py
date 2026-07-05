@@ -30,6 +30,7 @@ import argparse
 import concurrent.futures as _cf
 import json
 import random
+import re
 import sqlite3
 import subprocess
 import sys
@@ -144,9 +145,15 @@ def _archived_skill(version: str) -> Path:
     return p
 
 
-def _prompt(version: str, skill_path: Path, tag: str, ticker: str, date: str) -> str:
+def _prompt(version: str, skill_path: Path, tag: str, ticker: str, date: str,
+            time_et: Optional[str]) -> str:
     """The per-setup task handed to a headless hermes agent. Thin wrapper: it pins the
-    *mechanics* (version, batch tag, setup) and defers all trading logic to the skill."""
+    *mechanics* (version, batch tag, exact setup) and defers trading logic to the skill.
+
+    Command lines are NOT indented (leading whitespace on `\\`-continued lines would be
+    passed to the agent verbatim); the exact setup is pinned with `--time` so the agent
+    trades the same row the holdout snapshotted, not an unseeded same-day pick."""
+    time_flag = f" --time {time_et}" if time_et else ""
     return f"""You are executing ONE trade simulation as an automated backtest. The current
 working directory is the monorepo root.
 
@@ -154,47 +161,83 @@ Read and follow EXACTLY the trading rules in this file (read it fully first). Do
 read any other skill file, and do NOT read the live skills/TRADE_SIMULATOR.md:
   {skill_path}
 
-Setup to trade (do NOT choose your own): ticker={ticker}  date={date}
+Setup to trade (do NOT choose your own): ticker={ticker}  date={date}  time={time_et}
 
-Run these EXACT commands — they pin the skill version and tag the batch cohort:
+Run these EXACT commands — copy them as written (do not add indentation). They pin the
+skill version, the exact setup, and the batch cohort:
 
-  SDIR=$(python3 -m trading.llm_trader.recorder init \\
-      --ticker {ticker} --date {date} --profile small \\
-      --skill {skill_path} --pin-version {version} --batch {tag})
-  python3 -m trading.llm_trader.step start --session "$SDIR" --ticker {ticker} --date {date}
+SDIR=$(python3 -m trading.llm_trader.recorder init --ticker {ticker} --date {date} --profile small --skill {skill_path} --pin-version {version} --batch {tag})
+python3 -m trading.llm_trader.step start --session "$SDIR" --ticker {ticker} --date {date}{time_flag}
 
-Then loop: `step next --session "$SDIR"` → decide per the skill → `recorder log
---session "$SDIR" --record '{{...}}'` → repeat until STATUS end. Then:
+Then loop: `step next --session "$SDIR"` -> decide per the skill -> `recorder log
+--session "$SDIR" --record '{{...}}'` -> repeat until STATUS end. Then:
 
-  python3 -m trading.llm_trader.recorder finalize --session "$SDIR"
+python3 -m trading.llm_trader.recorder finalize --session "$SDIR"
 
 HARD RULES (violating any voids the run): never open a file whose name starts with
 `_`; never run `replay` or `fetch_bars` directly; never re-run `step start`. When
-`finalize` prints its summary, echo the SDIR path and stop.
+`finalize` prints its summary, print the line `SDIR=$SDIR` and stop.
 """
 
 
+def _session_name(tag: str, ticker: str, date: str, rep: int) -> str:
+    """A deterministic, addressable hermes session title per run, so the audit can
+    export exactly that agent's tool-call log afterward."""
+    return f"batchsim-{tag}-{ticker}-{date}-r{rep}"
+
+
+# a recorder session id: {14 digits}-{TICKER}-{6 hex} (see recorder.init)
+_SID_RE = re.compile(r"\d{14}-[A-Z0-9]+-[0-9a-f]{6}")
+
+
+def _extract_sid(text: str) -> Optional[str]:
+    """Pull the recorder session id the agent echoed (last match wins)."""
+    hits = _SID_RE.findall(text or "")
+    return hits[-1] if hits else None
+
+
 def _completed_counts(tag: str) -> dict[tuple, int]:
-    """(ticker, date) → number of finalized sessions already recorded for this batch."""
+    """(ticker, date) → number of **clean** finalized sessions for this batch.
+
+    Voided sessions do NOT count as done, so ``--resume`` re-runs a setup whose only
+    prior attempt was audit-voided instead of leaving you a tainted cohort."""
     counts: dict[tuple, int] = defaultdict(int)
     if not recorder.SIM_ROOT.exists():
         return counts
     for d in recorder.SIM_ROOT.iterdir():
         s = recorder._load_json(d / "session.json", {}) or {}
-        if s.get("batch") == tag and s.get("status") == "complete":
+        if s.get("batch") == tag and s.get("status") == "complete" and not s.get("void"):
             counts[(s.get("ticker"), s.get("historical_date"))] += 1
     return counts
 
 
+def _manifest_path(tag: str) -> Path:
+    return BATCH_LOGS / tag / "manifest.jsonl"
+
+
+def _load_manifest(tag: str) -> list[dict]:
+    p = _manifest_path(tag)
+    if not p.exists():
+        return []
+    return [json.loads(ln) for ln in p.read_text().splitlines() if ln.strip()]
+
+
 def _run_one(work: dict) -> dict:
-    """Spawn one headless hermes agent for a single (setup, repeat). Returns a result dict."""
+    """Spawn one headless hermes agent for a single (setup, repeat). Returns a result
+    dict including the recorder session id (parsed from the agent's echo) and the
+    hermes session name, so the audit can map session → its tool-call log."""
     log_dir = BATCH_LOGS / work["tag"]
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"{work['ticker']}_{work['date']}_r{work['rep']}.log"
+    name = work["session_name"]
+    log_path = log_dir / f"{name}.log"
 
-    cmd = ["hermes", "-z", work["prompt"], "--yolo", "-m", work["model"]]
+    # --continue names the hermes session so `sessions export --session-id <name>`
+    # can later retrieve exactly this agent's structured tool calls for the audit.
+    cmd = ["hermes", "-z", work["prompt"], "--yolo", "-m", work["model"],
+           "--continue", name]
     if work.get("dry_run"):
-        return {"item": work["item"], "status": "dry-run", "cmd": cmd, "log": str(log_path)}
+        return {"item": work["item"], "status": "dry-run", "cmd": cmd,
+                "session_name": name, "sid": None}
 
     try:
         proc = subprocess.run(
@@ -202,17 +245,22 @@ def _run_one(work: dict) -> dict:
             timeout=work["timeout"],
         )
         log_path.write_text(
-            f"$ {' '.join(cmd[:2])} …\n[exit {proc.returncode}]\n"
-            f"===== STDOUT =====\n{proc.stdout}\n===== STDERR =====\n{proc.stderr}\n"
+            f"[exit {proc.returncode}]\n===== STDOUT =====\n{proc.stdout}\n"
+            f"===== STDERR =====\n{proc.stderr}\n"
         )
-        return {"item": work["item"], "status": "ok" if proc.returncode == 0 else "err",
+        sid = _extract_sid(proc.stdout)
+        return {"item": work["item"], "session_name": name, "sid": sid,
+                "ticker": work["ticker"], "date": work["date"], "rep": work["rep"],
+                "status": "ok" if proc.returncode == 0 else "err",
                 "returncode": proc.returncode, "log": str(log_path)}
     except subprocess.TimeoutExpired:
-        log_path.write_text(f"$ {' '.join(cmd[:2])} …\n[TIMEOUT after {work['timeout']}s]\n")
-        return {"item": work["item"], "status": "timeout", "log": str(log_path)}
+        log_path.write_text(f"[TIMEOUT after {work['timeout']}s]\n")
+        return {"item": work["item"], "session_name": name, "sid": None,
+                "ticker": work["ticker"], "date": work["date"], "rep": work["rep"],
+                "status": "timeout"}
     except FileNotFoundError:
-        return {"item": work["item"], "status": "no-hermes",
-                "error": "`hermes` CLI not found on PATH"}
+        return {"item": work["item"], "session_name": name, "sid": None,
+                "status": "no-hermes", "error": "`hermes` CLI not found on PATH"}
 
 
 def run(
@@ -231,12 +279,14 @@ def run(
         already = done.get((su["ticker"], su["date"]), 0)
         for rep in range(repeats):
             if resume and rep < already:
-                continue   # this (setup, rep) already finalized under this tag
+                continue   # a clean (non-void) attempt already exists for this slot
             work.append({
                 "item": f"{su['ticker']}_{su['date']}#r{rep}",
                 "ticker": su["ticker"], "date": su["date"], "rep": rep,
+                "session_name": _session_name(tag, su["ticker"], su["date"], rep),
                 "tag": tag, "model": model, "timeout": timeout, "dry_run": dry_run,
-                "prompt": _prompt(version, skill_path, tag, su["ticker"], su["date"]),
+                "prompt": _prompt(version, skill_path, tag, su["ticker"], su["date"],
+                                  su.get("time_et")),
             })
 
     print(f"batch {tag}: version {version}, {len(setups)} setups × {repeats} "
@@ -255,6 +305,14 @@ def run(
     if dry_run:
         print(json.dumps(results, indent=2))
         return tag
+
+    # persist the sid ↔ hermes-session-name mapping so audit can attribute per run
+    _manifest_path(tag).parent.mkdir(parents=True, exist_ok=True)
+    with open(_manifest_path(tag), "a") as f:
+        for r in results:
+            f.write(json.dumps({k: r.get(k) for k in
+                     ("item", "sid", "session_name", "ticker", "date", "rep",
+                      "status")}) + "\n")
 
     n_void = audit(tag)
     print(f"\nbatch {tag} done: {sum(r['status']=='ok' for r in results)}/{len(results)} "
@@ -277,51 +335,84 @@ def _sessions_for_batch(tag: str) -> list[Path]:
     return out
 
 
-def _transcript_for(session_dir: Path, tag: str) -> Optional[str]:
-    """Best-effort: the captured hermes transcript for this session's setup."""
-    s = recorder._load_json(session_dir / "session.json", {}) or {}
-    ticker, date = s.get("ticker"), s.get("historical_date")
-    log_dir = BATCH_LOGS / tag
-    if not log_dir.exists():
+def _parse_export(export_text: str) -> Optional[str]:
+    """Extract *only the executed tool-call commands* from a `hermes sessions export`
+    dump — never the assistant's prose. The prose quotes the rules (which name
+    `_sealed.jsonl`, `step start`, …) on every compliant run, so scanning it would
+    false-positive; the tool-call arguments are what the agent actually executed."""
+    parts: list[str] = []
+    for line in export_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        for m in obj.get("messages", []):
+            for tc in (m.get("tool_calls") or []):
+                fn = tc.get("function", {}) or {}
+                parts.append(str(fn.get("name", "")))
+                parts.append(str(fn.get("arguments", "")))
+    return "\n".join(parts) if parts else None
+
+
+def _agent_commands(session_name: str) -> Optional[str]:
+    """The concatenated tool-call commands for one hermes session (None if
+    unavailable — e.g. the session was never created or export failed)."""
+    try:
+        proc = subprocess.run(
+            ["hermes", "sessions", "export", "--session-id", session_name, "-"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
         return None
-    hits = sorted(log_dir.glob(f"{ticker}_{date}_r*.log"))
-    return "\n".join(p.read_text(errors="replace") for p in hits) if hits else None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    return _parse_export(proc.stdout)
+
+
+def _scan_commands(commands: str) -> Optional[str]:
+    """Return a void reason if the executed commands break no-look-ahead / determinism,
+    else None. Operates on tool-call commands only (see ``_parse_export``)."""
+    for pat in _PEEK_PATTERNS:
+        if pat in commands:
+            return f"agent command referenced forbidden `{pat}`"
+    if _REPLAY_RE in commands:
+        return "agent invoked replay directly (look-ahead)"
+    if commands.count(_STEP_START_RE) > 1:
+        return "agent re-ran `step start` (re-seal / look-ahead)"
+    return None
 
 
 def audit(tag: str) -> int:
-    """Scan each session's captured transcript for look-ahead / determinism breaks and
-    mark the session ``void`` (with a reason). Returns the number voided.
+    """Void any session in the batch whose executed tool-call commands show look-ahead
+    or a determinism break, or that can't be verified. Returns the number voided.
 
-    A session with no transcript to check is flagged ``void`` too (unverifiable), so
-    the report never silently counts an un-auditable run — better a false void than a
-    tainted number in the aggregate.
+    The command source is the structured `hermes sessions export` for the run's named
+    session (mapped by recorder-session-id via the batch manifest) — NOT the free-form
+    transcript, so the agent quoting its own rules no longer false-positives. A session
+    with no retrievable command log is voided as *unverifiable* rather than trusted.
     """
+    name_by_sid = {e["sid"]: e.get("session_name")
+                   for e in _load_manifest(tag) if e.get("sid")}
     voided = 0
     for d in _sessions_for_batch(tag):
         session = recorder._load_json(d / "session.json", {}) or {}
         if session.get("status") != "complete":
             continue
-        transcript = _transcript_for(d, tag)
-        reason = None
-        if transcript is None:
-            reason = "no transcript captured — unverifiable"
-        else:
-            for pat in _PEEK_PATTERNS:
-                if pat in transcript:
-                    reason = f"transcript references forbidden `{pat}`"
-                    break
-            if reason is None and _REPLAY_RE in transcript:
-                reason = "transcript calls replay directly (look-ahead)"
-            if reason is None and transcript.count(_STEP_START_RE) > 1:
-                reason = "transcript re-ran `step start` (re-seal / look-ahead)"
-
+        session_name = name_by_sid.get(d.name)
+        commands = _agent_commands(session_name) if session_name else None
+        reason = (
+            "no agent command log to verify (unverifiable)"
+            if commands is None else _scan_commands(commands)
+        )
         if reason:
             session["void"] = reason
             (d / "session.json").write_text(json.dumps(session, indent=2))
             voided += 1
         elif session.pop("void", None) is not None:
-            # previously voided, now clean (e.g. transcript re-captured) → clear it
-            (d / "session.json").write_text(json.dumps(session, indent=2))
+            (d / "session.json").write_text(json.dumps(session, indent=2))  # now clean
     return voided
 
 

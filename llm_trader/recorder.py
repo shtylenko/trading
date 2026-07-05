@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import secrets
 import sys
 import time
 from datetime import datetime, timezone
@@ -74,9 +75,11 @@ class PositionEngine:
         # $ risked at the initial entry (entry shares × per-share stop distance),
         # captured on the first buy — the denominator for a true R multiple.
         self.initial_risk: Optional[float] = None
-        # shares bought on the very first ENTER — the base size the MFE (best price
-        # since entry) is measured against for the capture ratio.
+        # shares bought on the very first ENTER (published for reference).
         self.entry_shares: Optional[int] = None
+        # peak position size ever held — the correct scale for the capture ratio, so
+        # pyramiding (ADD) doesn't make capture read >1 against the initial tranche.
+        self.max_shares: int = 0
 
     def _validate_action(
         self, i: int, action: str, has_fill: bool, dq: Optional[int]
@@ -129,6 +132,7 @@ class PositionEngine:
                 new_total = self.shares + dq
                 self.avg_entry = (self.avg_entry * self.shares + fill * dq) / new_total
                 self.shares = new_total
+                self.max_shares = max(self.max_shares, self.shares)
                 self._buy_value += fill * dq
                 self._buy_shares += dq
             else:  # sell
@@ -276,9 +280,12 @@ def init(
     (``report --batch <tag>``).
     """
     now = now or datetime.now()
-    sid = f"{now.strftime('%Y%m%d%H%M%S')}-{ticker.upper()}"
+    # A short random suffix makes the id collision-proof: under batch parallelism two
+    # agents trading the same ticker can `init` in the same wall-clock second, and a
+    # second-granularity id would race on the same folder (one clobbering the other).
+    sid = f"{now.strftime('%Y%m%d%H%M%S')}-{ticker.upper()}-{secrets.token_hex(3)}"
     sdir = Path(root) / sid
-    sdir.mkdir(parents=True, exist_ok=True)
+    sdir.mkdir(parents=True, exist_ok=False)
 
     skill_path = skill or skillmeta.DEFAULT_SKILL_PATH
     note = None
@@ -478,13 +485,18 @@ def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
             forced["t"] = _epoch_et(date_str, forced["time"])
         actions.append(forced)
 
-    mfe_ps = engine.mfe_per_share(bars)
-    entry_avg = engine.blended_entry
+    mfe_ps = engine.mfe_per_share(bars)          # max(high) − first-fill price
+    entry_avg = engine.blended_entry             # blended cost across all buys
     entry_shares = engine.entry_shares
-    # capture ratio: realized $ ÷ the best-case dollars had you sold the whole entry
-    # size at the high (mfe_per_share × entry_shares). ≈ "how much of the favorable
-    # move you kept". >0 and ≤~1 for a normal win; negative if the trade lost.
-    mfe_dollars = (mfe_ps * entry_shares) if (mfe_ps and entry_shares) else None
+    max_shares = engine.max_shares or None
+    # capture ratio: realized $ ÷ the best-case dollars had you held your *peak* size
+    # to the high and sold there (mfe-vs-blended-cost × peak shares). Peak size (not
+    # the initial tranche) is the right scale, so pyramiding doesn't inflate capture
+    # past ~1. ≈ "fraction of the favorable move you kept"; negative if the trade lost.
+    highs = [b["h"] for b in bars if b.get("i", -1) >= (engine.entry_i or 0)]
+    peak_high = max(highs) if (highs and engine.entry_i is not None) else None
+    cap_ps = (peak_high - entry_avg) if (peak_high is not None and entry_avg) else None
+    mfe_dollars = (cap_ps * max_shares) if (cap_ps and max_shares) else None
     mfe_capture = (
         round(engine.realized / mfe_dollars, 3)
         if (mfe_dollars and mfe_dollars > 0) else None
@@ -508,6 +520,7 @@ def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
         "entry_index": engine.entry_i,
         "entry_avg": entry_avg,   # blended cost basis across all buys
         "entry_shares": entry_shares,
+        "max_shares": max_shares,
         "mfe_per_share": mfe_ps,
         "mfe_pct": round(mfe_ps / entry_avg * 100, 2) if (mfe_ps and entry_avg) else None,
         "mfe_capture": mfe_capture,

@@ -111,8 +111,8 @@ The agent drives this loop automatically: reveal bar N, decide, log, reveal bar 
 repeat. No user prompting between bars.
 
 Keep a small **state**: `position ∈ {flat, long}`, `shares`, `avg_entry`, `stop`,
-`high_water` (best price since entry), `realized_pnl`, `bars_since_entry`, and a
-running bar index `i` (starts at 0). Persist each turn with `recorder log` (below) —
+`high_water` (best price since entry), `realized_pnl`, `bars_since_entry`,
+`re_entries_used` (0; caps at 1 per §C), and a running bar index `i` (starts at 0). Persist each turn with `recorder log` (below) —
 that file is your durable journal, so you don't keep one in your head.
 
 Reveal the next bar with `step next` — it appends exactly one bar to the visible
@@ -132,8 +132,8 @@ The output gives the tick (or the `end` line), then a `STATUS` line:
   finalize.
 
 You are structurally unable to act ahead — `step next` only ever appends the *next*
-bar, and the future is sealed away. Stop the loop when you are `flat` after an exit,
-or on `STATUS end`.
+bar, and the future is sealed away. Stop the loop on `STATUS end`, or when you are
+`flat` after an exit **and** are not watching for the optional single re-entry (§C).
 
 ### Tick fields you decide on
 `time, o,h,l,c, v, cum_vol, vwap, ema9, ema20, macd, macd_signal, macd_hist,
@@ -177,7 +177,21 @@ the current (closed) bar before committing:
 - bar is **green** (`c >= o`), **and**
 - `above_vwap` is true (uptrend confirmation), **and**
 - **volume expansion** — `rvol_bar` is clearly elevated (**≳1.5–2×**; the breakout
-  bar should show participation, not drift).
+  bar should show participation, not drift), and the recent **green bars carry more
+  volume than the red bars** (buyers in control, not distribution — §9), **and**
+- **not extended (don't chase)** — you are entering the **first** clean new high out
+  of a consolidation/micro-pullback, *not* the 3rd–4th green bar of a vertical spike.
+  If price is already stretched far above VWAP after a parabolic run (a stack of big
+  green bodies), the easy entry is gone and you are buying where late longs get
+  trapped — **stand down and wait for the pullback/washout** rather than chase.
+  ("You're never going to capture the entire move.")
+
+**Time-of-day (volume fades late morning).** These are morning gap-ups, so most
+breakouts fire early. But follow-through weakens as the session ages: the open and
+first ~90 minutes are prime; after **~10:30–11:00 ET** volume dries up and breakouts
+fade. If the `time` on your breakout bar is late morning, demand an A+ bar (strong
+`rvol_bar`, clean green, well clear of VWAP) or **stand down**. Never open a fresh
+momentum entry around/after **12:00 ET**.
 
 **MACD confirmation (filter, not a trigger — §4.6):** do **not** enter *against* the
 MACD. Prefer `macd_hist ≥ 0` (MACD line at/above signal). If `macd_hist` is clearly
@@ -221,24 +235,60 @@ Evaluate every tick, in this priority order:
    - **time stop**: `bars_since_entry ≥ 5` and the position has **not made a new
      high** since entry and is not meaningfully green ("almost immediate resolution"
      — if it just sits, get out).
-3. **SCALE OUT** into strength — on a **touch** (`h ≥`) of the first clear resistance
+3. **FREE TRADE (move to break-even early)** — the "10-cent" rule. If, within the
+   **first bar or two** after entry, price moves up ~**+$0.10** (or ~1/3 of your
+   stop_distance, whichever comes first) and holds, **raise the stop to your
+   `avg_entry`**. Now the trade is risk-free ("essentially a free trade"), so a fade
+   back through entry takes you out flat instead of at a full stop. This is *before*
+   any scale-out and is the single biggest cut to average-loss size. Never move the
+   stop back down.
+4. **SCALE OUT** into strength — on a **touch** (`h ≥`) of the first clear resistance
    (e.g. `pm_high`, prior-day level, a round number) or about **+1R**
-   (`avg_entry + stop_distance`): sell **1/3–1/2** filled at that level, and **move
-   the stop on the remainder to break-even**. Bank the win; let the rest work
-   risk-free.
-4. **TRAIL** the remainder once up ≳1R: ratchet the stop up to just under the most
+   (`avg_entry + stop_distance`): sell **1/3–1/2** filled at that level, and (if not
+   already there) **move the stop on the remainder to break-even**. Bank the win; let
+   the rest work risk-free. Scale out **slowly into strength** — sell into the up-move,
+   don't dump the whole position on one bar.
+5. **TRAIL** the remainder once up ≳1R: ratchet the stop up to just under the most
    recent swing low or a moving average (`ema9` for a tight trail, `ema20` for a
    looser one on a strong runner; ≈10–20¢). Never loosen a stop.
-5. **ADD** (optional, only with conviction): on a fresh **green new-high
-   continuation** bar that closes above VWAP with healthy `rvol_bar` **and MACD still
-   supportive** (`macd_hist ≥ 0`), you may add. **Never add to a red or extended bar,
-   into a negative MACD, and never average down.**
-6. **TARGET**: aim for **2:1** as a ceiling but accept the realized **~1:1**; the
+6. **ADD / SCALE IN (pyramiding — optional, only with conviction, §10)**. Add to a
+   *winner*, never a loser. The three-step pyramid:
+   - **Starter** = your 1/3 entry position (already on).
+   - **Add #2** when the **first bar since entry closes green and above your entry** —
+     confirmation the break held. Your average cost rises (up-average), which is the
+     point: you only pay up because the trade is already working.
+   - **Add #3** on a fresh **green new-high continuation** bar with healthy `rvol_bar`
+     **and MACD still supportive** (`macd_hist ≥ 0`).
+   After any add, **re-anchor the stop off your new (higher) average** so total open
+   risk stays inside `risk_budget`. **Never add to a red bar, into an extended/parabolic
+   bar, into a negative MACD, and never average down.** Skip pyramiding entirely if the
+   tape is choppy or volume is thin — one clean entry/exit beats a bad pyramid.
+7. **TARGET**: aim for **2:1** as a ceiling but accept the realized **~1:1**; the
    primary target is a retest/break of the day's high or the next marked resistance.
-   Scaling out (step 3) is how you bank it.
+   Scaling out (step 4) is how you bank it.
 
 Always be **flat by session end** — never hold overnight. If the `end` line arrives
 while still long, exit at the `end` line's `close`.
+
+### C. RE-ENTRY after a bailout (optional — Cameron's favorite second leg)
+Default remains **one round trip**. But Cameron's two favorite setups are *second-leg*
+entries after a first move fails — "I can always get back in if there's another setup."
+So after you've **exited/bailed and are flat**, you MAY take **at most one** re-entry on
+the same ticker *if* a clean qualifying setup re-forms before the stream ends. Still
+**one position at a time**; never re-enter while already long, and never to "make back"
+the prior loss (that's the loser cognitive loop — a re-entry must be a genuine A-setup
+on its own merits, not revenge). Two patterns qualify:
+
+- **Sub-VWAP trap / washout reclaim** (his #1 intraday setup): price spiked, then
+  washed **below VWAP** (`above_vwap` false) trapping late longs, then **reclaims VWAP**
+  (`above_vwap` flips back true) on a green bar with renewed `rvol_bar`. Enter on the
+  reclaim; **stop below the washout low**; target a retest of `session_high`.
+- **Fresh new-high after consolidation**: price bases sideways above VWAP, then prints a
+  clean green `new_high` bar meeting the full §A entry criteria (incl. MACD support).
+
+If neither re-forms cleanly, **stay flat** — a disciplined single round trip is the
+success case, not a failure. Apply the same sizing (Step 3), the free-trade/BE rule,
+scaling, and exits to the re-entry, and journal it as a distinct trade.
 
 ### Each tick → log one decision record (this is the artifact the viewer shows)
 After deciding on a bar, **persist the turn** with `recorder log` — one record per
@@ -320,7 +370,8 @@ indicators, and the turn-by-turn reasoning timeline.
   sealed in `_sealed.jsonl` (which you never read), so you are structurally unable to
   act on future data. Never pull bars by any other path.
 - **Long only** (Cameron only buys; the user can't short).
-- **One position at a time** (small-account = one round trip per day).
+- **One position at a time** (small-account = one round trip per day; at most one
+  optional re-entry per §C, never concurrent).
 - **Every action cites a rule** from the strategy doc — no discretionary drift.
 - Fills at bar close; no slippage / Level 2 / time-and-sales (we don't have them).
   Note this assumption in the journal.

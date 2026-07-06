@@ -103,21 +103,20 @@ def pick_setup(
     holdout snapshotted, not an unseeded pick among same-day setups. Raises if nothing
     matches.
     """
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    sql = "SELECT * FROM entries WHERE 1=1"
-    params: list = []
-    if ticker:
-        sql += " AND ticker = ?"
-        params.append(ticker.upper())
-    if day:
-        sql += " AND date = ?"
-        params.append(day.isoformat())
-    if at_time:
-        sql += " AND time_et = ?"
-        params.append(at_time)
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        sql = "SELECT * FROM entries WHERE 1=1"
+        params: list = []
+        if ticker:
+            sql += " AND ticker = ?"
+            params.append(ticker.upper())
+        if day:
+            sql += " AND date = ?"
+            params.append(day.isoformat())
+        if at_time:
+            sql += " AND time_et = ?"
+            params.append(at_time)
+        rows = conn.execute(sql, params).fetchall()
 
     rows = [r for r in rows if _hhmm_after(r["time_et"], after)]
     if not rows:
@@ -146,8 +145,8 @@ def pick_setup(
 # ───────────────────────────── bar prefetch ─────────────────────────────────
 
 
-def fetch_minute_bars(ticker: str, day: date, force: bool = False) -> pd.DataFrame:
-    """Prefetch the day's 1-minute RTH bars for ``ticker`` (ET-indexed OHLCV).
+def fetch_minute_bars(ticker: str, day: date, force: bool = False, session: str = "rth") -> pd.DataFrame:
+    """Prefetch the day's 1-minute bars for ``ticker`` (ET-indexed OHLCV).
 
     Returns an empty frame if the provider can't serve the day (e.g. on-demand
     intraday access blocked for dates >1yr old — see SPEC §2).
@@ -156,7 +155,7 @@ def fetch_minute_bars(ticker: str, day: date, force: bool = False) -> pd.DataFra
     end = start + timedelta(days=1)
     df = fetch_bars(
         ticker, "1min", start=start, end=end,
-        session="rth", adjustment="raw", force=force,
+        session=session, adjustment="raw", force=force,
     )
     if df is None or df.empty:
         return pd.DataFrame()
@@ -176,7 +175,7 @@ def _enrich(df: pd.DataFrame) -> pd.DataFrame:
     return enrich_1min_for_replay(df, rvol_bar_window=20, rvol_min_periods=5)
 
 
-def _context(ticker: str, day: date, force: bool = False) -> dict:
+def _context(ticker: str, day: date, force: bool = False, ext_df: Optional[pd.DataFrame] = None) -> dict:
     """One-time reference levels for the meta line (best-effort, never fatal).
 
     ``prior_close/high/low`` from the previous daily bar and ``pm_high/low`` from
@@ -202,13 +201,15 @@ def _context(ticker: str, day: date, force: bool = False) -> dict:
         logger.debug("daily context fetch failed for %s %s", ticker, day, exc_info=True)
         ctx["context_warnings"].append(f"daily_context_unavailable:{type(exc).__name__}")
     try:
-        ext = fetch_bars(ticker, "1min", start=start, end=end,
-                         session="extended", adjustment="raw", force=force)
-        if ext is not None and not ext.empty:
-            ext = ext.sort_index()
-            ext = ext.tz_localize("America/New_York") if ext.index.tz is None \
-                else ext.tz_convert("America/New_York")
-            pm = ext[(ext.index.date == day) & (ext.index.time < RTH_OPEN)]
+        if ext_df is None:
+            ext_df = fetch_bars(ticker, "1min", start=start, end=end,
+                             session="extended", adjustment="raw", force=force)
+            if ext_df is not None and not ext_df.empty:
+                ext_df = ext_df.sort_index()
+                ext_df = ext_df.tz_localize("America/New_York") if ext_df.index.tz is None \
+                    else ext_df.tz_convert("America/New_York")
+        if ext_df is not None and not ext_df.empty:
+            pm = ext_df[(ext_df.index.date == day) & (ext_df.index.time < RTH_OPEN)]
             if not pm.empty:
                 ctx["pm_high"] = round(float(pm["high"].max()), 4)
                 ctx["pm_low"] = round(float(pm["low"].min()), 4)
@@ -250,11 +251,18 @@ def replay(
     Returns the number of bars streamed. Indicators are computed over the full
     RTH session so they match a chart; only bars from the start point are shown.
     """
-    df = fetch_minute_bars(setup.ticker, setup.day, force=force)
+    if fmt == "jsonl":
+        ext_df = fetch_minute_bars(setup.ticker, setup.day, force=force, session="extended")
+        df = ext_df[(ext_df.index.time >= RTH_OPEN) & (ext_df.index.time < RTH_CLOSE)]
+    else:
+        ext_df = None
+        df = fetch_minute_bars(setup.ticker, setup.day, force=force)
     streams: list[TextIO] = [out]
     fh: Optional[TextIO] = None
     if out_file is not None:
-        fh = open(out_file, "w")
+        out_file = Path(out_file)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(out_file, "w", encoding="utf-8")
         streams.append(fh)
 
     try:
@@ -275,7 +283,7 @@ def replay(
         anchor = setup.entry_px if setup.entry_px else float(df["open"].iloc[0])
 
         if fmt == "jsonl":
-            return _stream_jsonl(setup, df, start_t, anchor, streams, delay)
+            return _stream_jsonl(setup, df, start_t, anchor, streams, delay, force=force, ext_df=ext_df)
         return _stream_human(setup, df, start_t, anchor, streams, delay)
     finally:
         if fh is not None:
@@ -331,8 +339,10 @@ def _stream_human(setup, df, start_t, anchor, streams, delay) -> int:
             time.sleep(delay)
 
     w("  " + "─" * 78)
-    last = float(df["close"].iloc[-1])
-    if anchor:
+    if n == 0 or day_high == float("-inf"):
+        w(f"  bars streamed: 0   no bars matched streaming window (start {start_t:%H:%M} ET)")
+    elif anchor:
+        last = float(df["close"].iloc[-1])
         run = (day_high - anchor) / anchor * 100.0
         eod = (last - anchor) / anchor * 100.0
         w(
@@ -342,8 +352,8 @@ def _stream_human(setup, df, start_t, anchor, streams, delay) -> int:
     return n
 
 
-def _stream_jsonl(setup, df, start_t, anchor, streams, delay) -> int:
-    ctx = _context(setup.ticker, setup.day)
+def _stream_jsonl(setup, df, start_t, anchor, streams, delay, force: bool = False, ext_df: Optional[pd.DataFrame] = None) -> int:
+    ctx = _context(setup.ticker, setup.day, force=force, ext_df=ext_df)
     meta = {
         "type": "meta",
         "ticker": setup.ticker,

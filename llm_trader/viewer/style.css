@@ -1,8 +1,8 @@
 :root {
   --bg: #0e1116; --panel: #161b22; --line: #232a34; --txt: #d6deea;
   --muted: #7d8aa0; --green: #26a69a; --red: #ef5350; --accent: #5b9dff;
-  --vwap: #f5c542; --ema: #b06cff; --stop: #ef5350; --entry: #26a69a; --pm: #4a90d9;
-  --ema2: #5b9dff;
+  --vwap: #f5c542; --ema: #b06cff; --stop: var(--red); --entry: var(--green); --pm: #4a90d9;
+  --ema2: var(--accent);
 }
 * { box-sizing: border-box; }
 html, body {
@@ -257,8 +257,8 @@ header {
 }
 #blotter th, #blotter td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--line); }
 #blotter th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
-#blotter td.buy { color: var(--green); } #blotter td.sell { color: var(--red); }
-#blotter td.pos { color: var(--green); } #blotter td.neg { color: var(--red); }
+#blotter td.buy, #blotter td.pos, .bd-table td.pos, .pnl .pos-v { color: var(--green); }
+#blotter td.sell, #blotter td.neg, .bd-table td.neg, .pnl .neg-v { color: var(--red); }
 
 #right h3 {
   flex: 0 0 auto;
@@ -294,20 +294,17 @@ header {
 .turn .pos { margin-left: auto; font-size: 11px; }
 .turn .thought { margin-top: 5px; color: var(--txt); white-space: pre-wrap; }
 .turn .pnl { margin-top: 4px; font-size: 11px; }
-.pnl .pos-v { color: var(--green); } .pnl .neg-v { color: var(--red); }
 
 #error { position: fixed; inset: 16px; padding: 16px; background: #2a1414;
   border: 1px solid var(--red); border-radius: 8px; color: #ffd7d4; white-space: pre-wrap; }
 
-/* Sidebar tabs (Sessions | Batches) */
-.tabs { display: flex; gap: 4px; }
-.tab {
+/* Sidebar title button */
+.sidebar-title-btn {
   font: inherit; font-weight: 600; font-size: 12px;
-  padding: 3px 9px; border: 1px solid var(--line); border-radius: 5px;
-  background: var(--panel); color: var(--muted); cursor: pointer;
+  padding: 3px 9px; border: 1px solid var(--accent); border-radius: 5px;
+  background: #1c2433; color: var(--txt); cursor: pointer;
 }
-.tab.active { color: var(--txt); border-color: var(--accent); background: #1c2433; }
-.tab:hover { color: var(--txt); }
+.sidebar-title-btn:hover { background: #232d40; }
 
 /* Session-detail header/table (used by the tickers view: .bd-head, .bd-table, …) */
 .bd-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -319,6 +316,5 @@ header {
 .bd-table th { color: var(--muted); font-weight: 600; }
 .bd-table tr.run { cursor: pointer; }
 .bd-table tr.run:hover { background: #1c2330; }
-.bd-table td.pos { color: var(--green); } .bd-table td.neg { color: var(--red); }
 .bd-table td.void { color: #b98; }
 .bd-back { cursor: pointer; }

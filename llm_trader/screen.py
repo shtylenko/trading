@@ -5,7 +5,7 @@ For each ticker and trading day in the window, compute the daily-bar Pillars
 pairs that pass. This narrows ~4,950 symbols to a small set of gappers per day,
 which Stage B then inspects intraday.
 
-Source: ``trading.marketdata.fetch_bars(..., "1day", adjustment="split")``.
+Source: ``trading.marketdata.fetch_bars(..., "1day", adjustment="raw")``.
 """
 
 from __future__ import annotations
@@ -53,25 +53,24 @@ def screen_ticker(ticker: str, cfg: ScanConfig) -> list[GapCandidate]:
         return []
 
     df = df.sort_index()
-    prior_close = df["close"].shift(1)
-    # average volume of the trailing `rvol_lookback` days, excluding today
-    avg_vol = df["volume"].shift(1).rolling(cfg.rvol_lookback).mean()
-
-    gap_pct = (df["open"] - prior_close) / prior_close * 100.0
-    rvol = df["volume"] / avg_vol
+    df["prior_close"] = df["close"].shift(1)
+    df["avg_vol"] = df["volume"].shift(1).rolling(cfg.rvol_lookback).mean()
+    df["gap_pct"] = (df["open"] - df["prior_close"]) / df["prior_close"].replace(0, pd.NA) * 100.0
+    df["rvol"] = df["volume"] / df["avg_vol"].replace(0, pd.NA)
 
     out: list[GapCandidate] = []
-    for ts, row in df.iterrows():
+    for row in df.itertuples():
+        ts = row.Index
         d = ts.date()
         if d < cfg.start or d > cfg.end:
             continue
-        pc = prior_close.loc[ts]
-        av = avg_vol.loc[ts]
-        if pd.isna(pc) or pd.isna(av) or av <= 0:
+        pc = row.prior_close
+        av = row.avg_vol
+        if pd.isna(pc) or pd.isna(av) or pc <= 0 or av <= 0:
             continue
-        g = float(gap_pct.loc[ts])
-        rv = float(rvol.loc[ts])
-        op = float(row["open"])
+        g = float(row.gap_pct)
+        rv = float(row.rvol)
+        op = float(row.open)
         if g < cfg.gap_min_pct or g > cfg.gap_max_pct:
             continue
         if not (cfg.price_min <= op <= cfg.price_max):
@@ -89,7 +88,7 @@ def screen_ticker(ticker: str, cfg: ScanConfig) -> list[GapCandidate]:
                 gap_pct=g,
                 rvol=rv,
                 avg_vol=float(av),
-                day_volume=float(row["volume"]),
+                day_volume=float(row.volume),
             )
         )
     return out

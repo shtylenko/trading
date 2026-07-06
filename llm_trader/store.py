@@ -8,6 +8,7 @@ the row in place. ``setup_id = sha1("{ticker}|{date}|{pattern}")``.
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import io
 import sqlite3
@@ -47,9 +48,16 @@ class EntryStore:
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path))
+        self.conn = sqlite3.connect(str(self.db_path), timeout=30.0)
+        self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.executescript(_SCHEMA)
         self.conn.commit()
+
+    def __enter__(self) -> "EntryStore":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
 
     def upsert(self, e: Entry) -> None:
         sid = setup_id(e.ticker, e.day, e.pattern)
@@ -83,8 +91,9 @@ class EntryStore:
         return self.conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
 
     def all_rows(self) -> list[sqlite3.Row]:
-        self.conn.row_factory = sqlite3.Row
-        return self.conn.execute(
+        cur = self.conn.cursor()
+        cur.row_factory = sqlite3.Row
+        return cur.execute(
             "SELECT * FROM entries ORDER BY date, time_et, ticker"
         ).fetchall()
 
@@ -101,19 +110,18 @@ class EntryStore:
         return path
 
     def dump_csv(self, path: str | Path) -> Path:
-        import csv
-
         path = Path(path)
         rows = self.all_rows()
         cols = [
-            "ticker", "date", "time_et", "pattern", "entry_px", "bar_close",
-            "gap_pct", "rvol", "float_shares", "bar_vol_mult", "reason",
+            "setup_id", "ticker", "date", "time_et", "pattern", "entry_px",
+            "bar_close", "gap_pct", "rvol", "float_shares", "bar_vol_mult",
+            "reason", "updated_at",
         ]
         out = io.StringIO()
-        w = csv.writer(out)
-        w.writerow(cols)
+        w = csv.DictWriter(out, fieldnames=cols)
+        w.writeheader()
         for r in rows:
-            w.writerow([r[c] for c in cols])
+            w.writerow({c: r[c] for c in cols})
         atomic_write_text(path, out.getvalue())
         return path
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 
 
@@ -23,7 +24,7 @@ def session_vwap(df: pd.DataFrame) -> pd.Series:
     """
     typical = (df["high"] + df["low"] + df["close"]) / 3.0
     cum_pv = (typical * df["volume"]).cumsum()
-    cum_v = df["volume"].cumsum().replace(0, pd.NA)
+    cum_v = df["volume"].cumsum().replace(0, np.nan)
     return cum_pv / cum_v
 
 
@@ -33,7 +34,7 @@ def normalize_to_et(df: pd.DataFrame, day: Optional[date] = None) -> pd.DataFram
     If ``day`` is provided, filter to rows whose .date() == day (after tz conversion).
     The input may have tz-naive or any tz.
     """
-    out = df.sort_index().copy()
+    out = df.sort_index().copy() if not df.index.is_monotonic_increasing else df.copy()
     if out.index.tz is None:
         out.index = out.index.tz_localize("America/New_York")
     else:
@@ -106,8 +107,9 @@ def enrich_1min_for_replay(
     out["macd_signal"] = macd_df["macd_signal"]
     out["macd_hist"] = macd_df["macd_hist"]
     out["cum_vol"] = out["volume"].cumsum()
-    prev_max = out["high"].cummax().shift(1)
-    out["session_high"] = out["high"].cummax()
+    session_high = out["high"].cummax()
+    out["session_high"] = session_high
+    prev_max = session_high.shift(1)
     out["new_high"] = out["high"] > prev_max.fillna(float("-inf"))
     vol_base = out["volume"].shift(1).rolling(
         rvol_bar_window, min_periods=rvol_min_periods

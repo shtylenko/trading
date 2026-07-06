@@ -54,6 +54,17 @@ def _lock_path(session_dir: str | Path) -> Path:
     return Path(session_dir) / ".session.lock"
 
 
+def _get_sealed_line(path: Path, idx: int) -> Optional[str]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                if i == idx:
+                    return line.strip()
+    except FileNotFoundError:
+        pass
+    return None
+
+
 def start(
     session_dir: str | Path,
     *,
@@ -105,33 +116,35 @@ def next_(session_dir: str | Path, out: TextIO = sys.stdout) -> int:
         return 3
 
     with file_lock(_lock_path(sdir)):
-        st = json.loads(state.read_text())
-        meta, ticks, end = _parse_sealed(sealed)
+        st = json.loads(state.read_text(encoding="utf-8"))
         cur = st["cursor"]
+        n_ticks = st["n"]
 
-        if cur < len(ticks):
-            tk = ticks[cur]
-            with open(stream, "a") as f:
-                f.write(json.dumps(tk) + "\n")
-                f.flush()
-            st["cursor"] = cur + 1
-            atomic_write_json(state, st)
-            print(json.dumps(tk), file=out)
-            ended = cur + 1 >= len(ticks)
-            print(f"STATUS ok next={cur + 1} ended={str(ended).lower()}", file=out)
-            return 0
+        if cur < n_ticks:
+            line_str = _get_sealed_line(sealed, cur + 1)
+            if line_str is not None:
+                with open(stream, "a", encoding="utf-8") as f:
+                    f.write(line_str + "\n")
+                    f.flush()
+                st["cursor"] = cur + 1
+                atomic_write_json(state, st)
+                print(line_str, file=out)
+                ended = cur + 1 >= n_ticks
+                print(f"STATUS ok next={cur + 1} ended={str(ended).lower()}", file=out)
+                return 0
 
         # past the last tick: reveal the end line once, then report end idempotently
+        end_str = _get_sealed_line(sealed, n_ticks + 1)
         if not st.get("done"):
-            if end is not None:
-                with open(stream, "a") as f:
-                    f.write(json.dumps(end) + "\n")
+            if end_str is not None:
+                with open(stream, "a", encoding="utf-8") as f:
+                    f.write(end_str + "\n")
                     f.flush()
             st["done"] = True
             atomic_write_json(state, st)
-        if end is not None:
-            print(json.dumps(end), file=out)
-        print(f"STATUS end bars={len(ticks)}", file=out)
+        if end_str is not None:
+            print(end_str, file=out)
+        print(f"STATUS end bars={n_ticks}", file=out)
     return 0
 
 
@@ -142,7 +155,7 @@ def status(session_dir: str | Path, out: TextIO = sys.stdout) -> int:
         print("STATUS nostart", file=out)
         return 3
     with file_lock(_lock_path(sdir)):
-        st = json.loads(state.read_text())
+        st = json.loads(state.read_text(encoding="utf-8"))
     print(f"STATUS cursor={st['cursor']} of {st['n']} done={str(st.get('done', False)).lower()}", file=out)
     return 0
 

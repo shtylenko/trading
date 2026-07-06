@@ -31,5 +31,7 @@ def __getattr__(name: str):
     if name in {"PositionEngine", "get_session_view", "list_sessions"}:
         from . import recorder
 
-        return getattr(recorder, name)
-    raise AttributeError(name)
+        val = getattr(recorder, name)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

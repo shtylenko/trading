@@ -81,6 +81,7 @@ def _safe_session_id(sid: str) -> Optional[str]:
 _sse_clients: dict[str, list[queue.Queue]] = {}
 _sse_lock = threading.Lock()
 _monitor_thread_started = False
+_shutdown_event = threading.Event()
 
 
 def _sse_broadcast(session_id: str, event: dict):
@@ -120,22 +121,22 @@ def _start_monitor():
 
     def monitor():
         last_mtime: dict[str, float] = {}
-        while True:
+        while not _shutdown_event.is_set():
             try:
                 # Nothing is listening → don't stat every session folder on a
                 # 0.8s loop. Idle cheaply until a browser opens an SSE stream.
                 with _sse_lock:
-                    has_clients = any(_sse_clients.values())
-                if not has_clients:
-                    time.sleep(1.0)
+                    active_sids = [sid for sid, qs in _sse_clients.items() if qs]
+                if not active_sids:
+                    _shutdown_event.wait(1.0)
                     continue
                 if not SIM_ROOT.exists():
-                    time.sleep(1.0)
+                    _shutdown_event.wait(1.0)
                     continue
-                for sdir in SIM_ROOT.iterdir():
+                for sid in active_sids:
+                    sdir = SIM_ROOT / sid
                     if not (sdir / "session.json").exists():
                         continue
-                    sid = sdir.name
                     key_files = [sdir / "stream.jsonl", sdir / "decisions.jsonl", sdir / "session.json"]
                     current = 0.0
                     for f in key_files:
@@ -147,7 +148,7 @@ def _start_monitor():
                         _sse_broadcast(sid, {"type": "update", "session": sid, "ts": current})
             except Exception:
                 logger.debug("Monitor thread error", exc_info=True)
-            time.sleep(0.8)  # poll ~1.25 times/sec is plenty for local use
+            _shutdown_event.wait(0.8)  # poll ~1.25 times/sec is plenty for local use
 
     t = threading.Thread(target=monitor, daemon=True)
     t.start()
@@ -216,8 +217,11 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
                 from . import recorder
                 sessions = recorder.list_sessions()
                 self._send_json({"sessions": sessions})
+            except (json.JSONDecodeError, OSError, KeyError, TypeError) as e:
+                logger.warning("Error handling /api/sessions: %s", e)
+                self._send_json({"error": str(e)}, 500)
             except Exception as e:
-                logger.exception("Error handling /api/sessions")
+                logger.exception("Unexpected error handling /api/sessions")
                 self._send_json({"error": str(e)}, 500)
             return
 
@@ -227,15 +231,21 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
             if not sid:
                 self._send_json({"error": "bad session id"}, 400)
                 return
-            if len(parts) > 3 and parts[3] in ("state", "events", "finalize"):
+            if not (SIM_ROOT / sid).exists():
+                self._send_json({"error": "session not found"}, 404)
+                return
+            if len(parts) > 3:
                 # leaf detail endpoints: /api/session/<leaf>/state etc.
                 if path.endswith("/state") or path.endswith("/state/"):
                     try:
                         from . import recorder
                         view = recorder.get_session_view(SIM_ROOT / sid)
                         self._send_json(view)
+                    except (json.JSONDecodeError, OSError, KeyError, TypeError, ValueError) as e:
+                        logger.warning("Error handling leaf /api/session/<id>/state: %s", e)
+                        self._send_json({"error": str(e)}, 500)
                     except Exception as e:
-                        logger.exception("Error handling leaf /api/session/<id>/state")
+                        logger.exception("Unexpected error handling leaf /api/session/<id>/state")
                         self._send_json({"error": str(e)}, 500)
                     return
                 elif path.endswith("/events") or path.endswith("/events/"):
@@ -260,15 +270,18 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
                         _unregister_sse_client(sid, q)
                     return
                 else:
-                    self._send_json({"error": "not implemented in new model yet"}, 501)
+                    self._send_json({"error": "not found"}, 404)
                     return
             else:
                 # top-level session detail: /api/session/<sess-id>
                 try:
                     from . import recorder
                     self._send_json(recorder.get_top_session_view(sid))
+                except (json.JSONDecodeError, OSError, KeyError, TypeError, ValueError) as e:
+                    logger.warning("Error handling /api/session/<id>: %s", e)
+                    self._send_json({"error": str(e)}, 500)
                 except Exception as e:
-                    logger.exception("Error handling /api/session/<id>")
+                    logger.exception("Unexpected error handling /api/session/<id>")
                     self._send_json({"error": str(e)}, 500)
                 return
 
@@ -310,6 +323,9 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
     def _do_finalize(self, sid: str):
+        if not (SIM_ROOT / sid).exists():
+            self._send_json({"error": "session not found"}, 404)
+            return
         try:
             from . import recorder
             # Force-close any still-open position at the last known price. This is a
@@ -317,8 +333,11 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
             # =False) — never reveal price action past where trading stopped.
             session = recorder.finalize(SIM_ROOT / sid, full_day=False)
             self._send_json({"ok": True, "session": session})
+        except (json.JSONDecodeError, OSError, KeyError, TypeError, ValueError) as e:
+            logger.warning("Error handling /api/session/.../finalize: %s", e)
+            self._send_json({"error": str(e)}, 500)
         except Exception as e:
-            logger.exception("Error handling /api/session/.../finalize")
+            logger.exception("Unexpected error handling /api/session/.../finalize")
             self._send_json({"error": str(e)}, 500)
 
 
@@ -379,6 +398,8 @@ def serve(session: Optional[str], port: int = 8765, open_browser: bool = True) -
             httpd.serve_forever()
         except KeyboardInterrupt:
             logger.info("stopped.")
+        finally:
+            _shutdown_event.set()
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -11,7 +11,8 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import date
+from pathlib import Path
 
 from .config import DATA_DIR, ScanConfig
 
@@ -40,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _date(s: str):
-    return datetime.strptime(s, "%Y-%m-%d").date()
+    return date.fromisoformat(s)
 
 
 def config_from_args(args: argparse.Namespace) -> ScanConfig:
@@ -64,8 +65,5 @@ def config_from_args(args: argparse.Namespace) -> ScanConfig:
     if args.float_max is not None:
         cfg.float_max = None if args.float_max <= 0 else args.float_max
     if args.db:
-        from pathlib import Path
         cfg.db_path = Path(args.db)
-    else:
-        cfg.db_path = DATA_DIR / "entries.db"
     return cfg

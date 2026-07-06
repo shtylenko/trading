@@ -37,7 +37,7 @@ class Entry:
     gap_pct: float
     rvol: float
     float_shares: Optional[float]
-    bar_vol_mult: float    # breakout-bar volume vs trailing avg
+    bar_vol_mult: Optional[float]    # breakout-bar volume vs trailing avg
     reason: str
 
 
@@ -98,8 +98,9 @@ def detect_from_frame(
     running_high = float(pre["high"].max()) if not pre.empty else float(win["high"].iloc[0])
     bars_since_new_high = cfg.consolidation_min_bars  # allow an immediate ORB break
 
-    for ts, row in win.iterrows():
-        hi = float(row["high"])
+    for row in win.itertuples():
+        ts = row.Index
+        hi = float(row.high)
         if hi <= running_high:
             bars_since_new_high += 1
             continue
@@ -113,17 +114,17 @@ def detect_from_frame(
             continue
         bars_since_new_high = 0
 
-        close = float(row["close"])
-        if close <= float(row["open"]):           # require a green breakout bar
+        close = float(row.close)
+        if close <= float(row.open):           # require a green breakout bar
             continue
-        vol_avg = row["vol_avg"]
+        vol_avg = row.vol_avg
         has_vol_base = pd.notna(vol_avg) and vol_avg > 0
-        vol_mult = float(row["volume"] / vol_avg) if has_vol_base else None
+        vol_mult = float(row.volume / vol_avg) if has_vol_base else None
         # If we have a baseline, enforce expansion; if not (thin/empty premarket),
         # we can't disprove it — let the setup through and flag the gap in the reason.
         if vol_mult is not None and vol_mult < cfg.vol_expansion_mult:
             continue
-        vwap = float(row["vwap"]) if pd.notna(row["vwap"]) else None
+        vwap = float(row.vwap) if pd.notna(row.vwap) else None
         if cfg.require_above_vwap and (vwap is None or close < vwap):
             continue
 

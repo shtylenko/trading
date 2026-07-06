@@ -245,6 +245,16 @@ def test_resume_excludes_voided(tmp_path, monkeypatch):
     assert counts.get(("TK", "2025-01-02"), 0) == 0
 
 
+def test_allowed_command_whitelist_is_source_of_truth():
+    # Ensures audit and prompt stay aligned via the extracted data.
+    assert "python3 -m trading.llm_trader.step next --session \"$SDIR\"" in batchsim.ALLOWED_EXACT
+    assert any(p.startswith("SDIR=$(python3 -m") for p in batchsim.ALLOWED_PREFIXES)
+    assert batchsim._allowed_command_line('python3 -m trading.llm_trader.recorder finalize --session "$SDIR"')
+    assert batchsim._allowed_command_line('echo "foo"')
+    assert not batchsim._allowed_command_line("cat _sealed.jsonl")
+    assert not batchsim._allowed_command_line("ls")
+
+
 def test_at_time_pins_exact_setup(tmp_path):
     from trading.llm_trader import replay
     db = tmp_path / "entries.db"

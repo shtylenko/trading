@@ -148,12 +148,8 @@ async function loadAndRenderList() {
 
 // (Batches view removed — everything is grouped under Sessions now.)
 
-// Force an initial render in case top-level call had timing issues
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => loadAndRenderList());
-} else {
-  loadAndRenderList();
-}
+// Force an initial render
+loadAndRenderList();
 
 async function loadSessionTickers(sessionId, updateUrl = false) {
   const tickersEl = document.getElementById("session-tickers");
@@ -319,6 +315,48 @@ function renderChart(bars, actions, sess, preserveView = false) {
     try { prevRange = currentChart.timeScale().getVisibleLogicalRange(); } catch (_) {}
   }
 
+  if (preserveView && currentChart && currentChart._series) {
+    const s = currentChart._series;
+    if (s.candle) {
+      s.candle.setData(bars.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })));
+    }
+    if (s.vwap) {
+      s.vwap.setData(bars.filter((b) => b.vwap != null).map((b) => ({ time: b.t, value: b.vwap })));
+    }
+    if (s.ema) {
+      s.ema.setData(bars.filter((b) => b.ema9 != null).map((b) => ({ time: b.t, value: b.ema9 })));
+    }
+    if (s.ema20) {
+      s.ema20.setData(bars.filter((b) => b.ema20 != null).map((b) => ({ time: b.t, value: b.ema20 })));
+    }
+    if (s.vol) {
+      s.vol.setData(bars.map((b) => ({
+        time: b.t, value: b.v,
+        color: (b.c >= b.o) ? "rgba(38,166,154,.55)" : "rgba(239,83,80,.55)",
+      })));
+    }
+    if (s.macd) {
+      s.macd.setData(bars.filter((b) => b.macd_hist != null).map((b) => ({
+        time: b.t, value: b.macd_hist,
+        color: (b.macd_hist >= 0) ? "rgba(38,166,154,.65)" : "rgba(239,83,80,.65)",
+      })));
+    }
+    if (s.candle) {
+      s.candle.setMarkers((actions || []).map((a) => ({
+        time: a.t,
+        position: a.side === "buy" ? "belowBar" : "aboveBar",
+        color: a.side === "buy" ? col("--entry") : col("--stop"),
+        shape: a.side === "buy" ? "arrowUp" : "arrowDown",
+        text: `${a.side === "buy" ? "BUY" : "SELL"} ${a.shares}@${a.price}`,
+      })));
+    }
+    currentChart._bars = bars || [];
+    // keep cached sorted times in sync for zoom
+    const bt = (bars || []).map((b) => b.t).filter((t) => typeof t === "number").sort((a, b) => a - b);
+    currentChart._barTimes = bt;
+    return currentChart;
+  }
+
   // Destroy previous chart if exists. Disconnect its ResizeObserver first —
   // otherwise each live re-render leaks an observer that keeps firing
   // applyOptions() on the disposed chart.
@@ -364,38 +402,39 @@ function renderChart(bars, actions, sess, preserveView = false) {
     visible: true,   // show Y-axis for candles so user can see and scale prices
   });
 
+  let vwapSeries = null, emaSeries = null, ema20Series = null, macdSeries = null;
   // Overlays (VWAP/EMAs) belong on the main price scale (right)
   const vwapData = bars.filter((b) => b.vwap != null).map((b) => ({ time: b.t, value: b.vwap }));
   if (vwapData.length) {
-    const vwap = chart.addLineSeries({
+    vwapSeries = chart.addLineSeries({
       color: col("--vwap"),
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: false,
     });
-    vwap.setData(vwapData);
+    vwapSeries.setData(vwapData);
   }
 
   const emaData = bars.filter((b) => b.ema9 != null).map((b) => ({ time: b.t, value: b.ema9 }));
   if (emaData.length) {
-    const ema = chart.addLineSeries({
+    emaSeries = chart.addLineSeries({
       color: col("--ema"),
       lineWidth: 1,
       priceLineVisible: false,
       lastValueVisible: false,
     });
-    ema.setData(emaData);
+    emaSeries.setData(emaData);
   }
 
   const ema20Data = bars.filter((b) => b.ema20 != null).map((b) => ({ time: b.t, value: b.ema20 }));
   if (ema20Data.length) {
-    const ema20 = chart.addLineSeries({
+    ema20Series = chart.addLineSeries({
       color: col("--ema2"),
       lineWidth: 1,
       priceLineVisible: false,
       lastValueVisible: false,
     });
-    ema20.setData(ema20Data);
+    ema20Series.setData(ema20Data);
   }
 
   // Volume subchart (bottom pane)
@@ -418,12 +457,12 @@ function renderChart(bars, actions, sess, preserveView = false) {
     color: (b.macd_hist >= 0) ? "rgba(38,166,154,.65)" : "rgba(239,83,80,.65)",
   }));
   if (macdData.length) {
-    const macd = chart.addHistogramSeries({
+    macdSeries = chart.addHistogramSeries({
       priceScaleId: "macd",
       priceLineVisible: false,
       lastValueVisible: false,
     });
-    macd.setData(macdData);
+    macdSeries.setData(macdData);
     chart.priceScale("macd").applyOptions({
       scaleMargins: { top: 0.75, bottom: 0.10 },
       visible: false,
@@ -463,6 +502,18 @@ function renderChart(bars, actions, sess, preserveView = false) {
   }
   chart._candle = candle;   // referenced by the timeline for crosshair linking
   chart._bars = bars || []; // for timeline clicks to zoom 2h window around a decision
+
+  // Precompute sorted numeric times for fast zoom without re-sorting on every click
+  const barTimes = (bars || [])
+    .map((b) => b.t)
+    .filter((t) => typeof t === "number")
+    .sort((a, b) => a - b);
+  chart._barTimes = barTimes;
+
+  chart._series = {
+    candle: candle, vwap: vwapSeries, ema: emaSeries,
+    ema20: ema20Series, vol: vol, macd: macdSeries,
+  };
 
 
   // Ensure proper size (important inside flex layouts)
@@ -520,18 +571,19 @@ function renderTimeline(decisions, chart) {
   // Zoom helper: on timeline click, show ~2 hours centered on the decision time
   // (1h before + 1h after), clamped to available bars. Near session start (e.g. 9:30
   // with no prior data) show 2h forward from the clicked time (or dataMin).
+  // Uses pre-cached sorted times from renderChart for speed and consistency.
+  const ONE_HOUR = 3600;
+  const START_TOL = 120; // seconds tolerance for "near dataMin"
+  const TARGET_SPAN = 2 * ONE_HOUR;
+
   function zoomToDecision(time) {
-    if (!chart || !chart.timeScale || !chart._bars || !time) return;
-    const barTimes = chart._bars
-      .map((b) => b.t)
-      .filter((t) => typeof t === "number")
-      .sort((a, b) => a - b);
+    if (!chart || !chart.timeScale || !chart._barTimes || !time) return;
+    const barTimes = chart._barTimes;
     if (!barTimes.length) return;
 
     const dataMin = barTimes[0];
     const dataMax = barTimes[barTimes.length - 1];
 
-    const ONE_HOUR = 3600;
     let from = time - ONE_HOUR;
     let to = time + ONE_HOUR;
 
@@ -541,19 +593,19 @@ function renderTimeline(decisions, chart) {
 
     // If the window ended up smaller than ~2h because we couldn't go before the target
     // (e.g. start of day / first decision at 9:30 with no prior data), expand forward
-    // to give essentially a full 2h view starting from the earliest data.
+    // to give essentially a full 2h view (9:30-11:30 style).
     let span = to - from;
-    if (span < 2 * ONE_HOUR && from <= dataMin + 120) {
-      to = Math.min(from + 2 * ONE_HOUR, dataMax);
-      // from stays at dataMin (or the clamped start), per "9:30-11:30" example
+    if (span < TARGET_SPAN && from <= dataMin + START_TOL) {
+      to = Math.min(from + TARGET_SPAN, dataMax);
     }
 
     // Symmetric handling near the end of data: ensure ~2h if possible
     span = to - from;
-    if (span < 2 * ONE_HOUR && to >= dataMax - 120) {
-      from = Math.max(to - 2 * ONE_HOUR, dataMin);
+    if (span < TARGET_SPAN && to >= dataMax - START_TOL) {
+      from = Math.max(to - TARGET_SPAN, dataMin);
     }
 
+    // Final safety: if still inverted or zero span, fall back to full data
     if (from >= to) {
       from = dataMin;
       to = dataMax;
@@ -592,7 +644,7 @@ function renderTimeline(decisions, chart) {
 }
 
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 function highlightCurrentSession() {
@@ -662,6 +714,10 @@ function setupLiveUpdates(sessionId) {
     currentEventSource = es;
 
     es.onmessage = (ev) => {
+      if (pollFallbackTimer) {
+        clearInterval(pollFallbackTimer);
+        pollFallbackTimer = null;
+      }
       // Any message (including heartbeats or update) → refresh state
       if (currentSessionId === sessionId) {
         refreshCurrentSession();

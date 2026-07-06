@@ -67,13 +67,15 @@ def _archive_path(skill_path: Path, version: str) -> Path:
     return archive_dir_for(skill_path) / f"{skill_path.stem}@{version}.md"
 
 
-def _archive_snapshot(skill_path: Path, version: str) -> Path:
+def _archive_snapshot(skill_path: Path, version: str, raw_bytes: Optional[bytes] = None) -> Path:
     """Save an immutable copy of the *current* skill bytes as
     ``archive/<stem>@<version>.md``. Called at the moment a version is recorded,
     so the snapshot's hash equals the hash the registry stores for that version."""
     dest = _archive_path(skill_path, version)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_bytes(dest, skill_path.read_bytes())
+    if raw_bytes is None:
+        raw_bytes = skill_path.read_bytes()
+    atomic_write_bytes(dest, raw_bytes)
     return dest
 
 
@@ -133,8 +135,8 @@ def _load_registry(registry_path: Path) -> dict:
     if not registry_path.exists():
         return {}
     try:
-        return json.loads(registry_path.read_text())
-    except Exception:
+        return json.loads(registry_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
         return {}
 
 
@@ -178,15 +180,15 @@ def _next_version(current: str, taken: set[str]) -> str:
     return ".".join(map(str, nums))
 
 
-def _write_version(skill_path: Path, new_version: str) -> bool:
-    """Replace (or insert) the frontmatter ``version:`` line. Returns success.
+def _write_version(skill_path: Path, new_version: str) -> Optional[bytes]:
+    """Replace (or insert) the frontmatter ``version:`` line. Returns new file bytes on success.
 
     Rewrites only the version line inside the leading ``---`` block, leaving the
-    rest of the file byte-for-byte intact. Returns ``False`` if there is no
+    rest of the file byte-for-byte intact. Returns ``None`` if there is no
     frontmatter block to edit (caller then falls back to a warning)."""
-    lines = skill_path.read_text().splitlines(keepends=True)
+    lines = skill_path.read_text(encoding="utf-8").splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
-        return False
+        return None
     end_idx = ver_idx = None
     for idx in range(1, len(lines)):
         if lines[idx].strip() == "---":
@@ -195,14 +197,36 @@ def _write_version(skill_path: Path, new_version: str) -> bool:
         if lines[idx].lstrip().startswith("version:"):
             ver_idx = idx
     if end_idx is None:
-        return False
+        return None
     newline = f"version: {new_version}\n"
     if ver_idx is not None:
         lines[ver_idx] = newline
     else:
         lines.insert(1, newline)  # just under the opening ---
-    atomic_write_text(skill_path, "".join(lines))
-    return True
+    data = "".join(lines).encode("utf-8")
+    atomic_write_bytes(skill_path, data)
+    return data
+
+
+def _register_and_archive(
+    reg_path: Path,
+    reg: dict,
+    skill_path: Path,
+    version: str,
+    meta: dict,
+    now: datetime,
+    bumped_from: Optional[str] = None,
+    raw_bytes: Optional[bytes] = None,
+) -> None:
+    entry = {
+        "content_hash": meta["content_hash"],
+        "first_seen": now.isoformat(timespec="seconds"),
+    }
+    if bumped_from is not None:
+        entry["bumped_from"] = bumped_from
+    reg[version] = entry
+    _save_registry(reg_path, reg)
+    _archive_snapshot(skill_path, version, raw_bytes=raw_bytes)
 
 
 def resolve_version(
@@ -221,7 +245,7 @@ def resolve_version(
     reg_path = Path(registry_path) if registry_path else registry_for(skill_path)
     now = now or datetime.now()
 
-    with file_lock(_registry_lock_path(reg_path)):
+    with file_lock(_registry_lock_path(reg_path)), file_lock(skill_path):
         meta = read_skill_meta(skill_path)
         reg = _load_registry(reg_path)
         version = meta.get("version")
@@ -229,26 +253,21 @@ def resolve_version(
         # versionless skill: create an initial version so the run is trackable
         if not version:
             new_version = _next_version("0.0.0", set(reg.keys()))  # → 0.0.1
-            if not _write_version(skill_path, new_version):
+            new_bytes = _write_version(skill_path, new_version)
+            if new_bytes is None:
                 return meta, (
                     f"skill {meta.get('name')!r} has no `version:` and no frontmatter "
                     "to write one into — recorded as unversioned."
                 )
             meta = read_skill_meta(skill_path)  # re-hash after writing the version
-            reg[new_version] = {"content_hash": meta["content_hash"],
-                                "first_seen": now.isoformat(timespec="seconds")}
-            _save_registry(reg_path, reg)
-            _archive_snapshot(skill_path, new_version)
+            _register_and_archive(reg_path, reg, skill_path, new_version, meta, now, raw_bytes=new_bytes)
             return meta, f"skill had no version — created {new_version}."
 
         entry = reg.get(version)
         current = meta.get("content_hash")
 
         if entry is None:  # first sighting (incl. a hand-set minor/major bump)
-            reg[version] = {"content_hash": current,
-                            "first_seen": now.isoformat(timespec="seconds")}
-            _save_registry(reg_path, reg)
-            _archive_snapshot(skill_path, version)
+            _register_and_archive(reg_path, reg, skill_path, version, meta, now)
             return meta, None
 
         if entry.get("content_hash") == current:  # unchanged
@@ -256,15 +275,12 @@ def resolve_version(
 
         # drift: content changed under an already-recorded version → auto-bump patch
         new_version = _next_version(version, set(reg.keys()))
-        if not _write_version(skill_path, new_version):
+        new_bytes = _write_version(skill_path, new_version)
+        if new_bytes is None:
             return meta, (
                 f"skill content changed under {version} but the frontmatter could not "
                 "be updated — bump `version:` manually."
             )
         meta = read_skill_meta(skill_path)  # re-hash AFTER writing the new version line
-        reg[new_version] = {"content_hash": meta["content_hash"],
-                            "first_seen": now.isoformat(timespec="seconds"),
-                            "bumped_from": version}
-        _save_registry(reg_path, reg)
-        _archive_snapshot(skill_path, new_version)
+        _register_and_archive(reg_path, reg, skill_path, new_version, meta, now, bumped_from=version, raw_bytes=new_bytes)
         return meta, f"auto-bumped skill version {version} → {new_version} (rules changed)."

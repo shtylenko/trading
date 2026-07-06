@@ -93,13 +93,12 @@ def run_scan(
                 if entry is not None:
                     store.upsert(entry)
                     stats.entries_found += 1
+        txt = store.dump_text(cfg.db_path.with_suffix(".txt"))
+        csv = store.dump_csv(cfg.db_path.with_suffix(".csv"))
+        total = store.count()
     finally:
         floats.flush()
-
-    txt = store.dump_text(cfg.db_path.with_suffix(".txt"))
-    csv = store.dump_csv(cfg.db_path.with_suffix(".csv"))
-    total = store.count()
-    store.close()
+        store.close()
 
     log.info(
         "done. gappers=%d float_ok=%d entries(new/updated)=%d table_total=%d",

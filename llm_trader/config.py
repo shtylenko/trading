@@ -21,7 +21,7 @@ def _as_date(value) -> date:
         return value.date()
     if isinstance(value, date):
         return value
-    return datetime.strptime(str(value), "%Y-%m-%d").date()
+    return date.fromisoformat(str(value)[:10])
 
 
 @dataclass
@@ -57,9 +57,9 @@ class ScanConfig:
     db_path: Path = field(default_factory=lambda: DATA_DIR / "entries.db")
 
     # ── Profiles ──────────────────────────────────────────────────────────
-    def apply_profile(self) -> "ScanConfig":
+    def apply_profile(self, *, override_bounds: bool = True) -> "ScanConfig":
         """Adjust price band for the 'main' account profile."""
-        if self.account_profile == "main":
+        if self.account_profile == "main" and override_bounds:
             self.price_min = 5.0
             self.price_max = 50.0
         return self
@@ -67,7 +67,9 @@ class ScanConfig:
     # ── (de)serialization ─────────────────────────────────────────────────
     @classmethod
     def from_yaml(cls, path: str | Path) -> "ScanConfig":
-        raw = yaml.safe_load(Path(path).read_text()) or {}
+        raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+        if not isinstance(raw, dict):
+            raise ValueError(f"Expected dict in YAML file {path}, got {type(raw).__name__}")
         return cls.from_dict(raw)
 
     @classmethod
@@ -83,7 +85,7 @@ class ScanConfig:
             raw["entry_window_et"] = tuple(raw["entry_window_et"])
         if "db_path" in raw and raw["db_path"] is not None:
             raw["db_path"] = Path(raw["db_path"])
-        known = {f for f in cls.__dataclass_fields__}
+        known = set(cls.__dataclass_fields__)
         unknown = set(raw) - known
         if unknown:
             # a typo'd key would otherwise be silently dropped and the run would
@@ -93,7 +95,7 @@ class ScanConfig:
                 f"valid keys: {sorted(known)}"
             )
         cfg = cls(**raw)
-        return cfg.apply_profile()
+        return cfg.apply_profile(override_bounds=not ("price_min" in raw or "price_max" in raw))
 
     def to_dict(self) -> dict:
         d = asdict(self)

@@ -454,3 +454,27 @@ def test_win_rate_counts_winning_sessions(tmp_path, monkeypatch):
     view = recorder.get_top_session_view("grp")
     row = next(t for t in view["tickers"] if t["ticker"] == "TK")
     assert row["n_trades"] == 2 and row["win_rate"] == 50.0
+
+
+def test_top_level_id_prefers_session_over_batch(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    d = tmp_path / "2026-foo-abc123"
+    d.mkdir()
+    (d / "session.json").write_text(json.dumps({
+        "id": "2026-foo-abc123", "session": "BATCH-XYZ", "batch": "old", "ticker": "FOO",
+        "status": "complete", "result": {"traded": False}
+    }))
+    groups = recorder.list_sessions()
+    assert any(g["id"] == "BATCH-XYZ" for g in groups)
+    # get_top should work with the session id
+    v = recorder.get_top_session_view("BATCH-XYZ")
+    assert v["id"] == "BATCH-XYZ"
+
+
+def test_validate_session_artifact_detects_problems(tmp_path):
+    d = tmp_path / "bad-sess"
+    d.mkdir()
+    (d / "session.json").write_text(json.dumps({"status": "complete"}))
+    # missing bars etc for complete
+    probs = recorder._validate_session_artifact(d, require_complete=True)
+    assert any("missing" in p for p in probs) or any("complete" in p for p in probs)

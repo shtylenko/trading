@@ -43,6 +43,7 @@ from typing import Optional
 from . import skillmeta
 from .config import DATA_DIR
 from .fsutils import atomic_write_json, atomic_write_text, file_lock
+from .streamio import epoch_et as _epoch_et
 from .streamio import parse_stream as _parse_stream
 from .streamio import read_jsonl as _read_jsonl
 
@@ -104,6 +105,8 @@ class PositionEngine:
             raise ValueError(f"turn i={i}: action {action} must not carry a fill (shares_delta set)")
         if action == "ENTER" and self.shares > 0:
             raise ValueError(f"turn i={i}: ENTER while already long {self.shares} (use ADD)")
+        if action == "ENTER" and self.entry_i is not None:
+            raise ValueError(f"turn i={i}: ENTER after position already established (one trade per session)")
         if action in ("ENTER", "ADD") and dq and dq < 0:
             raise ValueError(f"turn i={i}: {action} must be a buy (shares_delta > 0)")
         if action in ("SCALE", "EXIT") and dq and dq > 0:
@@ -253,13 +256,6 @@ class PositionEngine:
 
 
 # ───────────────────────────── helpers ──────────────────────────────────────
-
-
-def _epoch_et(date_str: str, hhmm: str) -> int:
-    """ET wall-clock as a unix timestamp, stored as if UTC so chart axis labels
-    read the ET clock (10:20, 10:21 …). One session, so no DST ambiguity."""
-    d = datetime.strptime(f"{date_str} {hhmm}", "%Y-%m-%d %H:%M")
-    return int(d.replace(tzinfo=timezone.utc).timestamp())
 
 
 def _session_lock_path(session_dir: str | Path) -> Path:
@@ -499,11 +495,13 @@ def _full_day_bars(meta: dict) -> Optional[list[dict]]:
     day = _dt.strptime(meta["date"], "%Y-%m-%d").date()
     try:
         df = replay.fetch_minute_bars(meta["ticker"], day)
-    except Exception:
+    except (OSError, ValueError, KeyError, TypeError) as e:
         # provider miss is a legitimate fallback path (caller uses streamed ticks),
         # but record why so a broken provider isn't silently masked as "no data".
-        logger.debug("full-day bar fetch failed for %s %s", meta["ticker"], day,
-                     exc_info=True)
+        logger.debug("full-day bar fetch failed for %s %s: %s", meta["ticker"], day, e)
+        return None
+    except Exception:
+        logger.debug("full-day bar fetch unexpected error for %s %s", meta["ticker"], day, exc_info=True)
         return None
     if df is None or df.empty:
         return None
@@ -671,6 +669,7 @@ def finalize(session_dir: str | Path, full_day: bool = True) -> dict:
     leak price action past where trading stopped.
     """
     sdir = Path(session_dir)
+    t0 = time.time()
     with file_lock(_session_lock_path(sdir)):
         session_path = sdir / "session.json"
         if not session_path.exists():
@@ -727,21 +726,56 @@ def finalize(session_dir: str | Path, full_day: bool = True) -> dict:
         atomic_write_json(sdir / "pnl.json", pnl, indent=2)
         atomic_write_text(sdir / "journal.md", _journal(session, meta, pnl, actions, timeline))
         atomic_write_json(sdir / "session.json", session, indent=2)
+        dt = round(time.time() - t0, 3)
+        logger.info("finalize %s took %ss (full_day=%s)", sdir.name, dt, full_day)
         return session
 
 
 # ───────────────────────────── Live / UI view helpers ────────────────────────
 
-def _load_json(path: Path, default=None):
+def _load_json(path: Path, default=None, *, log_errors: bool = True):
+    """Tolerant JSON loader for session artifacts.
+
+    Returns default for missing or unparseable files (expected for running
+    sessions). Distinguishes FileNotFound vs decode errors for better diagnostics.
+    Callers that need strict behavior should check the result or pass log_errors=False.
+    """
     if not path.exists():
         return default
     try:
-        return json.loads(path.read_text())
-    except Exception:
-        # a corrupt/half-written file is expected (sessions are polled mid-write),
-        # but log it so a genuinely broken artifact isn't invisible.
-        logger.debug("failed to parse JSON at %s", path, exc_info=True)
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        if log_errors:
+            logger.debug("failed to parse JSON at %s: %s", path, e)
         return default
+    except Exception:
+        # Other I/O or unexpected problems
+        if log_errors:
+            logger.debug("failed to load JSON at %s", path, exc_info=True)
+        return default
+
+
+def _validate_session_artifact(sdir: Path, *, require_complete: bool = False) -> list[str]:
+    """Lightweight structural validation. Returns list of problem strings (empty = ok).
+
+    Used by tests and can be called from finalize or admin tools. Does not raise.
+    """
+    problems = []
+    sess = _load_json(sdir / "session.json", {})
+    if not sess:
+        problems.append("missing or unreadable session.json")
+        return problems
+    if require_complete and sess.get("status") != "complete":
+        problems.append("session not marked complete")
+    for name in ("bars.json", "actions.json", "decisions.json", "pnl.json"):
+        if not (sdir / name).exists() and sess.get("status") == "complete":
+            problems.append(f"missing {name} for complete session")
+    # spot check keys on complete
+    if sess.get("status") == "complete":
+        pnl = _load_json(sdir / "pnl.json", {})
+        if pnl is not None and not isinstance(pnl.get("realized_pnl"), (int, float, type(None))):
+            problems.append("pnl.realized_pnl has unexpected type")
+    return problems
 
 
 def iter_sessions(*, skip_private: bool = True):
@@ -801,7 +835,11 @@ def get_session_view(session_dir: str | Path) -> dict:
         }
 
     # Live path: use only what has been revealed
-    meta, ticks, end = _parse_stream(sdir / "stream.jsonl")
+    try:
+        meta, ticks, end = _parse_stream(sdir / "stream.jsonl")
+    except Exception:
+        logger.debug("parse_stream failed for live view %s", sdir.name, exc_info=True)
+        meta = None
     if meta is None:
         # brand new, only session.json exists
         return {
@@ -859,15 +897,17 @@ def get_session_view(session_dir: str | Path) -> dict:
 _LIVE_PNL_CACHE_MAX = 512
 _live_pnl_cache: dict[str, tuple[float, Optional[dict]]] = {}
 _live_pnl_lock = threading.Lock()
+_completed_mtime_cache: dict[str, float] = {}
 
 
-def _live_pnl_snapshot(sdir: Path) -> Optional[dict]:
+def _live_pnl_snapshot(sdir: Path, mtime: Optional[float] = None) -> Optional[dict]:
     sid = sdir.name
-    mtime = 0.0
-    for name in ("stream.jsonl", "decisions.jsonl"):
-        f = sdir / name
-        if f.exists():
-            mtime = max(mtime, f.stat().st_mtime)
+    if mtime is None:
+        mtime = 0.0
+        for name in ("stream.jsonl", "decisions.jsonl"):
+            f = sdir / name
+            if f.exists():
+                mtime = max(mtime, f.stat().st_mtime)
     with _live_pnl_lock:
         cached = _live_pnl_cache.get(sid)
         if cached and cached[0] == mtime:
@@ -875,47 +915,70 @@ def _live_pnl_snapshot(sdir: Path) -> Optional[dict]:
     snapshot = None
     try:
         live = get_session_view(sdir)
-        lp = live.get("pnl", {})
+        lp = live.get("pnl", {}) or {}
         if lp:
             decs = live.get("decisions") or []
             snapshot = {
                 "realized_pnl": lp.get("realized_pnl"),
                 "unrealized": decs[-1].get("unrealized") if decs else None,
             }
+    except (json.JSONDecodeError, KeyError, TypeError, OSError) as e:
+        # Expected for half-written running sessions or missing artifacts
+        logger.debug("live pnl snapshot failed for %s: %s", sid, e)
+        snapshot = None
     except Exception:
-        logger.debug("live pnl snapshot failed for %s", sid, exc_info=True)
+        logger.debug("live pnl snapshot unexpected error for %s", sid, exc_info=True)
         snapshot = None
     with _live_pnl_lock:
-        # simple FIFO-ish bound: drop an arbitrary existing entry when full and this
-        # is a new key. Insertion order ≈ eviction order (dicts are ordered).
+        # Bound the cache: drop oldest (by insertion) when full for a new key.
+        # Use a simple pop of first item; for very large histories consider LRU.
         if len(_live_pnl_cache) >= _LIVE_PNL_CACHE_MAX and sid not in _live_pnl_cache:
-            _live_pnl_cache.pop(next(iter(_live_pnl_cache)), None)
+            try:
+                oldest = next(iter(_live_pnl_cache))
+                _live_pnl_cache.pop(oldest, None)
+            except StopIteration:
+                pass
         _live_pnl_cache[sid] = (mtime, snapshot)
     return snapshot
 
 
-def _session_newest_mtime(d: Path) -> float:
+def _session_newest_mtime(d: Path, is_complete: bool = False) -> float:
     """Newest write to any live file — the session's real wall-clock last activity."""
+    sid = d.name
+    if is_complete and sid in _completed_mtime_cache:
+        return _completed_mtime_cache[sid]
     newest = 0.0
     for name in ("decisions.jsonl", "stream.jsonl", "session.json"):
         f = d / name
         if f.exists():
             newest = max(newest, f.stat().st_mtime)
+    if is_complete and newest > 0:
+        _completed_mtime_cache[sid] = newest
     return newest
+
+
+def _top_level_id(s: dict, d: Path) -> str:
+    """Single source of truth for grouping leaf sessions under a top-level id.
+
+    Prefers the explicit "session" field (live day or batch tag), falls back to
+    legacy "batch", then the leaf "id", then folder name. This centralizes the
+    logic that previously used repeated ternaries and prevents drift.
+    """
+    return s.get("session") or s.get("batch") or s.get("id") or d.name
 
 
 def _session_entry(d: Path, s: dict) -> dict:
     """Lightweight summary of one session folder (for the list + batch views)."""
     # Last activity = newest live-file write as real wall-clock time (NOT the last
     # decision's historical bar clock like "10:23", which would sort nonsensically).
-    newest_mtime = _session_newest_mtime(d)
+    status = s.get("status", "running")
+    newest_mtime = _session_newest_mtime(d, is_complete=(status == "complete"))
     last_ts = (
         datetime.fromtimestamp(newest_mtime).isoformat(timespec="seconds")
         if newest_mtime
         else s.get("finalized_ts") or s.get("real_run_ts")
     )
 
-    status = s.get("status", "running")
     # A "running" session whose files haven't changed in a while was almost certainly
     # abandoned (crash / closed terminal) — flag it so the UI can distinguish it from
     # a live one instead of showing it green forever.
@@ -944,7 +1007,7 @@ def _session_entry(d: Path, s: dict) -> dict:
 
     # For running sessions, include a current PnL snapshot (mtime-cached).
     if status != "complete":
-        snap = _live_pnl_snapshot(d)
+        snap = _live_pnl_snapshot(d, mtime=newest_mtime)
         if snap:
             entry["live_pnl"] = snap
 
@@ -955,7 +1018,7 @@ def list_sessions() -> list[dict]:
     """Return top-level sessions (live or simulated batches). New primary grouping."""
     groups: dict[str, list] = defaultdict(list)
     for d, s in iter_sessions():
-        sid = s.get("session") or s.get("batch") or s.get("id") or d.name
+        sid = _top_level_id(s, d)
         groups[sid].append((d, s))
     out = []
     for sid, items in groups.items():
@@ -1012,9 +1075,13 @@ def _batch_meta(tag: str) -> dict:
 
 
 def _iter_session_members(sess_id: str):
-    """Yield leaves belonging to a top-level session (by ``session`` or ``batch`` field)."""
+    """Yield leaves belonging to a top-level session (by ``session`` or ``batch`` field).
+
+    Uses the single _top_level_id resolver so grouping never drifts between
+    list_sessions, get_top_session_view, and reporting.
+    """
     for d, s in iter_sessions():
-        if (s.get("session") == sess_id) or (s.get("batch") == sess_id):
+        if _top_level_id(s, d) == sess_id:
             yield d, s
 
 

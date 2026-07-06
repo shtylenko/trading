@@ -34,9 +34,11 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as _cf
 import json
+import os
 import random
 import re
 import secrets
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -61,6 +63,30 @@ BATCH_LOGS = recorder.SIM_ROOT / "_batch"   # captured agent transcripts, per co
 _PEEK_PATTERNS = ("_sealed.jsonl", "_step.json", "fetch_bars", "fetch_minute_bars")
 _REPLAY_RE = "trading.llm_trader.replay"
 _STEP_START_RE = "step start"
+
+# Single source for the conservative whitelist used both by the batch prompt
+# instructions and by the post-hoc audit. Adding a new allowed shape requires
+# updating BOTH the prompt text in _prompt() AND this list (see test_batchsim).
+ALLOWED_EXACT = {
+    "step start",
+    "step next",
+    "recorder log",
+    "finalize",
+    "ROOT=$(pwd)",
+    'ls -la "$SDIR" | cat',
+    'python3 -m trading.llm_trader.step next --session "$SDIR"',
+    'python3 -m trading.llm_trader.step status --session "$SDIR"',
+    'python3 -m trading.llm_trader.recorder finalize --session "$SDIR"',
+    "python3 -m trading.llm_trader.step start --session X",  # unit-test shorthand
+}
+ALLOWED_PREFIXES = (
+    "echo ",
+    "SDIR=$(python3 -m trading.llm_trader.recorder init ",
+    'ls -la "$ROOT" | grep -E ',
+    'test -f "$SDIR/stream.jsonl" && echo ',
+    'python3 -m trading.llm_trader.step start --session "$SDIR" ',
+    'python3 -m trading.llm_trader.recorder log --session "$SDIR" --record ',
+)
 
 
 def _latest_version() -> str:
@@ -93,10 +119,9 @@ def build_set(
     Deduped to one setup per (ticker, date) so `step start --ticker --date` is
     unambiguous.
     """
-    conn = sqlite3.connect(str(db))
-    conn.row_factory = sqlite3.Row
-    rows = [dict(r) for r in conn.execute("SELECT * FROM entries")]
-    conn.close()
+    with sqlite3.connect(str(db)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = [dict(r) for r in conn.execute("SELECT * FROM entries")]
     rows = [r for r in rows if _hhmm_after(r.get("time_et", ""), after)]
 
     # dedupe to one per (ticker, date)
@@ -298,8 +323,9 @@ def _completed_counts(tag: str) -> dict[tuple, int]:
     Voided sessions do NOT count as done, so ``--resume`` re-runs a setup whose only
     prior attempt was audit-voided instead of leaving you a tainted cohort."""
     counts: dict[tuple, int] = defaultdict(int)
-    for _, s in recorder.iter_sessions():
-        if s.get("batch") == tag and s.get("status") == "complete" and not s.get("void"):
+    for d in _sessions_for_batch(tag):
+        s = recorder._load_json(d / "session.json", {}) or {}
+        if s.get("status") == "complete" and not s.get("void"):
             counts[(s.get("ticker"), s.get("historical_date"))] += 1
     return counts
 
@@ -312,7 +338,16 @@ def _load_manifest(tag: str) -> list[dict]:
     p = _manifest_path(tag)
     if not p.exists():
         return []
-    return [json.loads(ln) for ln in p.read_text().splitlines() if ln.strip()]
+    out = []
+    for ln in p.read_text(encoding="utf-8").splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            out.append(json.loads(ln))
+        except (json.JSONDecodeError, TypeError):
+            pass  # tolerate a partially written manifest line
+    return out
 
 
 def _run_one(work: dict) -> dict:
@@ -333,24 +368,31 @@ def _run_one(work: dict) -> dict:
                 "session_name": name, "sid": None}
 
     try:
-        proc = subprocess.run(
-            cmd, cwd=str(REPO_ROOT), capture_output=True, text=True,
-            timeout=work["timeout"],
-        )
+        with subprocess.Popen(
+            cmd, cwd=str(REPO_ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, start_new_session=True,
+        ) as proc:
+            try:
+                stdout, stderr = proc.communicate(timeout=work["timeout"])
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    proc.kill()
+                proc.wait()
+                log_path.write_text(f"[TIMEOUT after {work['timeout']}s]\n")
+                return {"item": work["item"], "session_name": name, "sid": None,
+                        "ticker": work["ticker"], "date": work["date"], "rep": work["rep"],
+                        "status": "timeout"}
         log_path.write_text(
-            f"[exit {proc.returncode}]\n===== STDOUT =====\n{proc.stdout}\n"
-            f"===== STDERR =====\n{proc.stderr}\n"
+            f"[exit {proc.returncode}]\n===== STDOUT =====\n{stdout}\n"
+            f"===== STDERR =====\n{stderr}\n"
         )
-        sid = _extract_sid(proc.stdout)
+        sid = _extract_sid(stdout)
         return {"item": work["item"], "session_name": name, "sid": sid,
                 "ticker": work["ticker"], "date": work["date"], "rep": work["rep"],
                 "status": "ok" if proc.returncode == 0 else "err",
                 "returncode": proc.returncode, "log": str(log_path)}
-    except subprocess.TimeoutExpired:
-        log_path.write_text(f"[TIMEOUT after {work['timeout']}s]\n")
-        return {"item": work["item"], "session_name": name, "sid": None,
-                "ticker": work["ticker"], "date": work["date"], "rep": work["rep"],
-                "status": "timeout"}
     except FileNotFoundError:
         return {"item": work["item"], "session_name": name, "sid": None,
                 "status": "no-hermes", "error": "`hermes` CLI not found on PATH"}
@@ -478,8 +520,8 @@ def _write_batch_meta(tag: str, **fields) -> None:
     meta = {}
     if p.exists():
         try:
-            meta = json.loads(p.read_text())
-        except json.JSONDecodeError:
+            meta = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, TypeError):
             meta = {}
     meta.update(fields)
     atomic_write_json(p, meta, indent=2)
@@ -511,6 +553,16 @@ def _void_stats(tag: str) -> tuple[int, int]:
 
 
 def _sessions_for_batch(tag: str) -> list[Path]:
+    manifest = _load_manifest(tag)
+    if manifest:
+        paths = []
+        for r in manifest:
+            sid = r.get("sid")
+            if sid:
+                d = recorder.SIM_ROOT / sid
+                if d.exists():
+                    paths.append(d)
+        return paths
     return [d for d, s in recorder.iter_sessions() if s.get("batch") == tag]
 
 
@@ -628,23 +680,30 @@ def _resolve_batch_commands(sids: list[str]) -> dict[str, Optional[str]]:
     if not remaining:
         return result
     saw_content = False
-    for hid in _recent_session_ids(limit=max(20, 3 * len(sids))):
-        if not remaining:
-            break
-        text = _export_session(hid)
-        if not text:
-            continue
-        matched = [s for s in remaining if s in text]
-        if not matched:
-            continue
-        saw_content = True
-        cmds = _parse_export(text)
-        if cmds is None:
-            print(f"⚠ audit: hermes session {hid} matched a run but yielded no parseable "
-                  f"tool calls — export schema mismatch? head:\n{text[:400]}", file=sys.stderr)
-        for s in matched:
-            result[s] = cmds
-            remaining.discard(s)
+    recent_ids = _recent_session_ids(limit=max(20, 3 * len(sids)))
+    with _cf.ThreadPoolExecutor(max_workers=min(10, max(1, len(recent_ids)))) as pool:
+        future_to_hid = {pool.submit(_export_session, hid): hid for hid in recent_ids}
+        for future in _cf.as_completed(future_to_hid):
+            hid = future_to_hid[future]
+            try:
+                text = future.result()
+            except Exception:
+                text = None
+            if not text:
+                continue
+            matched = [s for s in remaining if s in text]
+            if not matched:
+                continue
+            saw_content = True
+            cmds = _parse_export(text)
+            if cmds is None:
+                print(f"⚠ audit: hermes session {hid} matched a run but yielded no parseable "
+                      f"tool calls — export schema mismatch? head:\n{text[:400]}", file=sys.stderr)
+            for s in matched:
+                result[s] = cmds
+                remaining.discard(s)
+            if not remaining:
+                break
     if remaining and not saw_content:
         print(f"⚠ audit: could not locate hermes sessions for {len(remaining)} run(s) by "
               "SDIR — `hermes sessions export` contract may not hold (see README smoke "
@@ -683,37 +742,13 @@ def _command_lines(commands: str) -> list[str]:
 def _allowed_command_line(line: str) -> bool:
     """Allow only the command shapes the batch prompt intentionally permits.
 
-    This does not try to parse shell grammar. It is a conservative transcript
-    audit: if a run needs different tooling, the prompt and audit should change
-    together and the run should be re-audited.
+    Uses the module-level ALLOWED_EXACT + ALLOWED_PREFIXES so the audit and
+    the injected prompt stay aligned. If you change the prompt block, update
+    these sets and add a regression test.
     """
-    if line in {"step start", "step next", "recorder log", "finalize"}:  # compact unit-test shorthands
+    if line in ALLOWED_EXACT:
         return True
-    if line.startswith("echo "):
-        return True
-    if line.startswith("SDIR=$(python3 -m trading.llm_trader.recorder init "):
-        return True
-    if line == "ROOT=$(pwd)":
-        return True
-    if line == 'ls -la "$SDIR" | cat':
-        return True
-    if line.startswith('test -f "$SDIR/stream.jsonl" && echo '):
-        return True
-    if line.startswith('ls -la "$ROOT" | grep -E '):
-        return True
-    if line.startswith("python3 -m trading.llm_trader.step start --session \"$SDIR\" "):
-        return True
-    if line == "python3 -m trading.llm_trader.step start --session X":
-        return True
-    if line == 'python3 -m trading.llm_trader.step next --session "$SDIR"':
-        return True
-    if line == 'python3 -m trading.llm_trader.step status --session "$SDIR"':
-        return True
-    if line.startswith('python3 -m trading.llm_trader.recorder log --session "$SDIR" --record '):
-        return True
-    if line == 'python3 -m trading.llm_trader.recorder finalize --session "$SDIR"':
-        return True
-    return False
+    return any(line.startswith(p) for p in ALLOWED_PREFIXES)
 
 
 def audit(tag: str) -> int:

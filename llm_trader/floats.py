@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import DATA_DIR
-from .fsutils import atomic_write_json
+from .fsutils import atomic_write_json, file_lock
 
 _CACHE = DATA_DIR / "float_cache.json"
 _CACHE_TTL_S = 30 * 24 * 3600  # floats drift slowly; refresh monthly
@@ -29,11 +29,10 @@ class FloatCache:
     def __init__(self) -> None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._data: dict[str, dict] = {}
-        if _CACHE.exists():
-            try:
-                self._data = json.loads(_CACHE.read_text())
-            except (json.JSONDecodeError, OSError):
-                self._data = {}
+        try:
+            self._data = json.loads(_CACHE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            self._data = {}
         self._dirty = False
 
     def get(self, ticker: str) -> Optional[float]:
@@ -65,7 +64,16 @@ class FloatCache:
         return value < float_max
 
     def flush(self) -> None:
-        if self._dirty:
+        if not self._dirty:
+            return
+        with file_lock(_CACHE):
+            disk_data = {}
+            try:
+                disk_data = json.loads(_CACHE.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                disk_data = {}
+            disk_data.update(self._data)
+            self._data = disk_data
             atomic_write_json(_CACHE, self._data)
             self._dirty = False
 

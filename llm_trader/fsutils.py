@@ -15,9 +15,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+import weakref
 import fcntl
 
-_THREAD_LOCKS: dict[str, threading.Lock] = {}
+_THREAD_LOCKS: weakref.WeakValueDictionary[str, threading.Lock] = weakref.WeakValueDictionary()
 _THREAD_LOCKS_GUARD = threading.Lock()
 
 
@@ -42,7 +43,7 @@ def file_lock(path: str | Path) -> Iterator[None]:
     p.parent.mkdir(parents=True, exist_ok=True)
     thread_lock = _thread_lock_for(p)
     with thread_lock:
-        with open(p, "a+") as fh:
+        with open(p, "a") as fh:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
             try:
                 yield
@@ -52,21 +53,7 @@ def file_lock(path: str | Path) -> Iterator[None]:
 
 def atomic_write_text(path: str | Path, text: str) -> None:
     """Write text via a same-directory temp file and atomic replace."""
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{p.name}.", suffix=".tmp", dir=str(p.parent))
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, p)
-    finally:
-        try:
-            tmp.unlink()
-        except FileNotFoundError:
-            pass
+    atomic_write_bytes(path, text.encode("utf-8"))
 
 
 def atomic_write_bytes(path: str | Path, data: bytes) -> None:
@@ -82,10 +69,7 @@ def atomic_write_bytes(path: str | Path, data: bytes) -> None:
             os.fsync(fh.fileno())
         os.replace(tmp, p)
     finally:
-        try:
-            tmp.unlink()
-        except FileNotFoundError:
-            pass
+        tmp.unlink(missing_ok=True)
 
 
 def atomic_write_json(

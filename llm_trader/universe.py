@@ -19,7 +19,7 @@ from pathlib import Path
 import requests
 
 from .config import DATA_DIR
-from .fsutils import atomic_write_json
+from .fsutils import atomic_write_json, file_lock
 
 _FINNHUB_URL = "https://finnhub.io/api/v1/stock/symbol"
 _CACHE = DATA_DIR / "universe_symbols.json"
@@ -45,9 +45,10 @@ def fetch_symbols(
     Cached to ``data/universe_symbols.json`` (refreshed weekly or on ``force``).
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    cached = _read_cache(exchanges)
-    if cached is not None and not force:
-        return cached
+    with file_lock(_CACHE):
+        cached = _read_cache(exchanges)
+        if cached is not None and not force:
+            return cached
 
     resp = requests.get(
         _FINNHUB_URL,
@@ -56,10 +57,14 @@ def fetch_symbols(
     )
     resp.raise_for_status()
     rows = resp.json()
+    if not isinstance(rows, list):
+        raise ValueError(f"Expected list from Finnhub /stock/symbol, got {type(rows).__name__}")
 
-    keep = []
+    keep = set()
     wanted = set(exchanges)
     for r in rows:
+        if not isinstance(r, dict):
+            continue
         if r.get("type") != "Common Stock":
             continue
         if r.get("mic") not in wanted:
@@ -68,10 +73,15 @@ def fetch_symbols(
         # exclude symbols with class/warrant suffixes finnhub encodes with '.'
         if not sym or "." in sym:
             continue
-        keep.append(sym)
+        keep.add(sym)
 
-    symbols = sorted(set(keep))
-    _write_cache(exchanges, symbols)
+    symbols = sorted(keep)
+    with file_lock(_CACHE):
+        if not force:
+            cached_again = _read_cache(exchanges)
+            if cached_again is not None:
+                return cached_again
+        _write_cache(exchanges, symbols)
     return symbols
 
 
@@ -79,7 +89,7 @@ def _read_cache(exchanges: tuple[str, ...]) -> list[str] | None:
     if not _CACHE.exists():
         return None
     try:
-        blob = json.loads(_CACHE.read_text())
+        blob = json.loads(_CACHE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
     if blob.get("exchanges") != list(exchanges):

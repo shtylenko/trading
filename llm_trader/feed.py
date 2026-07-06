@@ -77,8 +77,24 @@ def read(
     """
     path = Path(ticks_path)
     deadline = time.monotonic() + timeout
+    last_stat = (-1, -1)
     while True:
+        try:
+            st = path.stat()
+            cur_stat = (st.st_size, st.st_mtime_ns)
+        except OSError:
+            cur_stat = None
+
+        if cur_stat == last_stat and wait and time.monotonic() < deadline:
+            time.sleep(poll)
+            continue
+        last_stat = cur_stat
+
         meta, want, end, n, has_next = _resolve(path, cursor)
+
+        def _emit_meta():
+            if cursor == 0 and meta is not None:
+                print(json.dumps(meta), file=out)
 
         if meta is None and want is None and end is None and n == 0:
             if wait and time.monotonic() < deadline:
@@ -88,8 +104,7 @@ def read(
             return 3
 
         if want is not None:
-            if cursor == 0 and meta is not None:
-                print(json.dumps(meta), file=out)
+            _emit_meta()
             print(json.dumps(want), file=out)
             # this tick is the last one iff no tick follows it AND the stream has
             # terminated — NOT merely because the end line exists in the file
@@ -99,8 +114,7 @@ def read(
 
         # No tick at the cursor: stream finished, or not streamed yet.
         if end is not None:
-            if cursor == 0 and meta is not None:
-                print(json.dumps(meta), file=out)
+            _emit_meta()
             print(json.dumps(end), file=out)
             print(f"STATUS end bars={end.get('bars', n)}", file=out)
             return 0
@@ -109,8 +123,7 @@ def read(
             time.sleep(poll)
             continue
 
-        if cursor == 0 and meta is not None:
-            print(json.dumps(meta), file=out)
+        _emit_meta()
         print(f"STATUS waiting have={n} ended=false", file=out)
         return 2
 

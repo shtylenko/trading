@@ -29,8 +29,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import secrets
 import sys
+import threading
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -42,7 +44,12 @@ from .config import DATA_DIR
 from .streamio import parse_stream as _parse_stream
 from .streamio import read_jsonl as _read_jsonl
 
+logger = logging.getLogger("llm_trader.recorder")
+
 SCHEMA_VERSION = 1
+# The one source of truth for the sessions tree. Other modules (viewer, batchsim,
+# step) import this rather than re-deriving the path, so they can never disagree
+# about where sessions live.
 SIM_ROOT = DATA_DIR.parent / "simulations"
 
 # default account profile knobs (mirrors the skill's small-account sizing)
@@ -215,13 +222,20 @@ class PositionEngine:
         self.avg_entry = 0.0
         return forced
 
-    def mfe_per_share(self, bars: list[dict]) -> Optional[float]:
-        if self.entry_i is None or self.entry_avg is None:
+    def peak_high_since_entry(self, bars: list[dict]) -> Optional[float]:
+        """Highest bar high from the entry bar onward (None if never entered / no
+        bars). Single source for both MFE (vs first fill) and capture (vs blended
+        cost) so ``_run_engine`` doesn't scan the bars for the max high twice."""
+        if self.entry_i is None:
             return None
         highs = [b["h"] for b in bars if b.get("i", -1) >= self.entry_i]
-        if not highs:
+        return max(highs) if highs else None
+
+    def mfe_per_share(self, bars: list[dict]) -> Optional[float]:
+        peak = self.peak_high_since_entry(bars)
+        if peak is None or self.entry_avg is None:
             return None
-        return round(max(highs) - self.entry_avg, 4)
+        return round(peak - self.entry_avg, 4)
 
     @property
     def realized_pnl(self) -> float:
@@ -338,6 +352,27 @@ def init(
     return sdir
 
 
+def _last_logged_i(path: Path) -> int:
+    """The largest decision ``i`` already appended to ``decisions.jsonl`` (-1 if
+    none). Scans from the end and returns the first parseable line's ``i`` — records
+    are written in increasing order, so that is the max; a half-flushed trailing line
+    is skipped."""
+    p = Path(path)
+    if not p.exists():
+        return -1
+    for line in reversed(p.read_text().splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        i = obj.get("i")
+        return i if isinstance(i, int) else -1
+    return -1
+
+
 def log(session_dir: str | Path, record: dict) -> None:
     """Append one decision record to ``decisions.jsonl``.
 
@@ -363,8 +398,10 @@ def log(session_dir: str | Path, record: dict) -> None:
         )
 
     i = record.get("i")
-    prior = _read_jsonl(sdir / "decisions.jsonl")
-    last_i = max((d.get("i", -1) for d in prior), default=-1)
+    # Decisions are append-only in strictly increasing `i`, so the last written
+    # record already holds the max — parse only that line instead of the whole file
+    # (this runs on every turn; a full re-parse would be O(n²) over a session).
+    last_i = _last_logged_i(sdir / "decisions.jsonl")
     if isinstance(i, int) and i <= last_i:
         raise ValueError(
             f"decision i={i} is not ahead of the last logged i={last_i} "
@@ -419,6 +456,10 @@ def _full_day_bars(meta: dict) -> Optional[list[dict]]:
     try:
         df = replay.fetch_minute_bars(meta["ticker"], day)
     except Exception:
+        # provider miss is a legitimate fallback path (caller uses streamed ticks),
+        # but record why so a broken provider isn't silently masked as "no data".
+        logger.debug("full-day bar fetch failed for %s %s", meta["ticker"], day,
+                     exc_info=True)
         return None
     if df is None or df.empty:
         return None
@@ -489,7 +530,12 @@ def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
             forced["t"] = _epoch_et(date_str, forced["time"])
         actions.append(forced)
 
-    mfe_ps = engine.mfe_per_share(bars)          # max(high) − first-fill price
+    # one scan of the bars for the peak high since entry, reused for both metrics.
+    peak_high = engine.peak_high_since_entry(bars)
+    mfe_ps = (                                   # max(high) − first-fill price
+        round(peak_high - engine.entry_avg, 4)
+        if (peak_high is not None and engine.entry_avg is not None) else None
+    )
     entry_avg = engine.blended_entry             # blended cost across all buys
     entry_shares = engine.entry_shares
     max_shares = engine.max_shares or None
@@ -497,8 +543,6 @@ def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
     # to the high and sold there (mfe-vs-blended-cost × peak shares). Peak size (not
     # the initial tranche) is the right scale, so pyramiding doesn't inflate capture
     # past ~1. ≈ "fraction of the favorable move you kept"; negative if the trade lost.
-    highs = [b["h"] for b in bars if b.get("i", -1) >= (engine.entry_i or 0)]
-    peak_high = max(highs) if (highs and engine.entry_i is not None) else None
     cap_ps = (peak_high - entry_avg) if (peak_high is not None and entry_avg) else None
     mfe_dollars = (cap_ps * max_shares) if (cap_ps and max_shares) else None
     mfe_capture = (
@@ -648,7 +692,30 @@ def _load_json(path: Path, default=None):
     try:
         return json.loads(path.read_text())
     except Exception:
+        # a corrupt/half-written file is expected (sessions are polled mid-write),
+        # but log it so a genuinely broken artifact isn't invisible.
+        logger.debug("failed to parse JSON at %s", path, exc_info=True)
         return default
+
+
+def iter_sessions(*, skip_private: bool = True):
+    """Yield ``(dir, session_dict)`` for every session folder under ``SIM_ROOT``,
+    newest-first by folder name.
+
+    The single source of truth for the "walk ``SIM_ROOT``, load ``session.json``,
+    tolerate junk" scan that was previously copy-pasted across the list/report/batch
+    helpers (and had already drifted on whether it skipped ``_``-prefixed bookkeeping
+    dirs). Skips ``_``-prefixed dirs (e.g. ``_batch``) by default and any folder
+    without a parseable ``session.json``.
+    """
+    if not SIM_ROOT.exists():
+        return
+    for d in sorted(SIM_ROOT.iterdir(), reverse=True):
+        if skip_private and d.name.startswith("_"):
+            continue
+        s = _load_json(d / "session.json")
+        if s:
+            yield d, s
 
 
 def get_session_view(session_dir: str | Path) -> dict:
@@ -741,7 +808,11 @@ def get_session_view(session_dir: str | Path) -> dict:
 
 # cache the (heavier) live-pnl recompute per session, keyed by input-file mtime,
 # so repeated /api/sessions polls don't re-run the engine on unchanged sessions.
+# The viewer server is threaded, so guard the dict with a lock; bound its size so a
+# long-lived server that has viewed thousands of sessions can't grow it unbounded.
+_LIVE_PNL_CACHE_MAX = 512
 _live_pnl_cache: dict[str, tuple[float, Optional[dict]]] = {}
+_live_pnl_lock = threading.Lock()
 
 
 def _live_pnl_snapshot(sdir: Path) -> Optional[dict]:
@@ -751,9 +822,10 @@ def _live_pnl_snapshot(sdir: Path) -> Optional[dict]:
         f = sdir / name
         if f.exists():
             mtime = max(mtime, f.stat().st_mtime)
-    cached = _live_pnl_cache.get(sid)
-    if cached and cached[0] == mtime:
-        return cached[1]
+    with _live_pnl_lock:
+        cached = _live_pnl_cache.get(sid)
+        if cached and cached[0] == mtime:
+            return cached[1]
     snapshot = None
     try:
         live = get_session_view(sdir)
@@ -765,8 +837,14 @@ def _live_pnl_snapshot(sdir: Path) -> Optional[dict]:
                 "unrealized": decs[-1].get("unrealized") if decs else None,
             }
     except Exception:
+        logger.debug("live pnl snapshot failed for %s", sid, exc_info=True)
         snapshot = None
-    _live_pnl_cache[sid] = (mtime, snapshot)
+    with _live_pnl_lock:
+        # simple FIFO-ish bound: drop an arbitrary existing entry when full and this
+        # is a new key. Insertion order ≈ eviction order (dicts are ordered).
+        if len(_live_pnl_cache) >= _LIVE_PNL_CACHE_MAX and sid not in _live_pnl_cache:
+            _live_pnl_cache.pop(next(iter(_live_pnl_cache)), None)
+        _live_pnl_cache[sid] = (mtime, snapshot)
     return snapshot
 
 
@@ -830,56 +908,45 @@ def _session_entry(d: Path, s: dict) -> dict:
 def list_sessions() -> list[dict]:
     """Return top-level sessions (live or simulated batches). New primary grouping."""
     groups: dict[str, list] = defaultdict(list)
-    if SIM_ROOT.exists():
-        for d in sorted(SIM_ROOT.iterdir(), reverse=True):
-            if d.name.startswith("_"):
-                continue
-            sf = d / "session.json"
-            if not sf.exists():
-                continue
-            try:
-                s = json.loads(sf.read_text())
-            except Exception:
-                continue
-            sid = s.get("session") or s.get("batch")
-            if not sid:
-                sid = s.get("id") or d.name  # ungrouped leaf as its own session
-            groups[sid].append((d, s))
+    for d, s in iter_sessions():
+        sid = s.get("session") or s.get("batch") or s.get("id") or d.name
+        groups[sid].append((d, s))
     out = []
     for sid, items in groups.items():
         modes = {ss.get("mode", "simulated") for _, ss in items}
         sess_type = "live" if "live" in modes else "simulated"
         total_pnl = 0.0
-        n_trades = 0
+        n_traded = 0   # leaf sessions that actually took a trade
+        n_fills = 0    # blotter fills across those sessions
         n_wins = 0
         tickers = set()
         last_activity = None
+        name = None
         for d, ss in items:
             res = ss.get("result") or {}
             tickers.add(ss.get("ticker"))
             if res.get("traded"):
                 total_pnl += res.get("realized_pnl", 0) or 0.0
-                n_trades += res.get("n_fills", 1) or 0
+                n_traded += 1
+                n_fills += res.get("n_fills", 1) or 0
                 if res.get("win"):
                     n_wins += 1
             ts = ss.get("finalized_ts") or ss.get("real_run_ts")
             if ts and (not last_activity or ts > last_activity):
                 last_activity = ts
-        n_tickers = len(tickers)
-        win_rate = round((n_wins / max(n_trades, 1)) * 100, 1) if n_trades > 0 else None
-        # Use the batch tag as human name if present, else the id
-        name = None
-        for _, ss in items:
-            if ss.get("batch"):
-                name = ss.get("batch")
-                break
+            if name is None and ss.get("batch"):
+                name = ss.get("batch")  # human label = batch tag if present
+        # win rate is winning *sessions* over traded *sessions* — NOT over fills
+        # (a single 3-fill winner must read 100%, not 33%).
+        win_rate = round(n_wins / n_traded * 100, 1) if n_traded else None
         out.append({
             "id": sid,
             "name": name or sid,
             "type": sess_type,
             "pnl": round(total_pnl, 2),
-            "n_tickers": n_tickers,
-            "n_trades": n_trades,
+            "n_tickers": len(tickers),
+            "n_trades": n_traded,   # traded sessions (matches win_rate denominator)
+            "n_fills": n_fills,
             "win_rate": win_rate,
             "last_activity": last_activity,
         })
@@ -898,118 +965,19 @@ def _batch_meta(tag: str) -> dict:
     return _load_json(BATCH_ROOT / tag / "batch.json", {}) or {}
 
 
-def _iter_batch_members(tag: str):
-    """Yield (dir, session_dict) for every session folder stamped with this batch."""
-    if not SIM_ROOT.exists():
-        return
-    for d in sorted(SIM_ROOT.iterdir(), reverse=True):
-        if d.name.startswith("_"):
-            continue
-        sf = d / "session.json"
-        if not sf.exists():
-            continue
-        try:
-            s = json.loads(sf.read_text())
-        except Exception:
-            continue
-        if s.get("batch") == tag:
-            yield d, s
-
-
 def _iter_session_members(sess_id: str):
-    """Yield leaves belonging to a top-level session (by session or batch field)."""
-    if not SIM_ROOT.exists():
-        return
-    for d in sorted(SIM_ROOT.iterdir(), reverse=True):
-        if d.name.startswith("_"):
-            continue
-        sf = d / "session.json"
-        if not sf.exists():
-            continue
-        try:
-            s = json.loads(sf.read_text())
-        except Exception:
-            continue
+    """Yield leaves belonging to a top-level session (by ``session`` or ``batch`` field)."""
+    for d, s in iter_sessions():
         if (s.get("session") == sess_id) or (s.get("batch") == sess_id):
             yield d, s
-
-
-def list_batches() -> list[dict]:
-    """One summary row per batch cohort (newest activity first), for the UI list.
-
-    A batch is enumerated from its member sessions *and* from any `_batch/<tag>/`
-    metadata (so a just-launched batch with no finalized sessions still shows up).
-    Status prefers the run's own metadata; a `running` batch with no recent session
-    activity is downgraded to `stale` (the runner likely died)."""
-    groups: dict[str, list] = {}
-    if SIM_ROOT.exists():
-        for d in sorted(SIM_ROOT.iterdir(), reverse=True):
-            if d.name.startswith("_"):
-                continue
-            sf = d / "session.json"
-            if not sf.exists():
-                continue
-            try:
-                s = json.loads(sf.read_text())
-            except Exception:
-                continue
-            tag = s.get("batch")
-            if tag:
-                groups.setdefault(tag, []).append((d, s))
-    if BATCH_ROOT.exists():
-        for bd in BATCH_ROOT.iterdir():
-            # include a session-less batch dir only if a real run recorded metadata
-            # (batch.json) — this shows a just-launched batch before any session
-            # finalizes, while skipping empty leftover dirs from old dry-runs/tests.
-            if bd.is_dir() and (bd / "batch.json").exists():
-                groups.setdefault(bd.name, [])
-
-    out = []
-    for tag, items in groups.items():
-        meta = _batch_meta(tag)
-        n_total = len(items)
-        n_complete = sum(1 for _, s in items if s.get("status") == "complete")
-        n_void = sum(1 for _, s in items if s.get("void"))
-        newest = max((_session_newest_mtime(d) for d, _ in items), default=0.0)
-        last = (
-            datetime.fromtimestamp(newest).isoformat(timespec="seconds")
-            if newest else meta.get("finished_ts") or meta.get("started_ts")
-        )
-        planned = meta.get("planned") or n_total
-        status = meta.get("status") or (
-            "complete" if (n_total and n_complete == n_total) else "running"
-        )
-        if status == "running" and newest > 0 and (time.time() - newest) > _STALE_AFTER_S:
-            status = "stale"
-        rep = report_by_version(batch=tag)
-        out.append({
-            "tag": tag,
-            "version": meta.get("version") or (rep[0]["version"] if rep else None),
-            "model": meta.get("model"),
-            "status": status,
-            "planned": planned,
-            "n_total": n_total,
-            "n_complete": n_complete,
-            "n_void": n_void,
-            "started_ts": meta.get("started_ts"),
-            "finished_ts": meta.get("finished_ts"),
-            "last_activity": last,
-            "report": rep,
-        })
-    out.sort(key=lambda b: (b.get("last_activity") or b.get("started_ts") or ""), reverse=True)
-    return out
-
-
-def get_batch_view(tag: str) -> dict:
-    """Legacy. Delegates to get_session_view."""
-    return get_session_view(tag)
 
 
 def get_top_session_view(sess_id: str) -> dict:
     """Detail for a top-level session (batch or live day): list of tickers with aggregates."""
     tickers: dict[str, dict] = defaultdict(lambda: {
         "ticker": None,
-        "n_trades": 0,
+        "n_traded": 0,   # leaf runs on this ticker that traded (win_rate denominator)
+        "n_fills": 0,    # blotter fills across those runs
         "pnl": 0.0,
         "wins": 0,
         "leaf_id": None,
@@ -1027,7 +995,8 @@ def get_top_session_view(sess_id: str) -> dict:
         td = tickers[t]
         td["ticker"] = t
         if res.get("traded"):
-            td["n_trades"] += res.get("n_fills", 1) or 0
+            td["n_traded"] += 1
+            td["n_fills"] += res.get("n_fills", 1) or 0
             td["pnl"] += res.get("realized_pnl", 0) or 0.0
             if res.get("win"):
                 td["wins"] += 1
@@ -1035,11 +1004,13 @@ def get_top_session_view(sess_id: str) -> dict:
             td["leaf_id"] = s.get("id") or d.name
     ticker_list = []
     for t, data in tickers.items():
-        n = data["n_trades"]
+        n = data["n_traded"]
+        # win% is winning runs over traded runs — not over fills (see list_sessions).
         wr = round((data["wins"] / n * 100), 1) if n > 0 else None
         ticker_list.append({
             "ticker": t,
-            "n_trades": n,
+            "n_trades": n,   # traded runs (matches win_rate denominator)
+            "n_fills": data["n_fills"],
             "pnl": round(data["pnl"], 2),
             "win_rate": wr,
             "leaf_id": data["leaf_id"],
@@ -1076,12 +1047,9 @@ def report_by_version(
     ``mode`` restricts to simulated/live. ``batch`` restricts to one backtest cohort
     (matched against ``session.batch`` / ``pnl.batch``) — the apples-to-apples view.
     """
-    if not SIM_ROOT.exists():
-        return []
     buckets: dict[str, dict] = {}
-    for d in sorted(SIM_ROOT.iterdir()):
+    for d, session in iter_sessions():
         pnl = _load_json(d / "pnl.json")
-        session = _load_json(d / "session.json", {}) or {}
         if pnl is None or session.get("status") != "complete":
             continue  # skip running/abandoned/unfinalized sessions
         if mode is not None and session.get("mode", "simulated") != mode:

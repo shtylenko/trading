@@ -33,9 +33,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, TextIO
 
-from . import replay
 from .config import DATA_DIR
 from .streamio import parse_stream as _parse_sealed
+
+# NOTE: `replay` (and its heavy pandas / marketdata imports) is imported lazily
+# inside `start()` only. `next`/`status` are the hot path — the agent calls them
+# hundreds of times per run, each in a fresh subprocess — and they never touch
+# `replay`, so paying its import cost on every ping would dominate their runtime.
 
 DEFAULT_DB = DATA_DIR / "entries.db"
 
@@ -59,6 +63,8 @@ def start(
     out: TextIO = sys.stdout,
 ) -> int:
     """Seal the full day's stream privately, reveal only the meta line, cursor=0."""
+    from . import replay  # heavy (pandas/marketdata); only `start` needs it
+
     sdir, sealed, stream, state = _paths(session_dir)
     sdir.mkdir(parents=True, exist_ok=True)
 

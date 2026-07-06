@@ -68,15 +68,9 @@ def _latest_version() -> str:
     reg = skillmeta._load_registry(reg_path)
     if not reg:
         raise RuntimeError(f"no versions in skill registry at {reg_path}")
-    def parse(v: str):
-        try:
-            nums = [int(x) for x in v.split(".")]
-            while len(nums) < 3:
-                nums.append(0)
-            return tuple(nums)
-        except Exception:
-            return (0, 0, 0)
-    return max(reg.keys(), key=parse)
+    # reuse skillmeta's semver parser (single source of truth); non-numeric tags
+    # sort lowest rather than crashing the max().
+    return max(reg.keys(), key=lambda v: skillmeta._parse_semver(v) or [0, 0, 0])
 
 
 # ───────────────────────────── build-set ────────────────────────────────────
@@ -303,10 +297,7 @@ def _completed_counts(tag: str) -> dict[tuple, int]:
     Voided sessions do NOT count as done, so ``--resume`` re-runs a setup whose only
     prior attempt was audit-voided instead of leaving you a tainted cohort."""
     counts: dict[tuple, int] = defaultdict(int)
-    if not recorder.SIM_ROOT.exists():
-        return counts
-    for d in recorder.SIM_ROOT.iterdir():
-        s = recorder._load_json(d / "session.json", {}) or {}
+    for _, s in recorder.iter_sessions():
         if s.get("batch") == tag and s.get("status") == "complete" and not s.get("void"):
             counts[(s.get("ticker"), s.get("historical_date"))] += 1
     return counts
@@ -519,14 +510,7 @@ def _void_stats(tag: str) -> tuple[int, int]:
 
 
 def _sessions_for_batch(tag: str) -> list[Path]:
-    out = []
-    if not recorder.SIM_ROOT.exists():
-        return out
-    for d in sorted(recorder.SIM_ROOT.iterdir()):
-        s = recorder._load_json(d / "session.json", {}) or {}
-        if s.get("batch") == tag:
-            out.append(d)
-    return out
+    return [d for d, s in recorder.iter_sessions() if s.get("batch") == tag]
 
 
 def _tool_calls_in(message: dict):

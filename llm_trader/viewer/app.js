@@ -14,7 +14,18 @@ let currentSessionId = null;
 let currentChart = null;
 let currentEventSource = null;
 let pollFallbackTimer = null;
-let activeTab = "sessions";
+
+// Show exactly one main-area pane. Single helper replacing the classList +
+// style.display toggles that used to be duplicated at every call site.
+function showPane(name) {
+  ["no-session", "session-tickers", "session-detail"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const on = id === name;
+    el.classList.toggle("hidden", !on);
+    el.style.display = on ? "" : "none";
+  });
+}
 
 const fmtMoney = (n) => (n == null ? "—" : (n >= 0 ? "+$" : "-$") + Math.abs(n));
 
@@ -135,17 +146,7 @@ async function loadAndRenderList() {
   listEl.classList.remove('hidden');
 }
 
-// (old batches code removed - everything is now under Sessions)
-
-function setTab(tab) {
-  activeTab = tab;
-  document.getElementById("tab-sessions").classList.toggle("active", tab === "sessions");
-  document.getElementById("session-list").classList.toggle("hidden", tab !== "sessions");
-  loadAndRenderList();
-}
-
-// Default to sessions view on load
-setTab("sessions");
+// (Batches view removed — everything is grouped under Sessions now.)
 
 // Force an initial render in case top-level call had timing issues
 if (document.readyState === 'loading') {
@@ -156,16 +157,9 @@ if (document.readyState === 'loading') {
 
 async function loadSessionTickers(sessionId, updateUrl = false) {
   const tickersEl = document.getElementById("session-tickers");
-  const detail = document.getElementById("session-detail");
-  const placeholder = document.getElementById("no-session");
 
   // Ensure only the tickers list is visible in the main area (no leftover detail chart)
-  placeholder.classList.add("hidden");
-  placeholder.style.display = "none";
-  detail.classList.add("hidden");
-  detail.style.display = "none";
-  tickersEl.classList.remove("hidden");
-  tickersEl.style.display = "";
+  showPane("session-tickers");
 
   tickersEl.innerHTML = `<div class="muted" style="padding:16px">Loading tickers for ${escapeHtml(sessionId)}...</div>`;
 
@@ -221,13 +215,7 @@ function renderSessionTickers(v) {
   // back button
   const back = bd.querySelector("#bd-back");
   if (back) back.addEventListener("click", () => {
-    bd.classList.add("hidden");
-    bd.style.display = "none";
-    document.getElementById("session-detail").classList.add("hidden");
-    document.getElementById("session-detail").style.display = "none";
-    const ns = document.getElementById("no-session");
-    ns.classList.remove("hidden");
-    ns.style.display = "";
+    showPane("no-session");
     // reload the sidebar list (highlight will re-apply based on currentSessionId if any)
     loadAndRenderList();
   });
@@ -618,17 +606,8 @@ function highlightCurrentSession() {
 // ---------- Load session detail ----------
 
 async function loadSession(sessionId, updateUrl = false) {
-  const detail = document.getElementById("session-detail");
-  const placeholder = document.getElementById("no-session");
-  const tickersEl = document.getElementById("session-tickers");
-
   // Show only the per-ticker detail; hide tickers list and placeholder
-  placeholder.classList.add("hidden");
-  placeholder.style.display = "none";
-  tickersEl.classList.add("hidden");
-  tickersEl.style.display = "none";
-  detail.classList.remove("hidden");
-  detail.style.display = "";  // let CSS (flex) take over
+  showPane("session-detail");
 
   currentSessionId = sessionId;
 
@@ -671,12 +650,7 @@ async function loadSession(sessionId, updateUrl = false) {
     highlightCurrentSession();
 
   } catch (e) {
-    detail.classList.add("hidden");
-    detail.style.display = "none";
-    document.getElementById("session-tickers").classList.add("hidden");
-    document.getElementById("session-tickers").style.display = "none";
-    placeholder.classList.remove("hidden");
-    placeholder.style.display = "";
+    showPane("no-session");
     fail(`Could not load session ${sessionId}: ${e}`);
   }
 }
@@ -782,8 +756,9 @@ async function main() {
   // Always render fresh session list on startup
   await loadAndRenderList();
 
-  // Wire sidebar tabs
-  document.getElementById("tab-sessions").onclick = () => setTab("sessions");
+  // Sessions header chip doubles as a refresh of the list
+  const tabSessions = document.getElementById("tab-sessions");
+  if (tabSessions) tabSessions.onclick = () => loadAndRenderList();
 
   // Wire global refresh button
   const refreshList = document.getElementById("refresh-list-btn");
@@ -804,13 +779,7 @@ async function main() {
       await loadSession(sessionFromUrl);
     }
   } else {
-    const ns = document.getElementById("no-session");
-    ns.classList.remove("hidden");
-    ns.style.display = "";
-    document.getElementById("session-detail").classList.add("hidden");
-    document.getElementById("session-detail").style.display = "none";
-    document.getElementById("session-tickers").classList.add("hidden");
-    document.getElementById("session-tickers").style.display = "none";
+    showPane("no-session");
   }
 
   // Light auto-refresh of the sidebar list

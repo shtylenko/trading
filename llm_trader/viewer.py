@@ -39,8 +39,12 @@ from urllib.parse import urlparse, parse_qs
 import logging
 import re
 
+from . import recorder
+
 PKG_DIR = Path(__file__).resolve().parent
-SIM_ROOT = PKG_DIR / "simulations"
+# Single source of truth: the writers (recorder/batchsim/step) and this server must
+# agree on where sessions live, so import the path rather than re-deriving it here.
+SIM_ROOT = recorder.SIM_ROOT
 
 # Set up logging to both console and file
 logger = logging.getLogger("llm_trader.viewer")
@@ -273,20 +277,25 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
         # /api/batches and /api/batch/* removed — use /api/sessions and /api/session/* instead
         # (internal batch tag logic in recorder/batchsim is kept for resume + metadata)
 
-        # Never serve private simulator internals over HTTP (the sealed full-day
-        # stream + step cursor). Exposing them would break no-look-ahead.
-        if any(seg.startswith("_") or seg.startswith(".") for seg in path.split("/") if seg):
+        # Static serving is restricted to the SPA's own asset dir (``viewer/``).
+        # The package root also contains source, the scan DB (``data/``), skill
+        # files, and the sessions tree — none of which should be downloadable over
+        # HTTP — so anything outside ``viewer/`` is 404, and a bare ``/`` redirects
+        # to the SPA instead of directory-listing the package. This subsumes the
+        # older per-segment blocks for ``_``/``.`` and ``simulations``.
+        segs = [seg for seg in path.split("/") if seg]
+        if not segs:
+            self.send_response(302)
+            self.send_header("Location", "/viewer/index.html")
+            self.end_headers()
+            return
+        if segs[0] != "viewer" or any(
+            seg.startswith("_") or seg.startswith(".") for seg in segs
+        ):
             self.send_error(404, "Not Found")
             return
 
-        # Session data goes through the API only (which clamps live sessions to
-        # revealed bars). The raw files — notably the full-day stream.jsonl — must
-        # never be fetched directly; that would leak future bars into a live view.
-        if "simulations" in [seg for seg in path.split("/") if seg]:
-            self.send_error(404, "Not Found")
-            return
-
-        # Default: static file serving
+        # Default: static file serving (only ever reaches files under viewer/).
         super().do_GET()
 
     def do_POST(self):

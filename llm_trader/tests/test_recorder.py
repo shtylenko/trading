@@ -410,3 +410,47 @@ def test_mfe_and_force_close():
     assert forced["action"] == "EXIT"
     assert forced["reason"].startswith("auto-flat")
     assert eng.shares == 0
+
+
+def _finalized_session(root, sid, ticker, n_fills, win, realized, sess_id="grp"):
+    """A minimal finalized session.json on disk (no artifacts) for list/aggregate tests."""
+    d = root / sid
+    d.mkdir()
+    (d / "session.json").write_text(json.dumps({
+        "id": sid, "status": "complete", "mode": "simulated",
+        "ticker": ticker, "historical_date": "2025-03-10", "session": sess_id,
+        "real_run_ts": "2026-06-30T18:23:10", "finalized_ts": "2026-06-30T18:25:00",
+        "result": {"traded": True, "realized_pnl": realized, "win": win,
+                   "n_fills": n_fills},
+    }))
+    return d
+
+
+def test_win_rate_is_per_session_not_per_fill(tmp_path, monkeypatch):
+    """A single winning trade with several fills must read 100%, not 1/n_fills.
+
+    Regression for the win-rate denominator bug: win% is winning *sessions* over
+    traded *sessions*, never over blotter fills."""
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    # one winner with 3 fills (ENTER+SCALE+EXIT) → 100%, not 33%
+    _finalized_session(tmp_path, "a-TK-111111", "TK", n_fills=3, win=True, realized=50.0)
+
+    top = next(s for s in recorder.list_sessions() if s["id"] == "grp")
+    assert top["n_trades"] == 1          # traded sessions, not fills
+    assert top["n_fills"] == 3
+    assert top["win_rate"] == 100.0
+
+    view = recorder.get_top_session_view("grp")
+    row = next(t for t in view["tickers"] if t["ticker"] == "TK")
+    assert row["n_trades"] == 1 and row["n_fills"] == 3 and row["win_rate"] == 100.0
+
+
+def test_win_rate_counts_winning_sessions(tmp_path, monkeypatch):
+    """Two runs on the same ticker, one win one loss → 50%."""
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    _finalized_session(tmp_path, "a-TK-111111", "TK", n_fills=2, win=True, realized=30.0)
+    _finalized_session(tmp_path, "b-TK-222222", "TK", n_fills=4, win=False, realized=-20.0)
+
+    view = recorder.get_top_session_view("grp")
+    row = next(t for t in view["tickers"] if t["ticker"] == "TK")
+    assert row["n_trades"] == 2 and row["win_rate"] == 50.0

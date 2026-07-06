@@ -9,11 +9,13 @@ the row in place. ``setup_id = sha1("{ticker}|{date}|{pattern}")``.
 from __future__ import annotations
 
 import hashlib
+import io
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .patterns import Entry
+from .fsutils import atomic_write_text
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS entries (
@@ -95,7 +97,7 @@ class EntryStore:
                 f"{r['date']}  {r['time_et']} ET  {r['ticker']:<6}  "
                 f"${r['entry_px']:.2f}  | {r['reason']}"
             )
-        path.write_text("\n".join(lines) + ("\n" if lines else ""))
+        atomic_write_text(path, "\n".join(lines) + ("\n" if lines else ""))
         return path
 
     def dump_csv(self, path: str | Path) -> Path:
@@ -107,11 +109,12 @@ class EntryStore:
             "ticker", "date", "time_et", "pattern", "entry_px", "bar_close",
             "gap_pct", "rvol", "float_shares", "bar_vol_mult", "reason",
         ]
-        with open(path, "w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(cols)
-            for r in rows:
-                w.writerow([r[c] for c in cols])
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(cols)
+        for r in rows:
+            w.writerow([r[c] for c in cols])
+        atomic_write_text(path, out.getvalue())
         return path
 
     def close(self) -> None:

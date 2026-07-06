@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Optional, TextIO
 
 from .config import DATA_DIR
+from .fsutils import atomic_write_json, atomic_write_text, file_lock
 from .streamio import parse_stream as _parse_sealed
 
 # NOTE: `replay` (and its heavy pandas / marketdata imports) is imported lazily
@@ -47,6 +48,10 @@ DEFAULT_DB = DATA_DIR / "entries.db"
 def _paths(session_dir: str | Path):
     sdir = Path(session_dir)
     return sdir, sdir / "_sealed.jsonl", sdir / "stream.jsonl", sdir / "_step.json"
+
+
+def _lock_path(session_dir: str | Path) -> Path:
+    return Path(session_dir) / ".session.lock"
 
 
 def start(
@@ -82,9 +87,10 @@ def start(
         print("STATUS error no bars sealed (provider may not serve this date)", file=out)
         return 3
 
-    with open(stream, "w") as f:               # visible stream: meta only, no ticks yet
-        f.write(json.dumps(meta) + "\n")
-    state.write_text(json.dumps({"cursor": 0, "n": len(ticks), "done": False}))
+    with file_lock(_lock_path(sdir)):
+        # visible stream: meta only, no ticks yet
+        atomic_write_text(stream, json.dumps(meta) + "\n")
+        atomic_write_json(state, {"cursor": 0, "n": len(ticks), "done": False})
 
     print(json.dumps(meta), file=out)
     print(f"STATUS started ticks={len(ticks)} — call `step next` to reveal bar 0", file=out)
@@ -98,31 +104,34 @@ def next_(session_dir: str | Path, out: TextIO = sys.stdout) -> int:
         print("STATUS nostart — run `step start` first", file=out)
         return 3
 
-    st = json.loads(state.read_text())
-    meta, ticks, end = _parse_sealed(sealed)
-    cur = st["cursor"]
+    with file_lock(_lock_path(sdir)):
+        st = json.loads(state.read_text())
+        meta, ticks, end = _parse_sealed(sealed)
+        cur = st["cursor"]
 
-    if cur < len(ticks):
-        tk = ticks[cur]
-        with open(stream, "a") as f:
-            f.write(json.dumps(tk) + "\n")
-        st["cursor"] = cur + 1
-        state.write_text(json.dumps(st))
-        print(json.dumps(tk), file=out)
-        ended = cur + 1 >= len(ticks)
-        print(f"STATUS ok next={cur + 1} ended={str(ended).lower()}", file=out)
-        return 0
-
-    # past the last tick: reveal the end line once, then report end idempotently
-    if not st.get("done"):
-        if end is not None:
+        if cur < len(ticks):
+            tk = ticks[cur]
             with open(stream, "a") as f:
-                f.write(json.dumps(end) + "\n")
-        st["done"] = True
-        state.write_text(json.dumps(st))
-    if end is not None:
-        print(json.dumps(end), file=out)
-    print(f"STATUS end bars={len(ticks)}", file=out)
+                f.write(json.dumps(tk) + "\n")
+                f.flush()
+            st["cursor"] = cur + 1
+            atomic_write_json(state, st)
+            print(json.dumps(tk), file=out)
+            ended = cur + 1 >= len(ticks)
+            print(f"STATUS ok next={cur + 1} ended={str(ended).lower()}", file=out)
+            return 0
+
+        # past the last tick: reveal the end line once, then report end idempotently
+        if not st.get("done"):
+            if end is not None:
+                with open(stream, "a") as f:
+                    f.write(json.dumps(end) + "\n")
+                    f.flush()
+            st["done"] = True
+            atomic_write_json(state, st)
+        if end is not None:
+            print(json.dumps(end), file=out)
+        print(f"STATUS end bars={len(ticks)}", file=out)
     return 0
 
 
@@ -132,7 +141,8 @@ def status(session_dir: str | Path, out: TextIO = sys.stdout) -> int:
     if not state.exists():
         print("STATUS nostart", file=out)
         return 3
-    st = json.loads(state.read_text())
+    with file_lock(_lock_path(sdir)):
+        st = json.loads(state.read_text())
     print(f"STATUS cursor={st['cursor']} of {st['n']} done={str(st.get('done', False)).lower()}", file=out)
     return 0
 

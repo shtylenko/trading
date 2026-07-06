@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import DATA_DIR
+from .fsutils import atomic_write_json
 
 _CACHE = DATA_DIR / "float_cache.json"
 _CACHE_TTL_S = 30 * 24 * 3600  # floats drift slowly; refresh monthly
@@ -65,7 +66,7 @@ class FloatCache:
 
     def flush(self) -> None:
         if self._dirty:
-            _CACHE.write_text(json.dumps(self._data))
+            atomic_write_json(_CACHE, self._data)
             self._dirty = False
 
 

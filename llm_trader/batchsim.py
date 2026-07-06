@@ -47,6 +47,7 @@ from typing import Optional
 
 from . import recorder, skillmeta
 from .config import DATA_DIR
+from .fsutils import atomic_write_json
 
 # monorepo root — the directory that contains `trading/`, so `import trading` resolves.
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -481,7 +482,7 @@ def _write_batch_meta(tag: str, **fields) -> None:
         except json.JSONDecodeError:
             meta = {}
     meta.update(fields)
-    p.write_text(json.dumps(meta, indent=2))
+    atomic_write_json(p, meta, indent=2)
 
 
 def _append_manifest(tag: str, result: dict) -> None:
@@ -654,14 +655,65 @@ def _resolve_batch_commands(sids: list[str]) -> dict[str, Optional[str]]:
 def _scan_commands(commands: str) -> Optional[str]:
     """Return a void reason if the executed commands break no-look-ahead / determinism,
     else None. Operates on tool-call commands only (see ``_parse_export``)."""
+    lines = _command_lines(commands)
+    executable = "\n".join(lines)
     for pat in _PEEK_PATTERNS:
-        if pat in commands:
+        if pat in executable:
             return f"agent command referenced forbidden `{pat}`"
-    if _REPLAY_RE in commands:
+    if _REPLAY_RE in executable:
         return "agent invoked replay directly (look-ahead)"
-    if commands.count(_STEP_START_RE) > 1:
+    if executable.count(_STEP_START_RE) > 1:
         return "agent re-ran `step start` (re-seal / look-ahead)"
+    for line in lines:
+        if not _allowed_command_line(line):
+            return f"agent executed unexpected command `{line[:120]}`"
     return None
+
+
+def _command_lines(commands: str) -> list[str]:
+    out = []
+    for raw in (commands or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        out.append(line)
+    return out
+
+
+def _allowed_command_line(line: str) -> bool:
+    """Allow only the command shapes the batch prompt intentionally permits.
+
+    This does not try to parse shell grammar. It is a conservative transcript
+    audit: if a run needs different tooling, the prompt and audit should change
+    together and the run should be re-audited.
+    """
+    if line in {"step start", "step next", "recorder log", "finalize"}:  # compact unit-test shorthands
+        return True
+    if line.startswith("echo "):
+        return True
+    if line.startswith("SDIR=$(python3 -m trading.llm_trader.recorder init "):
+        return True
+    if line == "ROOT=$(pwd)":
+        return True
+    if line == 'ls -la "$SDIR" | cat':
+        return True
+    if line.startswith('test -f "$SDIR/stream.jsonl" && echo '):
+        return True
+    if line.startswith('ls -la "$ROOT" | grep -E '):
+        return True
+    if line.startswith("python3 -m trading.llm_trader.step start --session \"$SDIR\" "):
+        return True
+    if line == "python3 -m trading.llm_trader.step start --session X":
+        return True
+    if line == 'python3 -m trading.llm_trader.step next --session "$SDIR"':
+        return True
+    if line == 'python3 -m trading.llm_trader.step status --session "$SDIR"':
+        return True
+    if line.startswith('python3 -m trading.llm_trader.recorder log --session "$SDIR" --record '):
+        return True
+    if line == 'python3 -m trading.llm_trader.recorder finalize --session "$SDIR"':
+        return True
+    return False
 
 
 def audit(tag: str) -> int:
@@ -686,10 +738,10 @@ def audit(tag: str) -> int:
         )
         if reason:
             session["void"] = reason
-            (d / "session.json").write_text(json.dumps(session, indent=2))
+            atomic_write_json(d / "session.json", session, indent=2)
             voided += 1
         elif session.pop("void", None) is not None:
-            (d / "session.json").write_text(json.dumps(session, indent=2))  # now clean
+            atomic_write_json(d / "session.json", session, indent=2)  # now clean
     return voided
 
 

@@ -43,6 +43,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from .fsutils import atomic_write_bytes, atomic_write_json, atomic_write_text, file_lock
+
 _SKILLS_DIR = Path(__file__).parent / "skills"
 DEFAULT_SKILL_PATH = _SKILLS_DIR / "TRADE_SIMULATOR.md"
 
@@ -71,7 +73,7 @@ def _archive_snapshot(skill_path: Path, version: str) -> Path:
     so the snapshot's hash equals the hash the registry stores for that version."""
     dest = _archive_path(skill_path, version)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(skill_path.read_bytes())
+    atomic_write_bytes(dest, skill_path.read_bytes())
     return dest
 
 
@@ -138,7 +140,11 @@ def _load_registry(registry_path: Path) -> dict:
 
 def _save_registry(registry_path: Path, reg: dict) -> None:
     registry_path.parent.mkdir(parents=True, exist_ok=True)
-    registry_path.write_text(json.dumps(reg, indent=2, sort_keys=True) + "\n")
+    atomic_write_json(registry_path, reg, indent=2, sort_keys=True)
+
+
+def _registry_lock_path(registry_path: Path) -> Path:
+    return registry_path.with_suffix(registry_path.suffix + ".lock")
 
 
 def _parse_semver(v: str) -> Optional[list[int]]:
@@ -195,7 +201,7 @@ def _write_version(skill_path: Path, new_version: str) -> bool:
         lines[ver_idx] = newline
     else:
         lines.insert(1, newline)  # just under the opening ---
-    skill_path.write_text("".join(lines))
+    atomic_write_text(skill_path, "".join(lines))
     return True
 
 
@@ -215,49 +221,50 @@ def resolve_version(
     reg_path = Path(registry_path) if registry_path else registry_for(skill_path)
     now = now or datetime.now()
 
-    meta = read_skill_meta(skill_path)
-    reg = _load_registry(reg_path)
-    version = meta.get("version")
+    with file_lock(_registry_lock_path(reg_path)):
+        meta = read_skill_meta(skill_path)
+        reg = _load_registry(reg_path)
+        version = meta.get("version")
 
-    # versionless skill: create an initial version so the run is trackable
-    if not version:
-        new_version = _next_version("0.0.0", set(reg.keys()))  # → 0.0.1
+        # versionless skill: create an initial version so the run is trackable
+        if not version:
+            new_version = _next_version("0.0.0", set(reg.keys()))  # → 0.0.1
+            if not _write_version(skill_path, new_version):
+                return meta, (
+                    f"skill {meta.get('name')!r} has no `version:` and no frontmatter "
+                    "to write one into — recorded as unversioned."
+                )
+            meta = read_skill_meta(skill_path)  # re-hash after writing the version
+            reg[new_version] = {"content_hash": meta["content_hash"],
+                                "first_seen": now.isoformat(timespec="seconds")}
+            _save_registry(reg_path, reg)
+            _archive_snapshot(skill_path, new_version)
+            return meta, f"skill had no version — created {new_version}."
+
+        entry = reg.get(version)
+        current = meta.get("content_hash")
+
+        if entry is None:  # first sighting (incl. a hand-set minor/major bump)
+            reg[version] = {"content_hash": current,
+                            "first_seen": now.isoformat(timespec="seconds")}
+            _save_registry(reg_path, reg)
+            _archive_snapshot(skill_path, version)
+            return meta, None
+
+        if entry.get("content_hash") == current:  # unchanged
+            return meta, None
+
+        # drift: content changed under an already-recorded version → auto-bump patch
+        new_version = _next_version(version, set(reg.keys()))
         if not _write_version(skill_path, new_version):
             return meta, (
-                f"skill {meta.get('name')!r} has no `version:` and no frontmatter "
-                "to write one into — recorded as unversioned."
+                f"skill content changed under {version} but the frontmatter could not "
+                "be updated — bump `version:` manually."
             )
-        meta = read_skill_meta(skill_path)  # re-hash after writing the version
+        meta = read_skill_meta(skill_path)  # re-hash AFTER writing the new version line
         reg[new_version] = {"content_hash": meta["content_hash"],
-                            "first_seen": now.isoformat(timespec="seconds")}
+                            "first_seen": now.isoformat(timespec="seconds"),
+                            "bumped_from": version}
         _save_registry(reg_path, reg)
         _archive_snapshot(skill_path, new_version)
-        return meta, f"skill had no version — created {new_version}."
-
-    entry = reg.get(version)
-    current = meta.get("content_hash")
-
-    if entry is None:  # first sighting (incl. a hand-set minor/major bump)
-        reg[version] = {"content_hash": current,
-                        "first_seen": now.isoformat(timespec="seconds")}
-        _save_registry(reg_path, reg)
-        _archive_snapshot(skill_path, version)
-        return meta, None
-
-    if entry.get("content_hash") == current:  # unchanged
-        return meta, None
-
-    # drift: content changed under an already-recorded version → auto-bump patch
-    new_version = _next_version(version, set(reg.keys()))
-    if not _write_version(skill_path, new_version):
-        return meta, (
-            f"skill content changed under {version} but the frontmatter could not "
-            "be updated — bump `version:` manually."
-        )
-    meta = read_skill_meta(skill_path)  # re-hash AFTER writing the new version line
-    reg[new_version] = {"content_hash": meta["content_hash"],
-                        "first_seen": now.isoformat(timespec="seconds"),
-                        "bumped_from": version}
-    _save_registry(reg_path, reg)
-    _archive_snapshot(skill_path, new_version)
-    return meta, f"auto-bumped skill version {version} → {new_version} (rules changed)."
+        return meta, f"auto-bumped skill version {version} → {new_version} (rules changed)."

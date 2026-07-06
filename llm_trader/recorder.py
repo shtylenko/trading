@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import secrets
 import sys
 import threading
@@ -41,6 +42,7 @@ from typing import Optional
 
 from . import skillmeta
 from .config import DATA_DIR
+from .fsutils import atomic_write_json, atomic_write_text, file_lock
 from .streamio import parse_stream as _parse_stream
 from .streamio import read_jsonl as _read_jsonl
 
@@ -61,6 +63,7 @@ _STALE_AFTER_S = 15 * 60
 # Action sets (also used by PositionEngine)
 ACTION_FILLS = {"ENTER", "ADD", "SCALE", "EXIT"}
 ALL_ACTIONS = {"OBSERVE", "ENTER", "ADD", "SCALE", "TRAIL", "EXIT", "STAND_DOWN"}
+_HHMM_RE = re.compile(r"^\d{2}:\d{2}$")
 
 
 class PositionEngine:
@@ -259,6 +262,10 @@ def _epoch_et(date_str: str, hhmm: str) -> int:
     return int(d.replace(tzinfo=timezone.utc).timestamp())
 
 
+def _session_lock_path(session_dir: str | Path) -> Path:
+    return Path(session_dir) / ".session.lock"
+
+
 # stream parsing lives in ``streamio`` (shared with feed/step) — imported above.
 
 
@@ -346,7 +353,7 @@ def init(
         },
         "files": {},
     }
-    (sdir / "session.json").write_text(json.dumps(session, indent=2))
+    atomic_write_json(sdir / "session.json", session, indent=2)
     # touch the append targets so the run never trips over a missing file
     (sdir / "decisions.jsonl").touch()
     return sdir
@@ -373,6 +380,45 @@ def _last_logged_i(path: Path) -> int:
     return -1
 
 
+def _validate_decision_record(record: dict) -> None:
+    action = record.get("action")
+    if action not in ALL_ACTIONS:
+        raise ValueError(f"action must be one of {sorted(ALL_ACTIONS)}, got {action!r}")
+
+    i = record.get("i")
+    if not isinstance(i, int) or i < 0:
+        raise ValueError("decision record 'i' must be a non-negative integer")
+
+    hhmm = record.get("time")
+    if not isinstance(hhmm, str) or not _HHMM_RE.match(hhmm):
+        raise ValueError("decision record 'time' must be HH:MM")
+    h, m = (int(x) for x in hhmm.split(":"))
+    if h > 23 or m > 59:
+        raise ValueError("decision record 'time' must be a valid HH:MM")
+
+    fill = record.get("fill_px")
+    dq = record.get("shares_delta")
+    stop = record.get("stop")
+    if fill is not None and not isinstance(fill, (int, float)):
+        raise ValueError("decision record 'fill_px' must be numeric or null")
+    if fill is not None and fill <= 0:
+        raise ValueError("decision record 'fill_px' must be positive")
+    if dq is not None and (not isinstance(dq, int) or dq == 0):
+        raise ValueError("decision record 'shares_delta' must be a non-zero integer or null")
+    if stop is not None and not isinstance(stop, (int, float)):
+        raise ValueError("decision record 'stop' must be numeric or null")
+
+    if action in ACTION_FILLS:
+        if fill is None or dq is None:
+            raise ValueError(f"action {action} requires fill_px + shares_delta")
+        if action in ("ENTER", "ADD") and dq < 0:
+            raise ValueError(f"action {action} must use positive shares_delta")
+        if action in ("SCALE", "EXIT") and dq > 0:
+            raise ValueError(f"action {action} must use negative shares_delta")
+    elif fill is not None or dq is not None:
+        raise ValueError(f"action {action} must not carry fill_px or shares_delta")
+
+
 def log(session_dir: str | Path, record: dict) -> None:
     """Append one decision record to ``decisions.jsonl``.
 
@@ -384,33 +430,31 @@ def log(session_dir: str | Path, record: dict) -> None:
     double the position.
     """
     sdir = Path(session_dir)
-    action = record.get("action")
-    if action not in ALL_ACTIONS:
-        raise ValueError(f"action must be one of {sorted(ALL_ACTIONS)}, got {action!r}")
-    if "i" not in record or "time" not in record:
-        raise ValueError("decision record needs at least 'i' and 'time'")
+    _validate_decision_record(record)
 
-    session = _load_json(sdir / "session.json", {}) or {}
-    if session.get("status") == "complete":
-        raise ValueError(
-            f"session {sdir.name} is finalized — cannot log new decisions "
-            "(re-init a fresh session instead)"
-        )
+    with file_lock(_session_lock_path(sdir)):
+        session = _load_json(sdir / "session.json", {}) or {}
+        if session.get("status") == "complete":
+            raise ValueError(
+                f"session {sdir.name} is finalized — cannot log new decisions "
+                "(re-init a fresh session instead)"
+            )
 
-    i = record.get("i")
-    # Decisions are append-only in strictly increasing `i`, so the last written
-    # record already holds the max — parse only that line instead of the whole file
-    # (this runs on every turn; a full re-parse would be O(n²) over a session).
-    last_i = _last_logged_i(sdir / "decisions.jsonl")
-    if isinstance(i, int) and i <= last_i:
-        raise ValueError(
-            f"decision i={i} is not ahead of the last logged i={last_i} "
-            "(bars must be logged in strictly increasing order; retried turns "
-            "must not re-log a bar)"
-        )
+        i = record["i"]
+        # Decisions are append-only in strictly increasing `i`, so the last written
+        # record already holds the max — parse only that line instead of the whole file
+        # (this runs on every turn; a full re-parse would be O(n²) over a session).
+        last_i = _last_logged_i(sdir / "decisions.jsonl")
+        if i <= last_i:
+            raise ValueError(
+                f"decision i={i} is not ahead of the last logged i={last_i} "
+                "(bars must be logged in strictly increasing order; retried turns "
+                "must not re-log a bar)"
+            )
 
-    with open(sdir / "decisions.jsonl", "a") as f:
-        f.write(json.dumps(record) + "\n")
+        with open(sdir / "decisions.jsonl", "a") as f:
+            f.write(json.dumps(record) + "\n")
+            f.flush()
 
 
 # ───────────────────────────── finalize ─────────────────────────────────────
@@ -627,61 +671,63 @@ def finalize(session_dir: str | Path, full_day: bool = True) -> dict:
     leak price action past where trading stopped.
     """
     sdir = Path(session_dir)
-    session_path = sdir / "session.json"
-    if not session_path.exists():
-        raise FileNotFoundError(f"no session.json in {sdir} — run `init` first")
-    session = json.loads(session_path.read_text())
+    with file_lock(_session_lock_path(sdir)):
+        session_path = sdir / "session.json"
+        if not session_path.exists():
+            raise FileNotFoundError(f"no session.json in {sdir} — run `init` first")
+        session = json.loads(session_path.read_text())
 
-    meta, ticks, end = _parse_stream(sdir / "stream.jsonl")
-    if meta is None:
-        raise ValueError(f"{sdir}/stream.jsonl has no meta line — was replay --out-file pointed here?")
-    decisions = _read_jsonl(sdir / "decisions.jsonl")
-    risk_budget = session.get("config", {}).get("risk_budget") or PROFILE_RISK["small"]
+        meta, ticks, end = _parse_stream(sdir / "stream.jsonl")
+        if meta is None:
+            raise ValueError(f"{sdir}/stream.jsonl has no meta line — was replay --out-file pointed here?")
+        decisions = _read_jsonl(sdir / "decisions.jsonl")
+        risk_budget = session.get("config", {}).get("risk_budget") or PROFILE_RISK["small"]
 
-    # chart bars = the whole RTH day for context when the run is legitimately done
-    # (`full_day=True`, the skill/CLI path). When force-finalizing a *live* session
-    # (the viewer button, `full_day=False`) we clamp to the revealed ticks so the
-    # saved artifact never shows price action past where trading stopped.
-    stream_bars = _build_bars(meta, ticks)
-    bars = (_full_day_bars(meta) or stream_bars) if full_day else stream_bars
-    actions, timeline, pnl = _run_engine(meta, stream_bars, decisions, risk_budget, end)
+        # chart bars = the whole RTH day for context when the run is legitimately done
+        # (`full_day=True`, the skill/CLI path). When force-finalizing a *live* session
+        # (the viewer button, `full_day=False`) we clamp to the revealed ticks so the
+        # saved artifact never shows price action past where trading stopped.
+        stream_bars = _build_bars(meta, ticks)
+        bars = (_full_day_bars(meta) or stream_bars) if full_day else stream_bars
+        actions, timeline, pnl = _run_engine(meta, stream_bars, decisions, risk_budget, end)
 
-    # mirror the frozen skill stamp into pnl.json so `report --by-version` can
-    # group by reading one file per session (not session.json + pnl.json).
-    skill = session.get("skill", {}) or {}
-    pnl["skill_version"] = skill.get("version")
-    pnl["skill_hash"] = skill.get("content_hash")
-    pnl["batch"] = session.get("batch")
+        # mirror the frozen skill stamp into pnl.json so `report --by-version` can
+        # group by reading one file per session (not session.json + pnl.json).
+        skill = session.get("skill", {}) or {}
+        pnl["skill_version"] = skill.get("version")
+        pnl["skill_hash"] = skill.get("content_hash")
+        pnl["batch"] = session.get("batch")
 
-    # enrich session manifest with setup meta + outcome + file index
-    session["status"] = "complete"
-    session["finalized_ts"] = datetime.now().isoformat(timespec="seconds")
-    session["setup"] = {
-        k: meta.get(k) for k in (
-            "entry_time", "entry_px", "anchor_px", "gap_pct", "rvol", "float_shares",
-            "prior_close", "prior_high", "prior_low", "pm_high", "pm_low",
-            "session_end", "reason",
-        )
-    }
-    session["result"] = {
-        "traded": pnl["traded"], "realized_pnl": pnl["realized_pnl"],
-        "r_multiple": pnl["r_multiple"], "win": pnl["win"],
-        "mfe_per_share": pnl["mfe_per_share"], "n_bars": len(bars),
-        "n_decisions": len(timeline), "n_fills": len(actions),
-        "skill_version": skill.get("version"),
-    }
-    session["files"] = {
-        "bars": "bars.json", "actions": "actions.json", "decisions": "decisions.json",
-        "pnl": "pnl.json", "journal": "journal.md", "stream": "stream.jsonl",
-    }
+        # enrich session manifest with setup meta + outcome + file index. Write
+        # session.json last so "complete" only appears after all artifacts exist.
+        session["status"] = "complete"
+        session["finalized_ts"] = datetime.now().isoformat(timespec="seconds")
+        session["setup"] = {
+            k: meta.get(k) for k in (
+                "entry_time", "entry_px", "anchor_px", "gap_pct", "rvol", "float_shares",
+                "prior_close", "prior_high", "prior_low", "pm_high", "pm_low",
+                "session_end", "reason",
+            )
+        }
+        session["result"] = {
+            "traded": pnl["traded"], "realized_pnl": pnl["realized_pnl"],
+            "r_multiple": pnl["r_multiple"], "win": pnl["win"],
+            "mfe_per_share": pnl["mfe_per_share"], "n_bars": len(bars),
+            "n_decisions": len(timeline), "n_fills": len(actions),
+            "skill_version": skill.get("version"),
+        }
+        session["files"] = {
+            "bars": "bars.json", "actions": "actions.json", "decisions": "decisions.json",
+            "pnl": "pnl.json", "journal": "journal.md", "stream": "stream.jsonl",
+        }
 
-    (sdir / "bars.json").write_text(json.dumps(bars, indent=2))
-    (sdir / "actions.json").write_text(json.dumps(actions, indent=2))
-    (sdir / "decisions.json").write_text(json.dumps(timeline, indent=2))
-    (sdir / "pnl.json").write_text(json.dumps(pnl, indent=2))
-    (sdir / "session.json").write_text(json.dumps(session, indent=2))
-    (sdir / "journal.md").write_text(_journal(session, meta, pnl, actions, timeline))
-    return session
+        atomic_write_json(sdir / "bars.json", bars, indent=2)
+        atomic_write_json(sdir / "actions.json", actions, indent=2)
+        atomic_write_json(sdir / "decisions.json", timeline, indent=2)
+        atomic_write_json(sdir / "pnl.json", pnl, indent=2)
+        atomic_write_text(sdir / "journal.md", _journal(session, meta, pnl, actions, timeline))
+        atomic_write_json(sdir / "session.json", session, indent=2)
+        return session
 
 
 # ───────────────────────────── Live / UI view helpers ────────────────────────

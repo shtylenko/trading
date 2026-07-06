@@ -11,7 +11,6 @@ from .indicators import (
     session_vwap,
 )
 from .patterns import Entry, detect_entry, detect_from_frame
-from .recorder import PositionEngine, get_session_view, list_sessions
 
 __all__ = [
     "ScanConfig",
@@ -26,3 +25,11 @@ __all__ = [
     "prepare_detection_frame",
     "enrich_1min_for_replay",
 ]
+
+
+def __getattr__(name: str):
+    if name in {"PositionEngine", "get_session_view", "list_sessions"}:
+        from . import recorder
+
+        return getattr(recorder, name)
+    raise AttributeError(name)

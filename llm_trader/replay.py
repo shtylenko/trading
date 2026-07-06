@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import random
 import sqlite3
 import sys
@@ -55,6 +56,7 @@ from .indicators import enrich_1min_for_replay, session_vwap
 
 RTH_OPEN = dtime(9, 30)
 RTH_CLOSE = dtime(16, 0)
+logger = logging.getLogger("llm_trader.replay")
 
 
 @dataclass
@@ -183,7 +185,7 @@ def _context(ticker: str, day: date, force: bool = False) -> dict:
     provider can't serve it; a context miss must not abort the replay.
     """
     ctx = {"prior_close": None, "prior_high": None, "prior_low": None,
-           "pm_high": None, "pm_low": None}
+           "pm_high": None, "pm_low": None, "context_warnings": []}
     start = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
     end = start + timedelta(days=1)
     try:
@@ -196,8 +198,9 @@ def _context(ticker: str, day: date, force: bool = False) -> dict:
                 ctx["prior_close"] = round(float(last["close"]), 4)
                 ctx["prior_high"] = round(float(last["high"]), 4)
                 ctx["prior_low"] = round(float(last["low"]), 4)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("daily context fetch failed for %s %s", ticker, day, exc_info=True)
+        ctx["context_warnings"].append(f"daily_context_unavailable:{type(exc).__name__}")
     try:
         ext = fetch_bars(ticker, "1min", start=start, end=end,
                          session="extended", adjustment="raw", force=force)
@@ -209,8 +212,9 @@ def _context(ticker: str, day: date, force: bool = False) -> dict:
             if not pm.empty:
                 ctx["pm_high"] = round(float(pm["high"].max()), 4)
                 ctx["pm_low"] = round(float(pm["low"].min()), 4)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("premarket context fetch failed for %s %s", ticker, day, exc_info=True)
+        ctx["context_warnings"].append(f"premarket_context_unavailable:{type(exc).__name__}")
     return ctx
 
 
@@ -358,6 +362,7 @@ def _stream_jsonl(setup, df, start_t, anchor, streams, delay) -> int:
         "prior_low": ctx["prior_low"],
         "pm_high": ctx["pm_high"],
         "pm_low": ctx["pm_low"],
+        "context_warnings": ctx["context_warnings"],
         "session_end": RTH_CLOSE.strftime("%H:%M"),
         "reason": setup.reason,
     }

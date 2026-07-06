@@ -19,6 +19,7 @@ from pathlib import Path
 import requests
 
 from .config import DATA_DIR
+from .fsutils import atomic_write_json
 
 _FINNHUB_URL = "https://finnhub.io/api/v1/stock/symbol"
 _CACHE = DATA_DIR / "universe_symbols.json"
@@ -89,12 +90,11 @@ def _read_cache(exchanges: tuple[str, ...]) -> list[str] | None:
 
 
 def _write_cache(exchanges: tuple[str, ...], symbols: list[str]) -> None:
-    _CACHE.write_text(
-        json.dumps(
-            {
-                "exchanges": list(exchanges),
-                "fetched_at": time.time(),
-                "symbols": symbols,
-            }
-        )
+    atomic_write_json(
+        _CACHE,
+        {
+            "exchanges": list(exchanges),
+            "fetched_at": time.time(),
+            "symbols": symbols,
+        },
     )

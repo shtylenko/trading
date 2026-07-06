@@ -33,12 +33,13 @@ python3 -m trading.llm_trader.recorder report --by-version
 
 cd /Users/shtylenko/Projects && set -a && . trading/.env && set +a
 python3 -m trading.llm_trader.batchsim run \
-    --version 2.0.2 --model deepseek-v4-flash \
-    --parallel 6 --repeats 2 --tag v2.0.2-baseline
+    --model deepseek-v4-flash \
+    --set trading/llm_trader/batch/testset.json \
+    --parallel 6 --repeats 2 --tag v2-baseline
 
 
 cd /Users/shtylenko/Projects && set -a && . trading/.env && set +a
 python3 -m trading.llm_trader.batchsim run \
-    --version 2.0.2 --model deepseek-v4-flash \
+    --model deepseek-v4-flash \
     --set trading/llm_trader/batch/testset_mini.json \
     --parallel 3 --repeats 1 --tag mini

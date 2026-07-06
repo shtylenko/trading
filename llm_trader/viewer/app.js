@@ -75,16 +75,17 @@ async function loadAndRenderList() {
   // Visibility of main content is managed by loadSession* and main() based on selection.
   listEl.innerHTML = `<div class="muted" style="padding:8px">Loading sessions...</div>`;
 
+  let sessions = [];
   try {
     const data = await getJSON("/api/sessions");
-    const sessions = data.sessions || [];
+    sessions = data.sessions || [];
     console.log('Sessions from API:', sessions);
 
     document.getElementById("session-count").textContent = `(${sessions.length})`;
 
     if (!sessions.length) {
       listEl.innerHTML = `<div class="muted" style="padding:12px">No sessions yet.</div>`;
-      return;
+      return sessions;
     }
 
     listEl.innerHTML = sessions.map(s => {
@@ -144,6 +145,7 @@ async function loadAndRenderList() {
   // Extra safety: ensure the list container is visible
   listEl.style.display = 'block';
   listEl.classList.remove('hidden');
+  return sessions;
 }
 
 // (Batches view removed — everything is grouped under Sessions now.)
@@ -809,8 +811,13 @@ function wireDetailButtons(sessionId) {
 async function main() {
   const sessionFromUrl = qs("session");
 
-  // Always render fresh session list on startup
-  await loadAndRenderList();
+  // Always render fresh session list on startup.
+  // We capture the returned sessions so we can reliably decide whether a
+  // ?session=... id refers to a top-level group (show tickers table) or a
+  // concrete leaf (go straight to detail chart). This fixes direct links
+  // and the BATCH- group ids which have no on-disk folder.
+  const topSessions = await loadAndRenderList() || [];
+  const topIds = new Set(topSessions.map(s => s.id));
 
   // Sessions header chip doubles as a refresh of the list
   const tabSessions = document.getElementById("tab-sessions");
@@ -823,15 +830,12 @@ async function main() {
   }
 
   if (sessionFromUrl) {
-    // try top session first
-    try {
-      const resp = await getJSON(`/api/session/${encodeURIComponent(sessionFromUrl)}`);
-      if (resp && resp.tickers) {
-        await loadSessionTickers(sessionFromUrl);
-      } else {
-        await loadSession(sessionFromUrl);
-      }
-    } catch {
+    if (topIds.has(sessionFromUrl)) {
+      // This id came from the sessions list (a batch, live day, or singleton group).
+      // Show the tickers sub-list (even if 1 item).
+      await loadSessionTickers(sessionFromUrl);
+    } else {
+      // Not a known top-level id → treat as a specific leaf session.
       await loadSession(sessionFromUrl);
     }
   } else {

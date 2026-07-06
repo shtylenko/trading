@@ -105,8 +105,6 @@ class PositionEngine:
             raise ValueError(f"turn i={i}: action {action} must not carry a fill (shares_delta set)")
         if action == "ENTER" and self.shares > 0:
             raise ValueError(f"turn i={i}: ENTER while already long {self.shares} (use ADD)")
-        if action == "ENTER" and self.entry_i is not None:
-            raise ValueError(f"turn i={i}: ENTER after position already established (one trade per session)")
         if action in ("ENTER", "ADD") and dq and dq < 0:
             raise ValueError(f"turn i={i}: {action} must be a buy (shares_delta > 0)")
         if action in ("SCALE", "EXIT") and dq and dq > 0:

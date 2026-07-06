@@ -231,11 +231,12 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
             if not sid:
                 self._send_json({"error": "bad session id"}, 400)
                 return
-            if not (SIM_ROOT / sid).exists():
-                self._send_json({"error": "session not found"}, 404)
-                return
             if len(parts) > 3:
                 # leaf detail endpoints: /api/session/<leaf>/state etc.
+                # These require a real directory on disk.
+                if not (SIM_ROOT / sid).exists():
+                    self._send_json({"error": "session not found"}, 404)
+                    return
                 if path.endswith("/state") or path.endswith("/state/"):
                     try:
                         from . import recorder
@@ -274,6 +275,12 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
                     return
             else:
                 # top-level session detail: /api/session/<sess-id>
+                # This is the entry point for grouped sessions (batches, live days).
+                # The "id" here is often a virtual key (e.g. "...-BATCH-xxx") that does
+                # not correspond to a directory. Leaves under it declare the key in
+                # their session.json "session" (or legacy "batch") field.
+                # get_top_session_view will find them by scanning.
+                # We deliberately do *not* require (SIM_ROOT / sid).exists() here.
                 try:
                     from . import recorder
                     self._send_json(recorder.get_top_session_view(sid))

@@ -427,9 +427,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.list:
         try:
             from . import recorder
-            for s in recorder.list_sessions():
-                print(f"{s['id']}  {s['ticker']} {s['historical_date']}  {s.get('mode','simulated')} {s['status']}")
-            if not recorder.list_sessions():
+            sesss = recorder.list_sessions()
+            for s in sesss:
+                name = s.get("name") or s["id"]
+                print(f"{s['id']}  {name}  {s.get('type','?')}  tickers={s.get('n_tickers')}  trades={s.get('n_trades')}  pnl={s.get('pnl')}")
+            if not sesss:
                 print("(no sessions yet)")
         except Exception as e:
             print(f"(error listing: {e})")

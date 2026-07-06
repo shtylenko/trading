@@ -322,8 +322,10 @@ def test_list_sessions_newest_first(tmp_path, monkeypatch):
     b = recorder.init("BBB", "2025-03-11", root=tmp_path, now=datetime(2026, 6, 30, 11, 0, 0))
     lst = recorder.list_sessions()
     ids = [e["id"] for e in lst]
-    assert ids == [b.name, a.name]               # newest first
-    assert all(e["status"] == "running" for e in lst)
+    assert ids == [b.name, a.name]               # newest first (each ungrouped leaf is its own top session)
+    # grouped list_sessions items describe aggregates (no per-leaf 'status'/'ticker' here)
+    assert all(e.get("n_tickers") == 1 for e in lst)
+    assert all("pnl" in e and "type" in e for e in lst)
 
 
 def test_stand_down_no_trade(tmp_path):

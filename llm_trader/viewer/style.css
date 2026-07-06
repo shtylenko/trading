@@ -20,7 +20,7 @@ body, #app {
   display: flex;
 }
 .muted { color: var(--muted); }
-.hidden { display: none; }
+.hidden { display: none !important; }
 .small { font-size: 11px; }
 
 header { 
@@ -95,6 +95,13 @@ header {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+#session-tickers {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 12px 12px;
 }
 
 #app {

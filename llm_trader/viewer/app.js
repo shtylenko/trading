@@ -60,7 +60,8 @@ async function loadAndRenderList() {
   const listEl = document.getElementById("session-list");
   listEl.style.display = 'block';
   listEl.classList.remove('hidden');
-  document.getElementById('no-session').classList.add('hidden');
+  // Do not touch main-pane visibility here (no-session / tickers / detail).
+  // Visibility of main content is managed by loadSession* and main() based on selection.
   listEl.innerHTML = `<div class="muted" style="padding:8px">Loading sessions...</div>`;
 
   try {
@@ -154,15 +155,25 @@ if (document.readyState === 'loading') {
 }
 
 async function loadSessionTickers(sessionId, updateUrl = false) {
-  const bd = document.getElementById("session-tickers");
-  bd.innerHTML = `<div class="muted" style="padding:16px">Loading tickers for ${escapeHtml(sessionId)}...</div>`;
-  document.getElementById("session-tickers").classList.remove("hidden");
+  const tickersEl = document.getElementById("session-tickers");
+  const detail = document.getElementById("session-detail");
+  const placeholder = document.getElementById("no-session");
+
+  // Ensure only the tickers list is visible in the main area (no leftover detail chart)
+  placeholder.classList.add("hidden");
+  placeholder.style.display = "none";
+  detail.classList.add("hidden");
+  detail.style.display = "none";
+  tickersEl.classList.remove("hidden");
+  tickersEl.style.display = "";
+
+  tickersEl.innerHTML = `<div class="muted" style="padding:16px">Loading tickers for ${escapeHtml(sessionId)}...</div>`;
 
   try {
     const v = await getJSON(`/api/session/${encodeURIComponent(sessionId)}`);
     renderSessionTickers(v);
   } catch (e) {
-    bd.innerHTML = `<div class="muted" style="padding:16px;color:#f88">Failed to load session: ${e}</div>`;
+    tickersEl.innerHTML = `<div class="muted" style="padding:16px;color:#f88">Failed to load session: ${e}</div>`;
   }
 
   if (updateUrl) {
@@ -211,7 +222,13 @@ function renderSessionTickers(v) {
   const back = bd.querySelector("#bd-back");
   if (back) back.addEventListener("click", () => {
     bd.classList.add("hidden");
-    // reload main list
+    bd.style.display = "none";
+    document.getElementById("session-detail").classList.add("hidden");
+    document.getElementById("session-detail").style.display = "none";
+    const ns = document.getElementById("no-session");
+    ns.classList.remove("hidden");
+    ns.style.display = "";
+    // reload the sidebar list (highlight will re-apply based on currentSessionId if any)
     loadAndRenderList();
   });
 
@@ -457,6 +474,8 @@ function renderChart(bars, actions, sess, preserveView = false) {
     chart.timeScale().fitContent();
   }
   chart._candle = candle;   // referenced by the timeline for crosshair linking
+  chart._bars = bars || []; // for timeline clicks to zoom 2h window around a decision
+
 
   // Ensure proper size (important inside flex layouts)
   const resizeChart = () => {
@@ -510,7 +529,57 @@ function renderTimeline(decisions, chart) {
 
   const turns = [...wrap.querySelectorAll(".turn")];
 
+  // Zoom helper: on timeline click, show ~2 hours centered on the decision time
+  // (1h before + 1h after), clamped to available bars. Near session start (e.g. 9:30
+  // with no prior data) show 2h forward from the clicked time (or dataMin).
+  function zoomToDecision(time) {
+    if (!chart || !chart.timeScale || !chart._bars || !time) return;
+    const barTimes = chart._bars
+      .map((b) => b.t)
+      .filter((t) => typeof t === "number")
+      .sort((a, b) => a - b);
+    if (!barTimes.length) return;
+
+    const dataMin = barTimes[0];
+    const dataMax = barTimes[barTimes.length - 1];
+
+    const ONE_HOUR = 3600;
+    let from = time - ONE_HOUR;
+    let to = time + ONE_HOUR;
+
+    // Clamp to data we actually have
+    from = Math.max(from, dataMin);
+    to = Math.min(to, dataMax);
+
+    // If the window ended up smaller than ~2h because we couldn't go before the target
+    // (e.g. start of day / first decision at 9:30 with no prior data), expand forward
+    // to give essentially a full 2h view starting from the earliest data.
+    let span = to - from;
+    if (span < 2 * ONE_HOUR && from <= dataMin + 120) {
+      to = Math.min(from + 2 * ONE_HOUR, dataMax);
+      // from stays at dataMin (or the clamped start), per "9:30-11:30" example
+    }
+
+    // Symmetric handling near the end of data: ensure ~2h if possible
+    span = to - from;
+    if (span < 2 * ONE_HOUR && to >= dataMax - 120) {
+      from = Math.max(to - 2 * ONE_HOUR, dataMin);
+    }
+
+    if (from >= to) {
+      from = dataMin;
+      to = dataMax;
+    }
+
+    try {
+      chart.timeScale().setVisibleRange({ from, to });
+    } catch (_) {}
+  }
+
   const select = (t, scrollList) => {
+    // Zoom first so the time is in view, then position crosshair etc.
+    if (t != null) zoomToDecision(+t);
+
     turns.forEach((el) => el.classList.toggle("sel", String(el.dataset.t) === String(t)));
     const sel = turns.find((el) => String(el.dataset.t) === String(t));
     if (chart && chart._candle && sel && chart.setCrosshairPosition) {
@@ -551,12 +620,15 @@ function highlightCurrentSession() {
 async function loadSession(sessionId, updateUrl = false) {
   const detail = document.getElementById("session-detail");
   const placeholder = document.getElementById("no-session");
+  const tickersEl = document.getElementById("session-tickers");
 
+  // Show only the per-ticker detail; hide tickers list and placeholder
   placeholder.classList.add("hidden");
+  placeholder.style.display = "none";
+  tickersEl.classList.add("hidden");
+  tickersEl.style.display = "none";
   detail.classList.remove("hidden");
-
-  // hide the session tickers list when opening a ticker detail
-  document.getElementById("session-tickers").classList.add("hidden");
+  detail.style.display = "";  // let CSS (flex) take over
 
   currentSessionId = sessionId;
 
@@ -600,7 +672,11 @@ async function loadSession(sessionId, updateUrl = false) {
 
   } catch (e) {
     detail.classList.add("hidden");
+    detail.style.display = "none";
+    document.getElementById("session-tickers").classList.add("hidden");
+    document.getElementById("session-tickers").style.display = "none";
     placeholder.classList.remove("hidden");
+    placeholder.style.display = "";
     fail(`Could not load session ${sessionId}: ${e}`);
   }
 }
@@ -728,8 +804,13 @@ async function main() {
       await loadSession(sessionFromUrl);
     }
   } else {
-    document.getElementById("no-session").classList.remove("hidden");
+    const ns = document.getElementById("no-session");
+    ns.classList.remove("hidden");
+    ns.style.display = "";
     document.getElementById("session-detail").classList.add("hidden");
+    document.getElementById("session-detail").style.display = "none";
+    document.getElementById("session-tickers").classList.add("hidden");
+    document.getElementById("session-tickers").style.display = "none";
   }
 
   // Light auto-refresh of the sidebar list

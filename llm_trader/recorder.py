@@ -1015,8 +1015,13 @@ def get_top_session_view(sess_id: str) -> dict:
         "leaf_id": None,
     })
     members = []
+    batch_tag = None
+    modes = set()
     for d, s in _iter_session_members(sess_id):
         members.append(_session_entry(d, s))
+        if not batch_tag:
+            batch_tag = s.get("batch")
+        modes.add(s.get("mode", "simulated"))
         t = s.get("ticker")
         res = s.get("result") or {}
         td = tickers[t]
@@ -1040,20 +1045,16 @@ def get_top_session_view(sess_id: str) -> dict:
             "leaf_id": data["leaf_id"],
         })
     ticker_list.sort(key=lambda x: x["ticker"])
-    meta = _batch_meta(sess_id) or {}
-    # Try to find a human name (batch tag)
-    name = meta.get("tag") or meta.get("name") or sess_id
-    if name == sess_id:
-        # fallback from leaves
-        for _, ss in members:  # members have the entries
-            if ss.get("batch"):
-                name = ss.get("batch")
-                break
+
+    meta = (_batch_meta(batch_tag) if batch_tag else None) or _batch_meta(sess_id) or {}
+    name = meta.get("tag") or meta.get("name") or batch_tag or sess_id
+    sess_type = "live" if "live" in modes else "simulated"
+
     return {
         "id": sess_id,
         "name": name,
         "meta": meta,
-        "type": "simulated" if meta else "live",
+        "type": sess_type,
         "tickers": ticker_list,
         "sessions": members,
     }
@@ -1220,9 +1221,13 @@ def main(argv: Optional[list[str]] = None) -> int:
               f"realized=${r.get('realized_pnl')} ({r.get('r_multiple')}R)")
     elif args.cmd == "list":
         for s in list_sessions():
-            status = s["status"]
-            mode = s.get("mode", "simulated")
-            print(f"{s['id']}  {s['ticker']}  {s['historical_date']}  {mode} {status}")
+            # grouped view (top sessions / batches)
+            name = s.get("name") or s["id"]
+            ntk = s.get("n_tickers", "?")
+            ntr = s.get("n_trades", "?")
+            pnl = s.get("pnl")
+            pnl_s = f"${pnl}" if pnl is not None else "—"
+            print(f"{s['id']}  {name}  {s.get('type','?')}  {ntk}tickers {ntr}trades  pnl={pnl_s}")
     elif args.cmd == "report":
         rows = report_by_version(mode=args.mode, batch=args.batch)
         if args.format == "json":

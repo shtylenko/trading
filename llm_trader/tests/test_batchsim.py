@@ -165,33 +165,36 @@ def test_resolve_batch_commands_matches_session_by_sid(monkeypatch):
 
 def test_resolve_batch_commands_ignores_report_output_contamination(monkeypatch):
     """A later run that prints another leaf's SDIR in `recorder report` OUTPUT must not
-    have its own commands attributed to that leaf. The owner (whose COMMANDS reference the
-    SDIR) wins over the mere mentioner — otherwise clean leaves get falsely voided."""
-    sid_clean = "20250101090000-AQMS-111111"   # a clean run
-    sid_dirty = "20250101093000-EVTV-222222"   # a run that re-ran step start AND printed AQMS's path
+    have its own commands attributed to that leaf. The owner is bound by its setup-block
+    marker (CAPTURED_SDIR/BATCHSIM_SID) even when its commands only use $SDIR (never the
+    literal) — so the compliant clean leaf is not falsely voided by the dirty mentioner."""
+    sid_clean = "20250101090000-AQMS-111111"   # a clean, protocol-compliant run ($SDIR only)
+    sid_dirty = "20250101093000-EVTV-222222"   # re-ran step start AND printed AQMS's path via report
     exports = {
-        # AQMS owner: commands reference its own SDIR; single clean step start
+        # AQMS owner: bound by CAPTURED_SDIR marker (echo output); commands use $SDIR, no literal
         "20250101_090005_aaa": json.dumps({"messages": [
+            {"role": "tool", "content": f"CAPTURED_SDIR=/x/simulations/{sid_clean}"},
             {"role": "assistant", "tool_calls": [{"function": {"name": "terminal",
-             "arguments": json.dumps({"command": f'SDIR="{sid_clean}" && step start --session "$SDIR"'})}}]},
-            {"role": "assistant", "tool_calls": [{"function": {"name": "terminal",
-             "arguments": json.dumps({"command": f'step next --session {sid_clean}'})}}]}]}),
-        # EVTV run: re-ran step start (bad) AND its OUTPUT prints AQMS's SDIR via a report
+             "arguments": json.dumps({"command": 'python3 -m trading.llm_trader.step next --session "$SDIR"'})}}]},
+            {"role": "assistant", "content": f"BATCHSIM_SID=/x/simulations/{sid_clean}"}]}),
+        # EVTV run: re-ran step start (bad) AND its OUTPUT prints AQMS's SDIR via a bare report path
         "20250101_093005_bbb": json.dumps({"messages": [
+            {"role": "tool", "content": f"CAPTURED_SDIR=/x/simulations/{sid_dirty}"},
             {"role": "assistant", "tool_calls": [{"function": {"name": "terminal",
-             "arguments": json.dumps({"command": f'step start --session {sid_dirty}'})}}]},
+             "arguments": json.dumps({"command": f'python3 -m trading.llm_trader.step start --session {sid_dirty}'})}}]},
             {"role": "assistant", "tool_calls": [{"function": {"name": "terminal",
-             "arguments": json.dumps({"command": f'step start --session {sid_dirty}'})}}]},
+             "arguments": json.dumps({"command": f'python3 -m trading.llm_trader.step start --session {sid_dirty}'})}}]},
             {"role": "tool", "content": f"report listing ... {sid_clean} ... {sid_dirty} ..."}]}),
     }
     monkeypatch.setattr(batchsim, "_recent_session_ids", lambda limit: list(exports))
     monkeypatch.setattr(batchsim, "_export_session", lambda hid: exports.get(hid))
     got = batchsim._resolve_batch_commands([sid_clean, sid_dirty])
-    # the clean leaf keeps ITS OWN commands (one step start), NOT the dirty session's
-    # double step start pulled in via the report-output mention (the contamination bug)
-    assert got[sid_clean].count("step start") == 1
+    # clean leaf resolves to its OWN commands (only `step next`) via the marker — NOT the
+    # dirty session's double step start pulled in through the report-output mention
     assert "step next" in got[sid_clean]
-    # the dirty leaf still gets its own commands and is correctly flagged
+    assert got[sid_clean].count("step start") == 0
+    assert batchsim._scan_commands(got[sid_clean]) is None
+    # dirty leaf still resolves to its own commands and is correctly flagged
     assert got[sid_dirty].count("step start") == 2
     assert batchsim._scan_commands(got[sid_dirty]) == "agent re-ran `step start` (re-seal / look-ahead)"
 

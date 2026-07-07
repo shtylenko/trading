@@ -685,6 +685,21 @@ def _export_session(session_id: str) -> Optional[str]:
     return proc.stdout if (proc.returncode == 0 and proc.stdout.strip()) else None
 
 
+# A run's session prints these markers bound to its own SDIR (see the setup block in
+# _prompt): `echo "CAPTURED_SDIR=$SDIR"` and the final `BATCHSIM_SID=$SDIR`. Both resolve
+# to the literal SDIR only in the owner's export; a `recorder report` / `ls` listing shows
+# other runs' SDIRs as bare paths with no such marker. So a marker immediately preceding
+# the SDIR is a definitive owner signal, immune to report-output cross-contamination.
+_OWNER_MARKERS = ("BATCHSIM_SID=", "CAPTURED_SDIR=")
+
+
+def _owns_marker(text: Optional[str], sid: str) -> bool:
+    """True if ``text`` binds this SDIR to a session via a setup-block owner marker."""
+    if not text:
+        return False
+    return re.search(r"(?:BATCHSIM_SID|CAPTURED_SDIR)=\S*" + re.escape(sid), text) is not None
+
+
 def _resolve_batch_commands(sids: list[str]) -> dict[str, Optional[str]]:
     """Map each recorder session id → its agent's executed tool-call commands (or None
     if its hermes session can't be found). Finds the session by the SDIR it contains
@@ -708,15 +723,22 @@ def _resolve_batch_commands(sids: list[str]) -> dict[str, Optional[str]]:
             if text:
                 exported.append((text, _parse_export(text)))
 
-    # Attribute each run to the session that OWNS it. Priority:
-    #   1. the run's SDIR appears in a session's executed COMMANDS — only the owner ever
-    #      *commands* its own SDIR (init/step/log --session <sdir>).
-    #   2. fallback: the SDIR appears only in the raw export (e.g. captured into $SDIR from
-    #      init output and never re-typed as a literal); prefer a session that has commands.
+    # Attribute each run to the session that OWNS it. Priority (strongest signal first):
+    #   1. the owner's export contains a setup-block marker binding it to this SDIR:
+    #      `CAPTURED_SDIR=<sdir>` (echoed right after init) or `BATCHSIM_SID=<sdir>` (the
+    #      agent's final line). Only the owning agent emits these for its own $SDIR.
+    #   2. the SDIR appears in the session's executed COMMANDS (owner typed the literal path).
+    #   3. fallback: the SDIR appears anywhere in the raw export (captured into $SDIR from
+    #      init output, never re-typed); prefer a session that has parseable commands.
     # This stops cross-contamination: an agent that runs `recorder report`/`ls` prints OTHER
-    # runs' SDIRs in its OUTPUT, which used to pull that session's commands (its own re-run
-    # `step start`, `_sealed` reference, …) onto innocent leaves and falsely void them.
+    # runs' SDIRs in its OUTPUT as bare paths (no marker), which used to pull that session's
+    # commands (its own re-run `step start`, `_sealed` reference, …) onto innocent leaves.
     for sid in list(remaining):
+        owners = [c for t, c in exported if _owns_marker(t, sid)]
+        if owners:
+            result[sid] = next((c for c in owners if c), owners[0])  # prefer a parseable one
+            remaining.discard(sid)
+            continue
         pick = next((c for _, c in exported if c and sid in c), None)
         if pick is None:
             pick = next((c for t, c in exported if c and sid in t), None)

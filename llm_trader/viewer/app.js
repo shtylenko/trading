@@ -150,8 +150,144 @@ async function loadAndRenderList() {
 
 // (Batches view removed — everything is grouped under Sessions now.)
 
-// Force an initial render
-loadAndRenderList();
+// ---------- FULL-PAGE TABLE (default view, no session selected) ----------
+
+// Columns shown in the full-width session table. `num` drives right-alignment
+// and numeric sorting.
+const TABLE_COLS = [
+  { key: "name",          label: "Session",       num: false },
+  { key: "type",          label: "Type",          num: false },
+  { key: "version",       label: "Version",       num: false },
+  { key: "model",         label: "Model",         num: false },
+  { key: "last_activity", label: "Last activity", num: false },
+  { key: "n_tickers",     label: "Tickers",       num: true  },
+  { key: "n_trades",      label: "Trades",        num: true  },
+  { key: "n_fills",       label: "Fills",         num: true  },
+  { key: "win_rate",      label: "Win %",         num: true  },
+  { key: "expectancy_r",  label: "Exp R",         num: true  },
+  { key: "effective_r",   label: "Eff R",         num: true  },
+  { key: "profit_factor_r", label: "PF",          num: true  },
+  { key: "n_void",        label: "Void",          num: true  },
+  { key: "pnl",           label: "P&L",           num: true  },
+];
+
+// Sort comparator for a column. Nulls always sort last regardless of direction.
+function sessionCmp(key, dir) {
+  const mult = dir === "asc" ? 1 : -1;
+  const val = (s) => (key === "name" ? (s.name || s.id) : s[key]);
+  return (a, b) => {
+    const va = val(a), vb = val(b);
+    const na = va == null || va === "";
+    const nb = vb == null || vb === "";
+    if (na && nb) return 0;
+    if (na) return 1;
+    if (nb) return -1;
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * mult;
+    return String(va).localeCompare(String(vb)) * mult;
+  };
+}
+
+// Render the default full-page, sortable session table into #no-session.
+// Row click fully navigates to ?session=<id> (no dynamic swap); Cmd/Ctrl/
+// middle-click opens it in a new tab. Header click re-sorts via URL + reload.
+async function renderSessionTable() {
+  document.getElementById("app").classList.add("table-view");
+
+  const host = document.getElementById("no-session");
+  host.classList.add("session-table-mode");
+  host.classList.remove("hidden");
+  host.style.display = "";
+  host.innerHTML = `<div class="muted" style="padding:8px">Loading sessions…</div>`;
+
+  let sessions = [];
+  try {
+    const data = await getJSON("/api/sessions");
+    sessions = data.sessions || [];
+  } catch (e) {
+    host.innerHTML = `<div class="muted" style="padding:12px;color:#f88">Failed to load sessions: ${escapeHtml(String(e))}</div>`;
+    return;
+  }
+
+  // Sort state lives in the URL so it survives the full-page reload and is
+  // deep-linkable. Default: most recent first.
+  const sortKey = TABLE_COLS.some((c) => c.key === qs("sort")) ? qs("sort") : "last_activity";
+  const sortDir = qs("dir") === "asc" ? "asc" : "desc";
+  sessions.sort(sessionCmp(sortKey, sortDir));
+
+  if (!sessions.length) {
+    host.innerHTML = `<div class="muted" style="padding:12px">No sessions yet.</div>`;
+    return;
+  }
+
+  const head = TABLE_COLS.map((c) => {
+    const cls = [c.num ? "num" : "", c.key === sortKey ? `sorted-${sortDir}` : ""].filter(Boolean).join(" ");
+    return `<th data-key="${c.key}"${cls ? ` class="${cls}"` : ""}>${c.label}</th>`;
+  }).join("");
+
+  const rows = sessions.map((s) => {
+    const type = s.type || "simulated";
+    const isLive = type === "live";
+    const display = s.name && s.name !== s.id ? `${escapeHtml(s.name)} <span class="muted small">(${escapeHtml(s.id)})</span>` : escapeHtml(s.id);
+    const pnlCls = s.pnl > 0 ? "pos" : s.pnl < 0 ? "neg" : "";
+    const wr = s.win_rate != null ? `${s.win_rate}%` : "—";
+    const rCls = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
+    // Expectancy cell: clean expectancy (= mean R) with std dispersion appended.
+    const expCell = s.expectancy_r != null
+      ? `${s.expectancy_r.toFixed(2)}${s.std_r != null ? ` <span class="muted small">±${s.std_r.toFixed(2)}</span>` : ""}`
+      : "—";
+    const effCell = s.effective_r != null ? s.effective_r.toFixed(2) : "—";
+    const pfCell = s.profit_factor_r != null ? s.profit_factor_r.toFixed(2) : "—";
+    const voidCell = s.n_void != null
+      ? (s.n_void > 0 ? `<span class="neg">${s.n_void}</span>` : "0")
+      : "—";
+    return `<tr data-id="${escapeHtml(s.id)}">
+      <td>${display}</td>
+      <td><span class="badge ${isLive ? "live" : "sim"}">${isLive ? "live" : "sim"}</span></td>
+      <td>${s.version ? escapeHtml(s.version) : "—"}</td>
+      <td>${s.model ? escapeHtml(s.model) : "—"}</td>
+      <td>${escapeHtml(s.last_activity || "—")}</td>
+      <td class="num">${s.n_tickers}</td>
+      <td class="num">${s.n_trades}</td>
+      <td class="num">${s.n_fills != null ? s.n_fills : "—"}</td>
+      <td class="num">${wr}</td>
+      <td class="num ${rCls(s.expectancy_r)}">${expCell}</td>
+      <td class="num ${rCls(s.effective_r)}">${effCell}</td>
+      <td class="num">${pfCell}</td>
+      <td class="num">${voidCell}</td>
+      <td class="num ${pnlCls}">${s.pnl != null ? fmtMoney(s.pnl) : "—"}</td>
+    </tr>`;
+  }).join("");
+
+  host.innerHTML = `<table class="session-table">
+    <thead><tr>${head}</tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+
+  // Header click → re-sort by that column via URL params + full reload.
+  // Same column toggles asc/desc; a new column starts descending.
+  host.querySelectorAll("th[data-key]").forEach((th) => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.key;
+      const dir = key === sortKey && sortDir === "desc" ? "asc" : "desc";
+      const p = new URLSearchParams(location.search);
+      p.set("sort", key);
+      p.set("dir", dir);
+      location.search = p.toString();  // triggers a full page reload
+    });
+  });
+
+  // Row click → navigate (full page load) to the session detail view.
+  const open = (id, newTab) => {
+    const url = `/viewer/index.html?session=${encodeURIComponent(id)}`;
+    if (newTab) window.open(url, "_blank");
+    else window.location.href = url;
+  };
+  host.querySelectorAll("tr[data-id]").forEach((tr) => {
+    const id = tr.dataset.id;
+    tr.addEventListener("click", (e) => open(id, e.metaKey || e.ctrlKey));
+    tr.addEventListener("auxclick", (e) => { if (e.button === 1) open(id, true); });
+  });
+}
 
 async function loadSessionTickers(sessionId, updateUrl = false) {
   const tickersEl = document.getElementById("session-tickers");
@@ -185,37 +321,56 @@ function renderSessionTickers(v) {
       <h2>${escapeHtml(v.name || v.id)}</h2>
       <span class="badge ${type === "live" ? "live" : "sim"}">${type}</span>
     </div>
-    <div class="bd-meta">${meta.model ? `model ${escapeHtml(meta.model)}` : ""} ${meta.version ? `v${escapeHtml(meta.version)}` : ""}</div>
-    <div class="bd-section">Tickers (${tickers.length})</div>
-    <table class="bd-table">
-      <thead><tr><th>ticker</th><th>trades</th><th>P&amp;L</th><th>win %</th></tr></thead>
-      <tbody>`;
+    <div class="bd-meta">${meta.model ? `model ${escapeHtml(meta.model)}` : ""} ${meta.version ? `v${escapeHtml(meta.version)}` : ""}</div>`;
+  const m = v.metrics || {};
+  if (m.clean_expectancy_r != null || m.effective_expectancy_r != null || m.profit_factor_r != null) {
+    html += `<div class="bd-metrics" style="font-size:12px; margin:4px 0; padding:4px; background:#222; border-radius:3px;">`;
+    if (m.clean_expectancy_r != null) html += `Clean Exp: <b>${m.clean_expectancy_r}R</b> `;
+    if (m.effective_expectancy_r != null) html += `Eff Exp: <b>${m.effective_expectancy_r}R</b> `;
+    if (m.profit_factor_r != null) html += `PF: <b>${m.profit_factor_r}</b> `;
+    if (m.n_planned != null) html += `N=${m.n_planned} (traded ${m.n_traded||0}, void ${m.n_void||0}) `;
+    if (m.sequence_drawdown_r != null) html += `SeqDD: <b>${m.sequence_drawdown_r}R</b>`;
+    if (m.r_distribution) {
+      const d = m.r_distribution;
+      html += ` | meanR:${d.mean} med:${d.median} std:${d.std}`;
+    }
+    html += `</div>`;
+  }
+  html += `<div class="bd-section">Tickers (${tickers.length})</div>
+<table class="bd-table">
+  <thead><tr><th>ticker</th><th>trades</th><th>R</th><th>P&amp;L</th><th>win %</th><th>status</th></tr></thead>
+  <tbody>`;
 
   if (tickers.length) {
     html += tickers.map(t => {
       const pnlCls = t.pnl > 0 ? "pos" : t.pnl < 0 ? "neg" : "";
       const wr = t.win_rate != null ? `${t.win_rate}%` : "—";
-      return `<tr class="run" data-leaf="${escapeHtml(t.leaf_id)}" data-ticker="${escapeHtml(t.ticker)}">
+      const rStr = t.r != null ? t.r.toFixed(2) + "R" : "—";
+      const voided = t.n_void > 0;
+      const statusCell = voided
+        ? `<span class="void-badge" title="${escapeHtml(t.void_reason || "voided")}">VOID${t.n_void > 1 ? ` ×${t.n_void}` : ""}</span>`
+        : `<span class="muted">ok</span>`;
+      return `<tr class="run${voided ? " voided" : ""}" data-leaf="${escapeHtml(t.leaf_id)}" data-ticker="${escapeHtml(t.ticker)}">
         <td><b>${escapeHtml(t.ticker)}</b></td>
         <td>${t.n_trades}</td>
+        <td>${rStr}</td>
         <td class="${pnlCls}">${fmtMoney(t.pnl)}</td>
         <td>${wr}</td>
+        <td>${statusCell}</td>
       </tr>`;
     }).join("");
   } else {
-    html += `<tr><td colspan="4" class="muted">no tickers</td></tr>`;
+    html += `<tr><td colspan="6" class="muted">no tickers</td></tr>`;
   }
 
   html += `</tbody></table>`;
 
   bd.innerHTML = html;
 
-  // back button
+  // back button → return to the full-page session table (top-level view)
   const back = bd.querySelector("#bd-back");
   if (back) back.addEventListener("click", () => {
-    showPane("no-session");
-    // reload the sidebar list (highlight will re-apply based on currentSessionId if any)
-    loadAndRenderList();
+    window.location.href = "/viewer/index.html";
   });
 
   // click ticker row -> load detail
@@ -248,7 +403,9 @@ function renderHeader(view) {
   const badge = document.getElementById("h-pnl");
   badge.className = "badge";
   if (pnl && pnl.traded) {
-    badge.textContent = `${pnl.realized_pnl >= 0 ? "+" : ""}$${pnl.realized_pnl}  ·  ${pnl.r_multiple}R  ·  ${pnl.win ? "WIN" : "LOSS"}`;
+    let txt = `${pnl.realized_pnl >= 0 ? "+" : ""}$${pnl.realized_pnl}  ·  ${pnl.r_multiple}R  ·  ${pnl.win ? "WIN" : "LOSS"}`;
+    if (pnl.mae_per_share != null) txt += `  ·  MAE -${pnl.mae_per_share}`;
+    badge.textContent = txt;
     badge.classList.add(pnl.win ? "win" : "loss");
   } else if (view.is_live) {
     badge.textContent = "running";
@@ -264,7 +421,8 @@ function renderHeader(view) {
     chip("float", s.float_shares != null ? fmtFloat(s.float_shares) : null) +
     chip("anchor(5m)", s.anchor_px != null ? `$${s.anchor_px}` : null) +
     chip("entry", pnl && pnl.entry_avg ? `$${pnl.entry_avg}` : null) +
-    chip("MFE", pnl && pnl.mfe_pct != null ? `+${pnl.mfe_pct}%` : null);
+    chip("MFE", pnl && pnl.mfe_pct != null ? `+${pnl.mfe_pct}%` : null) +
+    chip("MAE", pnl && pnl.mae_pct != null ? `-${pnl.mae_pct}%` : null);
 
   document.getElementById("h-levels").innerHTML =
     chip("prior close", s.prior_close) + chip("prior high", s.prior_high) +
@@ -811,10 +969,24 @@ function wireDetailButtons(sessionId) {
 async function main() {
   const sessionFromUrl = qs("session");
 
-  // Always render fresh session list on startup.
-  // We capture the returned sessions so we can reliably decide whether a
-  // ?session=... id refers to a top-level group (show tickers table) or a
-  // concrete leaf (go straight to detail chart). This fixes direct links
+  // Default view (no session selected): full-page, sortable session table with
+  // no sidebar. Selecting a row fully navigates to ?session=<id>, which drops
+  // into the sidebar + detail layout below.
+  if (!sessionFromUrl) {
+    await renderSessionTable();
+    return;
+  }
+
+  // A session is selected → sidebar + detail layout.
+  document.getElementById("app").classList.remove("table-view");
+
+  // Mark the selected session up front so the sidebar highlights it on first
+  // render (loadAndRenderList applies the highlight from currentSessionId).
+  currentSessionId = sessionFromUrl;
+
+  // Render the sidebar list. We capture the returned sessions so we can reliably
+  // decide whether ?session=... refers to a top-level group (show tickers table)
+  // or a concrete leaf (go straight to detail chart). This fixes direct links
   // and the BATCH- group ids which have no on-disk folder.
   const topSessions = await loadAndRenderList() || [];
   const topIds = new Set(topSessions.map(s => s.id));
@@ -829,17 +1001,13 @@ async function main() {
     refreshList.onclick = () => loadAndRenderList();
   }
 
-  if (sessionFromUrl) {
-    if (topIds.has(sessionFromUrl)) {
-      // This id came from the sessions list (a batch, live day, or singleton group).
-      // Show the tickers sub-list (even if 1 item).
-      await loadSessionTickers(sessionFromUrl);
-    } else {
-      // Not a known top-level id → treat as a specific leaf session.
-      await loadSession(sessionFromUrl);
-    }
+  if (topIds.has(sessionFromUrl)) {
+    // This id came from the sessions list (a batch, live day, or singleton group).
+    // Show the tickers sub-list (even if 1 item).
+    await loadSessionTickers(sessionFromUrl);
   } else {
-    showPane("no-session");
+    // Not a known top-level id → treat as a specific leaf session.
+    await loadSession(sessionFromUrl);
   }
 
   // Light auto-refresh of the sidebar list

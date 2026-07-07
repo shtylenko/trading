@@ -93,6 +93,8 @@ class PositionEngine:
         # peak position size ever held — the correct scale for the capture ratio, so
         # pyramiding (ADD) doesn't make capture read >1 against the initial tranche.
         self.max_shares: int = 0
+        # most negative (close - avg_entry) while in position; used for MAE per share
+        self.worst_price_vs_entry: float = 0.0
 
     def _validate_action(
         self, i: int, action: str, has_fill: bool, dq: Optional[int]
@@ -178,6 +180,10 @@ class PositionEngine:
             if (self.shares and close is not None)
             else 0.0
         )
+        if self.shares > 0 and close is not None:
+            vs_entry = close - self.avg_entry
+            if vs_entry < self.worst_price_vs_entry:
+                self.worst_price_vs_entry = vs_entry
         timeline_row = {
             "i": i,
             "t": None,  # filled later
@@ -240,6 +246,13 @@ class PositionEngine:
         if peak is None or self.entry_avg is None:
             return None
         return round(peak - self.entry_avg, 4)
+
+    def mae_per_share(self) -> Optional[float]:
+        """Worst (most negative) price vs entry_avg while long, as positive MAE value.
+        Mirrors mfe_per_share for adverse excursion per share."""
+        if self.entry_i is None or self.worst_price_vs_entry >= 0:
+            return None
+        return round(-self.worst_price_vs_entry, 4)
 
     @property
     def realized_pnl(self) -> float:
@@ -590,6 +603,7 @@ def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
         if (mfe_dollars and mfe_dollars > 0) else None
     )
 
+    mae_ps = engine.mae_per_share()
     pnl = {
         "realized_pnl": engine.realized_pnl,
         "risk_budget": risk_budget,
@@ -612,6 +626,8 @@ def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
         "mfe_per_share": mfe_ps,
         "mfe_pct": round(mfe_ps / entry_avg * 100, 2) if (mfe_ps and entry_avg) else None,
         "mfe_capture": mfe_capture,
+        "mae_per_share": mae_ps,
+        "mae_pct": round(mae_ps / entry_avg * 100, 2) if (mae_ps and entry_avg) else None,
         "forced_exit": forced is not None,
         "assumptions": "fills at reported price; no slippage/fees/Level-2; avg-cost basis.",
     }
@@ -641,6 +657,7 @@ def _journal(session, meta, pnl, actions, timeline) -> str:
                  f"{r_actual}  ·  {'WIN' if pnl['win'] else 'LOSS'}")
         L.append(f"- entry avg ${pnl['entry_avg']}; max favorable "
                  f"+${pnl['mfe_per_share']}/sh ({pnl['mfe_pct']}%)"
+                 + (f"; max adverse -${pnl.get('mae_per_share')}/sh ({pnl.get('mae_pct')}%)" if pnl.get('mae_per_share') else "")
                  + ("  ·  _auto-flat at close_" if pnl["forced_exit"] else ""))
     else:
         L.append("- **stood down — no trade taken**")
@@ -1029,6 +1046,7 @@ def list_sessions() -> list[dict]:
         tickers = set()
         last_activity = None
         name = None
+        version = None
         for d, ss in items:
             res = ss.get("result") or {}
             tickers.add(ss.get("ticker"))
@@ -1043,18 +1061,40 @@ def list_sessions() -> list[dict]:
                 last_activity = ts
             if name is None and ss.get("batch"):
                 name = ss.get("batch")  # human label = batch tag if present
+            if version is None:
+                version = (ss.get("skill") or {}).get("version")
         # win rate is winning *sessions* over traded *sessions* — NOT over fills
         # (a single 3-fill winner must read 100%, not 33%).
         win_rate = round(n_wins / n_traded * 100, 1) if n_traded else None
+        # batch.json (keyed by the human tag = `name`) carries the hermes model
+        # and the pinned skill version. Fall back to the leaf skill version.
+        bmeta = _batch_meta(name) if name else {}
+        # Edge metrics (expectancy, PF, dispersion) — same computation the tickers
+        # detail view already shows, surfaced here so versions/models are rankable.
+        metrics = _compute_batch_metrics([ss for _, ss in items])
+        dist = metrics.get("r_distribution") or {}
+        pf = metrics.get("profit_factor_r")
+        # inf/nan would serialize as JS-invalid `Infinity`/`NaN` and break
+        # JSON.parse for the whole response — send null instead.
+        if isinstance(pf, float) and (pf != pf or pf in (float("inf"), float("-inf"))):
+            pf = None
         out.append({
             "id": sid,
             "name": name or sid,
             "type": sess_type,
+            "version": version or bmeta.get("version"),
+            "model": bmeta.get("model"),
             "pnl": round(total_pnl, 2),
             "n_tickers": len(tickers),
             "n_trades": n_traded,   # traded sessions (matches win_rate denominator)
             "n_fills": n_fills,
             "win_rate": win_rate,
+            "expectancy_r": metrics.get("clean_expectancy_r"),
+            "effective_r": metrics.get("effective_expectancy_r"),
+            "std_r": dist.get("std"),
+            "profit_factor_r": pf,
+            "n_planned": metrics.get("n_planned"),
+            "n_void": metrics.get("n_void"),
             "last_activity": last_activity,
         })
     out.sort(key=lambda x: (x.get("last_activity") or ""), reverse=True)
@@ -1070,6 +1110,117 @@ def _batch_meta(tag: str) -> dict:
     """Metadata a `batchsim run` writes at start/finish (planned count, version,
     model, status). Empty dict if the batch predates metadata or was hand-audited."""
     return _load_json(BATCH_ROOT / tag / "batch.json", {}) or {}
+
+
+# ───────────────────────────── metric helpers (synthesized from proposal) ────
+
+def _r_from_session(s: dict) -> Optional[float]:
+    """Extract the primary R for a leaf session dict (prefers actual if present)."""
+    res = s.get("result") or {}
+    r = res.get("r_multiple_actual")
+    if r is None:
+        r = res.get("r_multiple")
+    return r if isinstance(r, (int, float)) else None
+
+
+def _is_void(s: dict) -> bool:
+    v = s.get("void")
+    return bool(v) and v != "false"
+
+
+def _compute_batch_metrics(members: list[dict]) -> dict:
+    """Compute clean and effective metrics for a top-level batch from list of member session views.
+    members are the dicts from _session_entry (have 'result', possibly 'live_pnl', 'void').
+    """
+    clean_rs: list[float] = []
+    effective_rs: list[float] = []
+    n_planned = 0
+    n_void = 0
+    n_stood = 0
+    n_traded = 0
+    total_pnl = 0.0
+    for m in members:
+        n_planned += 1
+        if _is_void(m):
+            n_void += 1
+            effective_rs.append(-1.0)  # penalty
+            continue
+        r = _r_from_session(m)
+        res = m.get("result") or {}
+        traded = bool(res.get("traded"))
+        if not traded:
+            n_stood += 1
+            effective_rs.append(0.0)
+            continue
+        if r is not None:
+            clean_rs.append(r)
+            effective_rs.append(r)
+            total_pnl += res.get("realized_pnl", 0) or 0.0
+            n_traded += 1
+        else:
+            # fallback
+            effective_rs.append(0.0)
+    n_clean = len(clean_rs)
+    clean_exp = round(sum(clean_rs) / n_clean, 4) if n_clean > 0 else None
+    eff_exp = round(sum(effective_rs) / len(effective_rs), 4) if effective_rs else None
+
+    pos = sum(r for r in clean_rs if r > 0)
+    neg = abs(sum(r for r in clean_rs if r < 0))
+    pf = round(pos / neg, 4) if neg > 0 else (float("inf") if pos > 0 else None)
+
+    # distribution
+    if clean_rs:
+        clean_rs_sorted = sorted(clean_rs)
+        n = len(clean_rs_sorted)
+        mean_r = round(sum(clean_rs_sorted) / n, 4)
+        med_r = round(clean_rs_sorted[n // 2] if n % 2 else (clean_rs_sorted[n//2-1] + clean_rs_sorted[n//2]) / 2, 4)
+        # simple std
+        var = sum((x - mean_r)**2 for x in clean_rs_sorted) / n if n > 1 else 0.0
+        std_r = round(var ** 0.5, 4)
+        p10 = clean_rs_sorted[max(0, int(0.1 * (n-1)))]
+        p90 = clean_rs_sorted[min(n-1, int(0.9 * (n-1)))]
+        dist = {"mean": mean_r, "median": med_r, "std": std_r, "p10": round(p10,4), "p90": round(p90,4), "min": round(min(clean_rs_sorted),4), "max": round(max(clean_rs_sorted),4)}
+    else:
+        dist = None
+
+    # sequence drawdown using deterministic order by leaf id (stable across runs)
+    ordered_eff = []
+    for m in sorted(members, key=lambda x: x.get("id", "")):
+        if _is_void(m):
+            ordered_eff.append(-1.0)
+        else:
+            r = _r_from_session(m)
+            res = m.get("result") or {}
+            if res.get("traded"):
+                ordered_eff.append(r or 0.0)
+            else:
+                ordered_eff.append(0.0)
+    cum = 0.0
+    peak = 0.0
+    seq_dd = 0.0
+    for r in ordered_eff:
+        cum += r
+        if cum > peak:
+            peak = cum
+        dd = cum - peak
+        if dd < seq_dd:
+            seq_dd = dd
+    seq_dd = round(-seq_dd, 4) if seq_dd < 0 else 0.0
+    recovery = round(total_pnl / seq_dd, 4) if seq_dd > 0 else None
+
+    return {
+        "clean_expectancy_r": clean_exp,
+        "effective_expectancy_r": eff_exp,
+        "profit_factor_r": pf,
+        "r_distribution": dist,
+        "n_planned": n_planned,
+        "n_traded": n_traded,
+        "n_void": n_void,
+        "n_stood_down": n_stood,
+        "sequence_drawdown_r": seq_dd,
+        "recovery_factor_r": recovery,
+        "total_pnl": round(total_pnl, 2),
+    }
 
 
 def _iter_session_members(sess_id: str):
@@ -1092,6 +1243,8 @@ def get_top_session_view(sess_id: str) -> dict:
         "pnl": 0.0,
         "wins": 0,
         "leaf_id": None,
+        "n_void": 0,       # leaf runs on this ticker the audit voided
+        "void_reason": None,  # a representative void reason for the UI
     })
     members = []
     batch_tag = None
@@ -1105,12 +1258,18 @@ def get_top_session_view(sess_id: str) -> dict:
         res = s.get("result") or {}
         td = tickers[t]
         td["ticker"] = t
+        if _is_void(s):
+            td["n_void"] += 1
+            if not td["void_reason"]:
+                td["void_reason"] = str(s.get("void"))
         if res.get("traded"):
             td["n_traded"] += 1
             td["n_fills"] += res.get("n_fills", 1) or 0
             td["pnl"] += res.get("realized_pnl", 0) or 0.0
             if res.get("win"):
                 td["wins"] += 1
+            if "r" not in td or td["r"] is None:
+                td["r"] = res.get("r_multiple_actual") or res.get("r_multiple")
         if not td["leaf_id"]:
             td["leaf_id"] = s.get("id") or d.name
     ticker_list = []
@@ -1125,12 +1284,17 @@ def get_top_session_view(sess_id: str) -> dict:
             "pnl": round(data["pnl"], 2),
             "win_rate": wr,
             "leaf_id": data["leaf_id"],
+            "r": data.get("r"),
+            "n_void": data["n_void"],
+            "void_reason": data["void_reason"],
         })
     ticker_list.sort(key=lambda x: x["ticker"])
 
     meta = (_batch_meta(batch_tag) if batch_tag else None) or _batch_meta(sess_id) or {}
     name = meta.get("tag") or meta.get("name") or batch_tag or sess_id
     sess_type = "live" if "live" in modes else "simulated"
+
+    batch_metrics = _compute_batch_metrics(members) if members else {}
 
     return {
         "id": sess_id,
@@ -1139,6 +1303,7 @@ def get_top_session_view(sess_id: str) -> dict:
         "type": sess_type,
         "tickers": ticker_list,
         "sessions": members,
+        "metrics": batch_metrics,
     }
 
 

@@ -298,6 +298,62 @@ header {
 #error { position: fixed; inset: 16px; padding: 16px; background: #2a1414;
   border: 1px solid var(--red); border-radius: 8px; color: #ffd7d4; white-space: pre-wrap; }
 
+/* Full page table view for sessions list */
+#app.table-view #sidebar {
+  display: none !important;
+}
+#app.table-view #main {
+  flex: 1 1 100% !important;
+}
+#no-session.session-table-mode {
+  padding: 20px;
+  overflow: auto;
+  height: 100%;
+  text-align: left;   /* override .placeholder centering */
+  font-size: 13px;
+  color: var(--txt);
+}
+.session-table th.num, .session-table td.num { text-align: right; }
+.session-table td.pos { color: var(--green); }
+.session-table td.neg { color: var(--red); }
+
+.session-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  font-size: 13px;
+}
+.session-table th {
+  background: #1d2430;
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+.session-table th:hover {
+  background: #24334a;
+}
+.session-table th.sorted-asc::after {
+  content: " ▲";
+  font-size: 10px;
+}
+.session-table th.sorted-desc::after {
+  content: " ▼";
+  font-size: 10px;
+}
+.session-table td {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+}
+.session-table tr:hover {
+  background: #1c2330;
+}
+.session-table tr {
+  cursor: pointer;
+}
+
 /* Sidebar title button */
 .sidebar-title-btn {
   font: inherit; font-weight: 600; font-size: 12px;
@@ -318,3 +374,12 @@ header {
 .bd-table tr.run:hover { background: #1c2330; }
 .bd-table td.void { color: #b98; }
 .bd-back { cursor: pointer; }
+
+/* Voided leaves in the tickers table */
+.bd-table tr.voided td { opacity: .55; }
+.void-badge {
+  display: inline-block; padding: 1px 7px; border-radius: 10px;
+  font-size: 10px; font-weight: 700; letter-spacing: .3px;
+  color: var(--red); border: 1px solid var(--red); background: #2a1414;
+  cursor: help;
+}

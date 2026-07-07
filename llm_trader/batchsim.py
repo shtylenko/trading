@@ -188,8 +188,8 @@ def _archived_skill(version: str) -> Path:
     return p
 
 
-def _prompt(version: str, skill_path: Path, tag: str, session_id: str, ticker: str, date: str,
-            time_et: Optional[str]) -> str:
+def _prompt(version: str, skill_path: Path, skill_text: str, tag: str, session_id: str,
+            ticker: str, date: str, time_et: Optional[str]) -> str:
     """The per-setup task handed to a headless hermes agent. Thin wrapper: it pins the
     *mechanics* (version, batch tag, exact setup) and defers trading logic to the skill.
 
@@ -204,9 +204,14 @@ $VARIABLES DO NOT RELIABLY PERSIST across separate tool invocations. You must ca
 $SDIR once, then use the exact quoted form in EVERY subsequent command. The cwd is
 always the monorepo root (the dir that contains `trading/`).
 
-Read and follow EXACTLY the trading rules in this file (read it fully first). Do NOT
-read any other skill file, and do NOT read the live skills/TRADE_SIMULATOR.md:
-  {skill_path}
+Your trading rules are provided IN FULL below, between the BEGIN/END markers — they
+are already in your context. Follow them EXACTLY. Do NOT read, cat, open, or otherwise
+access ANY skill file (reading a file is an audited command that VOIDS the entire run);
+everything you need is inlined here.
+
+===== BEGIN TRADE_SIMULATOR SKILL (v{version}) =====
+{skill_text}
+===== END TRADE_SIMULATOR SKILL =====
 
 Setup to trade (do NOT choose your own): ticker={ticker}  date={date}  time={time_et}
 Batch tag: {tag}   Session ID: {session_id}   pinned skill version: {version}
@@ -256,6 +261,7 @@ BATCHSIM_SID=$SDIR
     - The run may still be usable; touching or naming the private files in commands makes it void.
 - Never run `step start` more than once.
 - Never run `replay`, `fetch_bars`, `fetch_minute_bars`, or anything that bypasses step next.
+- Do NOT read, cat, or open ANY skill file (TRADE_SIMULATOR.md or anything under skills/) — the rules are inlined above; reading one voids the run.
 - Before a long string of OBSERVE steps, re-verify with: echo "Still using SDIR=$SDIR"; python3 -m trading.llm_trader.step status --session "$SDIR"
 
 Copy the command text literally. Do not improvise paths or "help" the simulation by moving files. The audit will scan every tool-call command you actually executed.
@@ -404,10 +410,19 @@ def run(
     resume: bool = False, dry_run: bool = False,
 ) -> str:
     """Run the batch: spawn agents for every (setup × repeat), then audit + report."""
-    if not version:
-        version = _latest_version()
-        print(f"no --version provided; using latest: {version}", file=sys.stderr)
-    skill_path = _archived_skill(version)
+    # Source the skill from the LIVE working copy by default so a batch tests the
+    # current rules. Its text is inlined into every agent prompt (see _prompt), so
+    # the agent never reads a skill file — that agent-side file read is exactly what
+    # the audit was voiding. An explicit --version still runs the pinned, immutable
+    # archived snapshot (also inlined; the harness reads it, never the agent).
+    if version:
+        skill_path = _archived_skill(version)
+    else:
+        skill_path = skillmeta.DEFAULT_SKILL_PATH
+        version = skillmeta.read_skill_meta(skill_path).get("version")
+        print(f"no --version provided; using live skill {skill_path.name} (v{version})",
+              file=sys.stderr)
+    skill_text = skill_path.read_text(encoding="utf-8")
     setups = load_testset(testset)
     tag = tag or f"{version}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
     # Top-level session always gets a long unique ID (like leaf session IDs).
@@ -437,8 +452,8 @@ def run(
                 "tag": tag,
                 "session": session_id,
                 "model": model, "timeout": timeout, "dry_run": dry_run,
-                "prompt": _prompt(version, skill_path, tag, session_id, su["ticker"], su["date"],
-                                  su.get("time_et")),
+                "prompt": _prompt(version, skill_path, skill_text, tag, session_id,
+                                  su["ticker"], su["date"], su.get("time_et")),
             })
 
     print(f"batch {tag} (session {session_id}): version {version}, {len(setups)} setups × {repeats} "

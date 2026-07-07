@@ -14,6 +14,7 @@ let currentSessionId = null;
 let currentChart = null;
 let currentEventSource = null;
 let pollFallbackTimer = null;
+let tickersRefreshTimer = null;   // live re-poll of the tickers table while a batch runs
 
 // Show exactly one main-area pane. Single helper replacing the classList +
 // style.display toggles that used to be duplicated at every call site.
@@ -292,16 +293,34 @@ async function renderSessionTable() {
 async function loadSessionTickers(sessionId, updateUrl = false) {
   const tickersEl = document.getElementById("session-tickers");
 
-  // Ensure only the tickers list is visible in the main area (no leftover detail chart)
-  showPane("session-tickers");
+  // Any prior live re-poll is stale now (re-armed below only if still running).
+  clearInterval(tickersRefreshTimer);
+  tickersRefreshTimer = null;
 
-  tickersEl.innerHTML = `<div class="muted" style="padding:16px">Loading tickers for ${escapeHtml(sessionId)}...</div>`;
+  // Ensure only the tickers list is visible in the main area (no leftover detail chart).
+  // Skip on a background live refresh so we don't yank focus if the user navigated away.
+  const isBackgroundRefresh = arguments[2] === true;
+  if (!isBackgroundRefresh) {
+    showPane("session-tickers");
+    tickersEl.innerHTML = `<div class="muted" style="padding:16px">Loading tickers for ${escapeHtml(sessionId)}...</div>`;
+  }
 
   try {
     const v = await getJSON(`/api/session/${encodeURIComponent(sessionId)}`);
+    // If the user navigated into a leaf while this was in flight, drop the result.
+    if (isBackgroundRefresh && document.getElementById("session-tickers").classList.contains("hidden")) {
+      return;
+    }
     renderSessionTickers(v);
+    // While the batch is still producing / finalizing sessions, re-poll so tickers flip
+    // running → complete live. Passes the background flag so it won't grab focus.
+    if (v.is_running) {
+      tickersRefreshTimer = setInterval(() => loadSessionTickers(sessionId, false, true), 7000);
+    }
   } catch (e) {
-    tickersEl.innerHTML = `<div class="muted" style="padding:16px;color:#f88">Failed to load session: ${e}</div>`;
+    if (!isBackgroundRefresh) {
+      tickersEl.innerHTML = `<div class="muted" style="padding:16px;color:#f88">Failed to load session: ${e}</div>`;
+    }
   }
 
   if (updateUrl) {
@@ -336,6 +355,17 @@ function renderSessionTickers(v) {
     }
     html += `</div>`;
   }
+  // Progress line: how many tickers have finalized vs are still running.
+  if (v.n_tickers != null) {
+    const running = v.n_running || 0;
+    const complete = v.n_complete || 0;
+    html += `<div class="bd-progress">` +
+      `progress <b>${complete}/${v.n_tickers}</b> complete` +
+      (running ? ` · <b>${running}</b> running` : "") +
+      (v.is_running ? ` <span class="badge running">● live</span>` : ` <span class="badge complete">done</span>`) +
+      `</div>`;
+  }
+
   html += `<div class="bd-section">Tickers (${tickers.length})</div>
 <table class="bd-table">
   <thead><tr><th>ticker</th><th>trades</th><th>R</th><th>P&amp;L</th><th>win %</th><th>status</th></tr></thead>
@@ -347,10 +377,21 @@ function renderSessionTickers(v) {
       const wr = t.win_rate != null ? `${t.win_rate}%` : "—";
       const rStr = t.r != null ? t.r.toFixed(2) + "R" : "—";
       const voided = t.n_void > 0;
-      const statusCell = voided
-        ? `<span class="void-badge" title="${escapeHtml(t.void_reason || "voided")}">VOID${t.n_void > 1 ? ` ×${t.n_void}` : ""}</span>`
-        : `<span class="muted">ok</span>`;
-      return `<tr class="run${voided ? " voided" : ""}" data-leaf="${escapeHtml(t.leaf_id)}" data-ticker="${escapeHtml(t.ticker)}">
+      const st = t.status || "complete";
+      const rep = t.n_leaves > 1 ? ` ${t.n_complete}/${t.n_leaves}` : "";
+      let statusCell;
+      if (st === "running") {
+        statusCell = `<span class="badge running">running${rep}</span>`;
+      } else if (st === "stale") {
+        statusCell = `<span class="badge stale">stale</span>`;
+      } else if (voided) {
+        statusCell = `<span class="void-badge" title="${escapeHtml(t.void_reason || "voided")}">VOID${t.n_void > 1 ? ` ×${t.n_void}` : ""}</span>`;
+      } else {
+        statusCell = `<span class="badge complete">complete</span>`;
+      }
+      // dim only finalized-and-voided rows; a running row stays full-strength
+      const dim = voided && st !== "running" ? " voided" : "";
+      return `<tr class="run${dim}" data-leaf="${escapeHtml(t.leaf_id)}" data-ticker="${escapeHtml(t.ticker)}">
         <td><b>${escapeHtml(t.ticker)}</b></td>
         <td>${t.n_trades}</td>
         <td>${rStr}</td>
@@ -822,6 +863,12 @@ async function loadSession(sessionId, updateUrl = false) {
   showPane("session-detail");
 
   currentSessionId = sessionId;
+
+  // stop the tickers-view live re-poll so it can't yank us back here
+  if (tickersRefreshTimer) {
+    clearInterval(tickersRefreshTimer);
+    tickersRefreshTimer = null;
+  }
 
   // cleanup previous SSE
   if (currentEventSource) {

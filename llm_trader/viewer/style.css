@@ -366,6 +366,8 @@ header {
 .bd-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .bd-head h2 { margin: 0; font-size: 18px; letter-spacing: .3px; }
 .bd-meta { color: var(--muted); font-size: 12px; margin: 6px 0 16px; }
+.bd-progress { font-size: 12px; margin: 4px 0 8px; color: var(--txt); display: flex; align-items: center; gap: 8px; }
+.bd-progress .badge { margin-left: 0; padding: 1px 8px; font-size: 11px; }
 .bd-section { font-size: 13px; font-weight: 700; margin: 18px 0 6px; }
 .bd-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .bd-table th, .bd-table td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--line); }

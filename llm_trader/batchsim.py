@@ -8,10 +8,14 @@ profitability report. Because every session is version + batch stamped
 (``recorder init --pin-version … --batch …``), comparing two skill versions is just
 running the **same setups** against each and diffing the reports.
 
-**AI note**: The long prompt injected here (especially the MANDATORY SETUP BLOCK
-and verification commands) defines part of the agent's behavior for batch runs.
-Edits to this prompt that change what the agent is told to do should be treated
-as skill changes and accompanied by a version bump (see skills/MAINTAINING.md).
+**AI note**: The harness itself creates and seals each session (recorder init +
+step start) and hands the agent an already-started session via the literal SDIR in
+its prompt; the agent runs the trading loop only (step next + recorder log) and is
+spawned WITHOUT market-data credentials (see _agent_env), so look-ahead — direct
+`replay`/`fetch`, or re-sealing after a reveal — is structurally unreachable rather
+than merely audited. The prompt still defines the agent's trading behavior; edits
+that change what it's told to do should be treated as skill changes and accompanied
+by a version bump (see skills/MAINTAINING.md).
 
 Subcommands
 -----------
@@ -24,9 +28,10 @@ Design choices (per the harness spec):
 - **Local executor model** by default (`--model`) — we measure what actually trades live.
 - **Fixed curated holdout** — `build-set` writes a version-controlled set reused every run,
   so version-to-version comparison is apples-to-apples, not confounded by setup luck.
-- **Post-hoc audit** — `run` can't sandbox the agent's bash, so `audit` scans each run's
-  captured transcript for look-ahead (reading `_sealed.jsonl`, calling `replay`, re-running
-  `step start`) and voids the session rather than trusting it.
+- **Sandboxed agent + post-hoc audit** — the agent runs credential-less against an
+  already-sealed session, so the data layer is out of reach. `audit` remains as a
+  backstop: it scans each run's captured transcript for any look-ahead (reading
+  `_sealed.jsonl`, calling `replay`, re-running `step start`) and voids the session.
 """
 
 from __future__ import annotations
@@ -42,14 +47,48 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from . import recorder, skillmeta
+from . import recorder, skillmeta, step
 from .config import DATA_DIR
 from .fsutils import atomic_write_json
+
+# Provider API credentials. The harness (this process) holds them so it can seal each
+# day and finalize; the *agent* subprocess is spawned WITHOUT them (see _agent_env).
+_CRED_ENV_VARS = (
+    "ALPACA_API_KEY_ID", "ALPACA_SECRET_KEY", "ALPACA_PAPER", "ALPACA_RPM",
+    "FINNHUB_API_KEY", "MARKETDATA_TOKEN",
+)
+def _agent_env(cache_dir: Path) -> dict:
+    """The environment handed to the headless agent: harness env minus provider creds,
+    with the marketdata cache redirected to `cache_dir` (a fresh EMPTY dir per run) and
+    the provider chain disabled. The agent's ONLY window into price is `step next`
+    against the already-sealed file in its session dir (which does not live under the
+    marketdata cache), so that keeps working while any direct data-layer access
+    (`replay`, `fetch_bars`) fails.
+
+    Two non-obvious pitfalls, both handled here:
+    - Unsetting the cache-dir env vars is NOT enough: marketdata.config falls back to a
+      hardcoded default cache (which holds the day's bars), so `replay` would read the
+      future from cache. We redirect the cache to an empty dir so every lookup misses.
+    - An empty MARKETDATA_PROVIDERS means "all providers" — including yfinance, which
+      needs no creds and would happily serve (and cache!) the day's bars. We name a
+      sentinel provider that matches nothing, so the chain is empty and no fetch can
+      succeed. Using a fresh per-run dir also means a stray cached file can never leak
+      the future into a later run."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    for k in _CRED_ENV_VARS:
+        env.pop(k, None)
+    env["STRATEGY_LAB_MARKETDATA_DIR"] = str(cache_dir)
+    env["STOCKMARKETDATA_DIR"] = str(cache_dir)
+    env["MARKETDATA_PROVIDERS"] = "__none__"   # matches no real provider → empty chain
+    env["MARKETDATA_DISABLED"] = "1"           # belt-and-suspenders; documents intent
+    return env
 
 # monorepo root — the directory that contains `trading/`, so `import trading` resolves.
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -182,26 +221,24 @@ def _archived_skill(version: str) -> Path:
     return p
 
 
-def _prompt(version: str, skill_path: Path, skill_text: str, tag: str, session_id: str,
-            ticker: str, date: str, time_et: Optional[str]) -> str:
-    """The per-setup task handed to a headless hermes agent. Thin wrapper: it pins the
-    *mechanics* (version, batch tag, exact setup) and defers trading logic to the skill.
+def _prompt(version: str, skill_text: str, tag: str, session_id: str,
+            ticker: str, date: str, time_et: Optional[str], sdir: str) -> str:
+    """The per-setup task handed to a headless hermes agent.
+
+    The harness has ALREADY created and sealed the session (recorder init + step start)
+    and hands the agent the literal, already-started SDIR. The agent therefore never
+    runs init/start/finalize — its whole job is the trading loop: reveal a bar, decide,
+    log, repeat. This removes the two things that caused look-ahead voids: the setup
+    block the agent used to fumble (losing $SDIR → re-init/re-seal) and any reason to
+    touch the data layer. The agent is also spawned WITHOUT market-data credentials
+    (see _agent_env), so `replay`/`fetch` fail outright even if attempted.
 
     Command lines are NOT indented (leading whitespace on `\\`-continued lines would be
-    passed to the agent verbatim); the exact setup is pinned with `--time` so the agent
-    trades the same row the holdout snapshotted, not an unseeded same-day pick."""
-    time_flag = f" --time {time_et}" if time_et else ""
+    passed to the agent verbatim)."""
     return f"""You are executing ONE trade simulation as an automated backtest.
 
-CRITICAL: hermes terminal tool calls frequently execute in fresh or semi-fresh shells.
-$VARIABLES DO NOT RELIABLY PERSIST across separate tool invocations. You must capture
-$SDIR once, then use the exact quoted form in EVERY subsequent command. The cwd is
-always the monorepo root (the dir that contains `trading/`).
-
 Your trading rules are provided IN FULL below, between the BEGIN/END markers — they
-are already in your context. Follow them EXACTLY. Do NOT read, cat, open, or otherwise
-access ANY skill file (reading a file is an audited command that VOIDS the entire run);
-everything you need is inlined here.
+are already in your context. Follow them EXACTLY.
 
 ===== BEGIN TRADE_SIMULATOR SKILL (v{version}) =====
 {skill_text}
@@ -210,55 +247,49 @@ everything you need is inlined here.
 Setup to trade (do NOT choose your own): ticker={ticker}  date={date}  time={time_et}
 Batch tag: {tag}   Session ID: {session_id}   pinned skill version: {version}
 
-=== MANDATORY SETUP BLOCK — RUN THIS EXACTLY (paste as one block) ===
+=== YOUR SESSION IS ALREADY SET UP — DO NOT CREATE OR START ONE ===
 
-SDIR=$(python3 -m trading.llm_trader.recorder init --ticker {ticker} --date {date} --profile small --skill {skill_path} --pin-version {version} --batch {tag} --session {session_id})
-echo "CAPTURED_SDIR=$SDIR"
+The session has already been initialized and sealed for you. Use this exact path
+(it is fixed for the whole run; copy it literally into every command):
 
-python3 -m trading.llm_trader.step start --session "$SDIR" --ticker {ticker} --date {date}{time_flag}
+SDIR="{sdir}"
 
-# === MANDATORY VERIFICATION (run these immediately after the above) ===
-echo "=== HYGIENE VERIFICATION ==="
-echo "SDIR=$SDIR"
-ls -la "$SDIR" | cat
-test -f "$SDIR/stream.jsonl" && echo "✓ stream.jsonl lives inside $SDIR" || echo "✗ ERROR: stream not under SDIR"
-python3 -m trading.llm_trader.step status --session "$SDIR"
+There is nothing to initialize, seal, or start. The market's future does not exist
+anywhere you can reach: there is no data file to read, no command that fetches bars,
+and no way to restart or re-seal. Your ONLY window into price is `step next`.
 
-# Check project root (cwd) for any leaked private files.
-# Use a command whose text does NOT contain the substrings _sealed.jsonl or _step.json
-# (otherwise the audit will void the entire run).
-ROOT=$(pwd)
-ls -la "$ROOT" | grep -E '^[d-].*_' | head -5 || echo "✓ No underscore-prefixed files visible in project root (cwd)"
+=== THE TRADING LOOP — THESE ARE THE ONLY COMMANDS YOU RUN ===
 
-=== THE ONLY ALLOWED COMMANDS FOR THE REST OF THE RUN (use these literal forms) ===
+1. Reveal the next bar:
+python3 -m trading.llm_trader.step next --session "{sdir}"
 
-Reveal next bar:
-python3 -m trading.llm_trader.step next --session "$SDIR"
+2. Log your decision for the bar you just saw (after EVERY bar):
+python3 -m trading.llm_trader.recorder log --session "{sdir}" --record '{{"i":<i>,"time":"<HH:MM>","thought":"...","action":"OBSERVE|ENTER|...","fill_px":null,"shares_delta":null,"stop":null,"note":"..."}}'
 
-Log your decision for the bar you just saw (do this after every bar):
-python3 -m trading.llm_trader.recorder log --session "$SDIR" --record '{{"i":<i>,"time":"<HH:MM>","thought":"...","action":"OBSERVE|ENTER|...","fill_px":null,"shares_delta":null,"stop":null,"note":"..."}}'
-
-When the stream ends and you are done:
-python3 -m trading.llm_trader.recorder finalize --session "$SDIR"
-
-As the very last thing you ever output (after finalize), print exactly this line:
-BATCHSIM_SID=$SDIR
+Repeat 1→2 until `step next` prints `STATUS end`. Then you are DONE — stop. The harness
+finalizes the run for you; do NOT run finalize yourself. As the very last thing you
+output, print exactly this line so the audit can find your run:
+BATCHSIM_SID={sdir}
 
 === ABSOLUTE HARD RULES — ANY VIOLATION VOIDS THE ENTIRE RUN (audit detects this) ===
 
-- NEVER place the literal strings "_sealed.jsonl" or "_step.json" (or paths containing them) into ANY command, argument, mv, cat, ls, echo, etc.
-- EVERY call to step or recorder MUST use the exact form --session "$SDIR" (dollar sign + double quotes). No bare commands, no cd into the dir and omitting the flag, no $SDIR without quotes.
-- The hygiene verification command above deliberately avoids the forbidden substrings. If you ever see private files in the project root or anywhere except inside "$SDIR":
-    - DO NOT "fix" it with mv, cp, ln, or any command that names the private files.
-    - DO NOT ls or cat the leaked files using their exact names.
-    - Simply continue the loop using only the documented --session "$SDIR" commands.
-    - The run may still be usable; touching or naming the private files in commands makes it void.
-- Never run `step start` more than once.
-- Never run `replay`, `fetch_bars`, `fetch_minute_bars`, or anything that bypasses step next.
-- Do NOT read, cat, or open ANY skill file (TRADE_SIMULATOR.md or anything under skills/) — the rules are inlined above; reading one voids the run.
-- Before a long string of OBSERVE steps, re-verify with: echo "Still using SDIR=$SDIR"; python3 -m trading.llm_trader.step status --session "$SDIR"
+- Your ONLY data source is `step next` against the SDIR above. NEVER run `replay`,
+  `fetch_bars`, `fetch_minute_bars`, anything under `trading.marketdata`, or any command
+  that reads the day's data another way. (These will fail anyway — you have no data
+  credentials — and attempting them voids the run.)
+- Do NOT run `recorder init`, `step start`, or `recorder finalize`. The session is
+  already sealed and the harness finalizes it; there is nothing for you to set up or
+  close, and re-sealing is look-ahead.
+- NEVER place the literal strings "_sealed.jsonl" or "_step.json" (or paths containing
+  them) into ANY command. Do not read, cat, ls, mv, or open those files. Everything you
+  need comes from `step next` and the stream it reveals.
+- Do NOT read, cat, or open ANY skill file — the rules are inlined above.
+- FAIL CLOSED: if anything looks wrong — you lose the path, a command errors, the state
+  seems inconsistent — STOP and report it. Do NOT try to recover by re-initializing,
+  re-starting, forcing, or inspecting the data another way. An aborted run is fine; a
+  creative workaround voids the run.
 
-Copy the command text literally. Do not improvise paths or "help" the simulation by moving files. The audit will scan every tool-call command you actually executed.
+Copy the command text literally. The audit scans every tool-call command you executed.
 """
 
 
@@ -350,51 +381,90 @@ def _load_manifest(tag: str) -> list[dict]:
     return out
 
 
+def _preseal(work: dict, skill_path: Path, version: str, session_id: str) -> Path:
+    """Create AND seal the session for one setup, harness-side, before the agent runs.
+
+    Moving `recorder init` + `step start` out of the agent is the core anti-look-ahead
+    fix: the agent receives an already-started session (via the literal SDIR in its
+    prompt) and never touches init/start/replay. This process holds the data creds and
+    does the one sealing fetch here; the agent is then run credential-less (_agent_env).
+    Returns the session dir. Raises on failure (caller records it as a preseal error)."""
+    sdir = recorder.init(
+        work["ticker"], work["date"], profile="small", skill=skill_path,
+        pin_version=version, batch=work["tag"], session=session_id,
+    )
+    import io as _io
+    rc = step.start(sdir, ticker=work["ticker"], date=work["date"],
+                    at_time=work.get("time_et"), out=_io.StringIO())
+    if rc != 0:
+        raise RuntimeError(f"step start failed (rc={rc}) — provider may not serve "
+                           f"{work['ticker']} {work['date']}")
+    return sdir
+
+
 def _run_one(work: dict) -> dict:
-    """Spawn one headless hermes agent for a single (setup, repeat). Returns a result
-    dict including the recorder session id (parsed from the agent's echo) and the
-    hermes session name, so the audit can map session → its tool-call log."""
+    """Spawn one headless hermes agent for a single (setup, repeat) whose session was
+    ALREADY pre-sealed by the harness (work['sdir']). The agent runs the trading loop
+    only (step next + recorder log); this function then finalizes the run harness-side
+    (the agent has no data creds and cannot). The session id is known up front (the
+    sdir name), so the audit no longer depends on parsing it from agent output."""
     log_dir = BATCH_LOGS / work["tag"]
     log_dir.mkdir(parents=True, exist_ok=True)
     name = work["session_name"]
     log_path = log_dir / f"{name}.log"
 
+    if work.get("dry_run"):
+        cmd = ["hermes", "-z", work["prompt"], "--yolo", "-m", work["model"]]
+        return {"item": work["item"], "status": "dry-run", "cmd": cmd,
+                "session_name": name, "sid": None}
+
+    sdir = Path(work["sdir"])
+    sid = sdir.name
+
+    def _result(status: str, **extra) -> dict:
+        # Finalize harness-side no matter how the agent exited, so every pre-sealed
+        # session gets a result (a no-decision run finalizes as a stand-down). The
+        # harness holds the data creds; full-day finalize needs them.
+        try:
+            recorder.finalize(sdir)
+        except Exception as e:  # noqa: BLE001 — never let finalize sink the batch
+            extra["finalize_error"] = str(e)
+        base = {"item": work["item"], "session_name": name, "sid": sid,
+                "ticker": work["ticker"], "date": work["date"], "rep": work["rep"],
+                "status": status}
+        base.update(extra)
+        return base
+
     # hermes assigns its own opaque session id (it can't be forced), so the audit
     # finds this run's session afterward by the unique recorder SDIR it contains
     # (see _resolve_batch_commands) rather than by a name here.
     cmd = ["hermes", "-z", work["prompt"], "--yolo", "-m", work["model"]]
-    if work.get("dry_run"):
-        return {"item": work["item"], "status": "dry-run", "cmd": cmd,
-                "session_name": name, "sid": None}
-
     try:
-        with subprocess.Popen(
-            cmd, cwd=str(REPO_ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, start_new_session=True,
-        ) as proc:
-            try:
-                stdout, stderr = proc.communicate(timeout=work["timeout"])
-            except subprocess.TimeoutExpired:
+        # Fresh empty marketdata cache per agent so a stray cached bar can never leak
+        # the future into another run; auto-removed when the agent exits.
+        with tempfile.TemporaryDirectory(prefix="batchsim-nomd-") as nomd:
+            with subprocess.Popen(
+                cmd, cwd=str(REPO_ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, start_new_session=True, env=_agent_env(Path(nomd)),
+            ) as proc:
                 try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except (OSError, ProcessLookupError):
-                    proc.kill()
-                proc.wait()
-                log_path.write_text(f"[TIMEOUT after {work['timeout']}s]\n")
-                return {"item": work["item"], "session_name": name, "sid": None,
-                        "ticker": work["ticker"], "date": work["date"], "rep": work["rep"],
-                        "status": "timeout"}
+                    stdout, stderr = proc.communicate(timeout=work["timeout"])
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except (OSError, ProcessLookupError):
+                        proc.kill()
+                    proc.wait()
+                    log_path.write_text(f"[TIMEOUT after {work['timeout']}s]\n")
+                    return _result("timeout")
         log_path.write_text(
             f"[exit {proc.returncode}]\n===== STDOUT =====\n{stdout}\n"
             f"===== STDERR =====\n{stderr}\n"
         )
-        sid = _extract_sid(stdout)
-        return {"item": work["item"], "session_name": name, "sid": sid,
-                "ticker": work["ticker"], "date": work["date"], "rep": work["rep"],
-                "status": "ok" if proc.returncode == 0 else "err",
-                "returncode": proc.returncode, "log": str(log_path)}
+        return _result("ok" if proc.returncode == 0 else "err",
+                       returncode=proc.returncode, log=str(log_path))
     except FileNotFoundError:
-        return {"item": work["item"], "session_name": name, "sid": None,
+        return {"item": work["item"], "session_name": name, "sid": sid,
                 "status": "no-hermes", "error": "`hermes` CLI not found on PATH"}
 
 
@@ -442,12 +512,11 @@ def run(
             work.append({
                 "item": f"{su['ticker']}_{su['date']}#r{rep}",
                 "ticker": su["ticker"], "date": su["date"], "rep": rep,
+                "time_et": su.get("time_et"),
                 "session_name": _session_name(tag, su["ticker"], su["date"], rep),
                 "tag": tag,
                 "session": session_id,
                 "model": model, "timeout": timeout, "dry_run": dry_run,
-                "prompt": _prompt(version, skill_path, skill_text, tag, session_id,
-                                  su["ticker"], su["date"], su.get("time_et")),
             })
 
     print(f"batch {tag} (session {session_id}): version {version}, {len(setups)} setups × {repeats} "
@@ -455,8 +524,32 @@ def run(
           f"{' [DRY RUN]' if dry_run else ''}", file=sys.stderr)
 
     if dry_run:
+        # Don't create real sessions in a dry run — show the agent prompt with a
+        # placeholder SDIR so the plan is inspectable without touching the provider.
+        for w in work:
+            w["prompt"] = _prompt(version, skill_text, tag, session_id, w["ticker"],
+                                  w["date"], w.get("time_et"), sdir="<PRE-SEALED-SDIR>")
         print(json.dumps([_run_one(w) for w in work], indent=2))
         return tag
+
+    # Pre-seal every session harness-side (this process holds the data creds), then
+    # inline its literal, already-started SDIR into the agent prompt. The agents run
+    # credential-less and never init/start/replay — look-ahead is unreachable, not
+    # merely audited. Sealing is done serially before any agent spawns so the one
+    # provider fetch per setup isn't contending with N parallel agents.
+    ready: list[dict] = []
+    for w in work:
+        try:
+            w["sdir"] = str(_preseal(w, skill_path, version, session_id))
+            w["prompt"] = _prompt(version, skill_text, tag, session_id, w["ticker"],
+                                  w["date"], w.get("time_et"), w["sdir"])
+            ready.append(w)
+        except Exception as e:  # noqa: BLE001 — one bad setup shouldn't sink the batch
+            print(f"  [preseal-err] {w['item']}: {e}", file=sys.stderr)
+    work = ready
+    if not work:
+        raise RuntimeError("pre-sealing failed for every setup — no sessions to run "
+                           "(check market-data credentials and provider coverage)")
 
     # record the batch so the viewer's Batches list shows it as *running* with an
     # accurate planned total (len(setups)×repeats, not len(work) which drops resumed

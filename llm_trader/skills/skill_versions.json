@@ -20,5 +20,9 @@
   "2.0.4": {
     "content_hash": "sha256:abeb876a",
     "first_seen": "2026-07-05T17:29:29"
+  },
+  "2.0.5": {
+    "content_hash": "sha256:8194a70b",
+    "first_seen": "2026-07-07T12:09:30"
   }
 }

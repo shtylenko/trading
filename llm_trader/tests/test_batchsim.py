@@ -350,3 +350,39 @@ def test_pin_version_is_read_only(tmp_path, monkeypatch):
     assert s["skill"]["version"] == "2.0.1"
     assert s["batch"] == "t"
     assert skillmeta.REGISTRY_PATH.read_text() == before  # registry untouched
+
+
+def test_agent_env_sandboxes_marketdata(tmp_path, monkeypatch):
+    """The env handed to the agent strips provider creds, redirects the marketdata cache
+    to a fresh empty dir, and disables the provider chain — so `replay`/`fetch` can't
+    reach the day's data. `step next`/`recorder log` don't need any of it."""
+    monkeypatch.setenv("ALPACA_API_KEY_ID", "secret")
+    monkeypatch.setenv("MARKETDATA_TOKEN", "secret")
+    monkeypatch.setenv("STRATEGY_LAB_MARKETDATA_DIR", "/real/cache")
+    cache = tmp_path / "nomd"
+    env = batchsim._agent_env(cache)
+    assert "ALPACA_API_KEY_ID" not in env and "MARKETDATA_TOKEN" not in env
+    # cache redirected to our empty dir, NOT the real one (which would hold the future)
+    assert env["STRATEGY_LAB_MARKETDATA_DIR"] == str(cache)
+    assert env["STOCKMARKETDATA_DIR"] == str(cache)
+    assert cache.is_dir()
+    # a sentinel that matches no real provider — an empty string would mean "all"
+    assert env["MARKETDATA_PROVIDERS"] and env["MARKETDATA_PROVIDERS"] != ""
+    assert env["MARKETDATA_PROVIDERS"] not in ("alpaca", "marketdata", "yfinance")
+
+
+def test_prompt_is_preseal_step_next_only():
+    """The agent prompt hands over an already-started literal SDIR and confines the
+    agent to the step-next/log loop — no init/start/finalize, no data layer, fail-closed."""
+    sdir = "/x/simulations/20260101120000-BQ-abc123"
+    p = batchsim._prompt("2.0.5", "SKILL-TEXT", "tag", "SESSION-ID",
+                         "BQ", "2026-01-01", "09:35", sdir)
+    assert sdir in p                                          # literal path inlined
+    # the agent is never told to RUN these (they appear only in the prohibition list,
+    # as backticked prose — not as `python3 -m …` invocations it should execute)
+    assert "trading.llm_trader.recorder init" not in p        # no setup
+    assert "trading.llm_trader.step start" not in p           # no sealing
+    assert "trading.llm_trader.recorder finalize" not in p    # harness finalizes
+    assert "trading.llm_trader.step next" in p                # the one data command
+    assert "FAIL CLOSED" in p                                 # explicit fail-closed rule
+    assert f"BATCHSIM_SID={sdir}" in p                        # audit anchor marker

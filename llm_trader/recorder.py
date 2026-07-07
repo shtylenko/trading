@@ -1245,12 +1245,17 @@ def get_top_session_view(sess_id: str) -> dict:
         "leaf_id": None,
         "n_void": 0,       # leaf runs on this ticker the audit voided
         "void_reason": None,  # a representative void reason for the UI
+        "n_leaves": 0,     # total leaf runs on this ticker
+        "n_complete": 0,   # of those, how many are finalized
+        "running_any": False,
+        "stale_any": False,
     })
     members = []
     batch_tag = None
     modes = set()
     for d, s in _iter_session_members(sess_id):
-        members.append(_session_entry(d, s))
+        entry = _session_entry(d, s)
+        members.append(entry)
         if not batch_tag:
             batch_tag = s.get("batch")
         modes.add(s.get("mode", "simulated"))
@@ -1258,6 +1263,14 @@ def get_top_session_view(sess_id: str) -> dict:
         res = s.get("result") or {}
         td = tickers[t]
         td["ticker"] = t
+        # progress: is this leaf finalized, still running, or stale (abandoned)?
+        td["n_leaves"] += 1
+        if entry.get("status") == "complete":
+            td["n_complete"] += 1
+        elif entry.get("stale"):
+            td["stale_any"] = True
+        else:
+            td["running_any"] = True
         if _is_void(s):
             td["n_void"] += 1
             if not td["void_reason"]:
@@ -1273,10 +1286,26 @@ def get_top_session_view(sess_id: str) -> dict:
         if not td["leaf_id"]:
             td["leaf_id"] = s.get("id") or d.name
     ticker_list = []
+    n_complete_total = 0
+    n_running_total = 0
     for t, data in tickers.items():
         n = data["n_traded"]
         # win% is winning runs over traded runs — not over fills (see list_sessions).
         wr = round((data["wins"] / n * 100), 1) if n > 0 else None
+        # per-ticker rollup status: running while any leaf is still live, else complete
+        # (stale = a running leaf whose files went quiet, treated as abandoned).
+        if data["running_any"]:
+            tstatus = "running"
+        elif data["n_complete"] >= data["n_leaves"] and data["n_leaves"] > 0:
+            tstatus = "complete"
+        elif data["stale_any"]:
+            tstatus = "stale"
+        else:
+            tstatus = "running"
+        if tstatus == "complete":
+            n_complete_total += 1
+        elif tstatus == "running":
+            n_running_total += 1
         ticker_list.append({
             "ticker": t,
             "n_trades": n,   # traded runs (matches win_rate denominator)
@@ -1287,6 +1316,9 @@ def get_top_session_view(sess_id: str) -> dict:
             "r": data.get("r"),
             "n_void": data["n_void"],
             "void_reason": data["void_reason"],
+            "status": tstatus,
+            "n_leaves": data["n_leaves"],
+            "n_complete": data["n_complete"],
         })
     ticker_list.sort(key=lambda x: x["ticker"])
 
@@ -1295,6 +1327,9 @@ def get_top_session_view(sess_id: str) -> dict:
     sess_type = "live" if "live" in modes else "simulated"
 
     batch_metrics = _compute_batch_metrics(members) if members else {}
+    # is the whole top-level session still in progress? drives the viewer's live refresh.
+    planned = meta.get("planned")
+    is_running = n_running_total > 0 or (isinstance(planned, int) and len(members) < planned)
 
     return {
         "id": sess_id,
@@ -1304,6 +1339,10 @@ def get_top_session_view(sess_id: str) -> dict:
         "tickers": ticker_list,
         "sessions": members,
         "metrics": batch_metrics,
+        "n_tickers": len(ticker_list),
+        "n_complete": n_complete_total,
+        "n_running": n_running_total,
+        "is_running": is_running,
     }
 
 

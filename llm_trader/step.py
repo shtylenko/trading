@@ -84,16 +84,28 @@ def start(
     sdir, sealed, stream, state = _paths(session_dir)
     sdir.mkdir(parents=True, exist_ok=True)
 
-    # Idempotency guard: never re-seal a session that was already started. A model
-    # that loses the $SDIR shell variable (a warned-about hazard in batch runs) and
-    # re-runs the setup block would otherwise silently re-seal the day here — a fresh
-    # sealed file with cursor reset to 0, discarding revealed progress. That re-seal is
-    # a determinism / look-ahead break the audit then voids. Refuse instead (unless
-    # --force), so the mistake is a harmless no-op rather than a run-killer.
-    if not force and sealed.exists() and state.exists():
-        print("STATUS already-started — this session is already sealed; refusing to "
-              "re-seal (pass --force to override). Continue with `step next`.", file=out)
-        return 0
+    # Idempotency guard: never re-seal a session that was already started. A model that
+    # loses the $SDIR shell variable (a warned-about hazard in batch runs) and re-runs the
+    # setup block would otherwise silently re-seal the day — a fresh sealed file with cursor
+    # reset to 0, discarding revealed progress. Refuse so the mistake is a harmless no-op.
+    #
+    # The refusal message deliberately does NOT mention --force: a confused agent that reads
+    # "pass --force to override" will do exactly that, and a --force re-seal AFTER bars were
+    # revealed is a genuine look-ahead (reveal the day → reset → re-trade with knowledge).
+    # For that reason --force is itself refused once any bar has been revealed (cursor > 0).
+    if sealed.exists() and state.exists():
+        try:
+            revealed = json.loads(state.read_text(encoding="utf-8")).get("cursor", 0)
+        except (ValueError, OSError):
+            revealed = 0
+        if revealed > 0:
+            print("STATUS already-started — this session has revealed bars; re-sealing is "
+                  "forbidden (look-ahead). Continue with `step next`.", file=out)
+            return 0
+        if not force:
+            print("STATUS already-started — this session is already sealed. Do NOT re-run "
+                  "`step start`; continue with `step next`.", file=out)
+            return 0
 
     day = datetime.strptime(date, "%Y-%m-%d").date() if date else None
     h, m = (int(x) for x in after.split(":"))

@@ -67,17 +67,20 @@ BATCH_LOGS = recorder.SIM_ROOT / "_batch"   # captured agent transcripts, per co
 # is unbounded and can't be enumerated.) The vectors that CAN leak the future, all detected
 # below, are: touching the private sealed stream/state, reconstructing bars from the raw
 # market-data layer, or re-sealing the day.
-_LOOKAHEAD_PATTERNS = (
-    "_sealed.jsonl",       # the private full-day sealed stream (the future)
-    "_step.json",          # the private cursor/state file
-    "fetch_bars",
-    "fetch_minute_bars",
-    "trading.marketdata",  # importing the data layer to reconstruct future bars
-    "marketdata/data",     # reading the on-disk provider cache directly
-    "entries.db",          # the setup / universe database
-)
+# Private per-session files holding the future / cursor. NAMING them in a benign existence
+# check (ls / test -f — the setup block's own hygiene step does this) is fine; READING their
+# content is the peek. _reads_private_content() distinguishes the two.
+_PRIVATE_FILES = ("_sealed.jsonl", "_step.json")
+# Direct access to the raw market-data layer — reconstructing bars bypasses step next.
+_DATA_LAYER_PATTERNS = ("fetch_bars", "fetch_minute_bars", "trading.marketdata",
+                        "marketdata/data", "entries.db")
 _REPLAY_RE = "trading.llm_trader.replay"
 _STEP_START_RE = "step start"
+_STEP_NEXT_RE = "step next"
+# commands that READ a file's content (vs ls/test/stat which only name it)
+_READ_VERB_RE = re.compile(
+    r"\b(?:cat|head|tail|less|more|nl|od|xxd|hexdump|strings|grep|egrep|awk|sed|cut|"
+    r"sort|uniq|wc|python|python3|open|read_text|readlines|load)\b")
 
 
 def _latest_version() -> str:
@@ -744,20 +747,47 @@ def _resolve_batch_commands(sids: list[str]) -> dict[str, Optional[str]]:
     return result
 
 
+def _reads_private_content(line: str, name: str) -> bool:
+    """True if `line` READS the private file's content (cat/grep/python/input-redirect, …),
+    as opposed to a benign existence check (ls / test -f / stat) that only names it."""
+    idx = line.find(name)
+    if idx < 0:
+        return False
+    seg = re.split(r"[&;|]", line[:idx])[-1]      # the command governing this file arg
+    if re.search(r"<\s*\S*$", seg):               # input redirect  … < _sealed.jsonl
+        return True
+    return bool(_READ_VERB_RE.search(seg))
+
+
 def _scan_commands(commands: str) -> Optional[str]:
     """Return a void reason if the executed commands show look-ahead / a determinism break,
-    else None. DENYLIST model (see _LOOKAHEAD_PATTERNS): only concrete peek vectors void a
-    run — benign shell the agent wraps around the sanctioned tools (cd, env-load, viewer
-    management, journal writes, step loops) is not policed, since none of it can reveal an
-    unrevealed bar. Operates on tool-call commands only (see ``_parse_export``)."""
-    executable = "\n".join(_command_lines(commands))
-    for pat in _LOOKAHEAD_PATTERNS:
+    else None. DENYLIST model: only concrete peek vectors void a run — benign shell the agent
+    wraps around the sanctioned tools (cd, env-load, viewer management, journal writes, step
+    loops, re-running a no-op `step start`, or an `ls`/`test` on a private file) is not
+    policed, since none of it can reveal an unrevealed bar. Operates on tool-call commands
+    only (see ``_parse_export``)."""
+    lines = _command_lines(commands)
+    executable = "\n".join(lines)
+    # 1) reading the private sealed stream / cursor content (not merely naming it in ls/test)
+    for line in lines:
+        for name in _PRIVATE_FILES:
+            if _reads_private_content(line, name):
+                return f"agent read forbidden `{name}`"
+    # 2) direct access to the raw market-data layer
+    for pat in _DATA_LAYER_PATTERNS:
         if pat in executable:
             return f"agent command referenced forbidden `{pat}`"
     if _REPLAY_RE in executable:
         return "agent invoked replay directly (look-ahead)"
-    if executable.count(_STEP_START_RE) > 1:
-        return "agent re-ran `step start` (re-seal / look-ahead)"
+    # 3) re-seal AFTER revealing bars: reveal the day → reset cursor → re-trade with
+    #    foreknowledge. A plain re-run of `step start` is a harmless no-op (step.start refuses
+    #    to re-seal a started session); only a --force re-seal following a `step next` leaks.
+    seen_next = False
+    for line in lines:
+        if _STEP_NEXT_RE in line:
+            seen_next = True
+        elif _STEP_START_RE in line and "--force" in line and seen_next:
+            return "agent force-re-sealed after revealing bars (look-ahead)"
     return None
 
 

@@ -101,24 +101,28 @@ def test_status_does_not_reveal(tmp_path, monkeypatch):
 
 
 def test_start_refuses_to_reseal_started_session(tmp_path, monkeypatch):
-    """A second `step start` on an already-sealed session must not re-seal: it
-    preserves revealed progress (no cursor reset / look-ahead) so a model that lost
-    $SDIR and re-ran the setup block is harmless, not voided. --force still overrides."""
+    """A re-run of `step start` on a started, UNREVEALED session is a no-op (harmless
+    restart-recovery for an agent that lost $SDIR); --force re-seals it. But once a bar has
+    been revealed, re-sealing is forbidden even with --force — reveal→reset→re-trade is
+    look-ahead."""
     _install_fake_provider(monkeypatch)
     sdir = tmp_path / "sess"
     step.start(sdir, seed=1, out=StringIO())
-    step.next_(sdir, out=StringIO())            # reveal bar 0
-    _, ticks, _ = parse_stream(sdir / "stream.jsonl")
-    assert [t["i"] for t in ticks] == [0]
 
-    # re-run start → no-op guard: progress preserved, clear STATUS message
+    # started but nothing revealed yet (cursor == 0): a plain re-run is a no-op…
     out = StringIO()
     assert step.start(sdir, seed=1, out=out) == 0
     assert "already-started" in out.getvalue()
-    _, ticks, _ = parse_stream(sdir / "stream.jsonl")
-    assert [t["i"] for t in ticks] == [0]        # NOT reset to meta-only
+    # …and --force is permitted (a fresh restart is harmless before any reveal)
+    assert step.start(sdir, seed=1, force=True, out=StringIO()) == 0
 
-    # --force overrides and genuinely re-seals (cursor back to meta-only)
-    step.start(sdir, seed=1, force=True, out=StringIO())
-    _, ticks, end = parse_stream(sdir / "stream.jsonl")
-    assert ticks == [] and end is None
+    # reveal bar 0, then BOTH a plain re-run AND --force must be refused (progress kept)
+    step.next_(sdir, out=StringIO())
+    _, ticks, _ = parse_stream(sdir / "stream.jsonl")
+    assert [t["i"] for t in ticks] == [0]
+    for forced in (False, True):
+        out = StringIO()
+        assert step.start(sdir, seed=1, force=forced, out=out) == 0
+        assert "already-started" in out.getvalue()
+        _, ticks, _ = parse_stream(sdir / "stream.jsonl")
+        assert [t["i"] for t in ticks] == [0]    # never reset to meta-only

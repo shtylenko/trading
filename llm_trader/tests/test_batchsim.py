@@ -88,7 +88,8 @@ def test_parse_export_extracts_only_tool_call_commands():
 def test_scan_commands_flags_real_peek_but_not_prose():
     assert batchsim._scan_commands('{"cmd": "cat _sealed.jsonl"}') is not None
     assert batchsim._scan_commands('{"cmd": "python3 -m trading.llm_trader.replay"}') is not None
-    assert batchsim._scan_commands("step start\nstep start") is not None       # ran twice
+    # a plain re-run of step start is a harmless no-op (step.start guards it) — NOT a void
+    assert batchsim._scan_commands("step start\nstep start") is None
     assert batchsim._scan_commands("step next\nrecorder log\nfinalize") is None  # clean
 
 
@@ -177,26 +178,26 @@ def test_resolve_batch_commands_ignores_report_output_contamination(monkeypatch)
             {"role": "assistant", "tool_calls": [{"function": {"name": "terminal",
              "arguments": json.dumps({"command": 'python3 -m trading.llm_trader.step next --session "$SDIR"'})}}]},
             {"role": "assistant", "content": f"BATCHSIM_SID=/x/simulations/{sid_clean}"}]}),
-        # EVTV run: re-ran step start (bad) AND its OUTPUT prints AQMS's SDIR via a bare report path
+        # EVTV run: force-re-sealed AFTER revealing bars (real look-ahead) AND its OUTPUT
+        # prints AQMS's SDIR via a bare report path
         "20250101_093005_bbb": json.dumps({"messages": [
             {"role": "tool", "content": f"CAPTURED_SDIR=/x/simulations/{sid_dirty}"},
             {"role": "assistant", "tool_calls": [{"function": {"name": "terminal",
-             "arguments": json.dumps({"command": f'python3 -m trading.llm_trader.step start --session {sid_dirty}'})}}]},
+             "arguments": json.dumps({"command": f'python3 -m trading.llm_trader.step next --session {sid_dirty}'})}}]},
             {"role": "assistant", "tool_calls": [{"function": {"name": "terminal",
-             "arguments": json.dumps({"command": f'python3 -m trading.llm_trader.step start --session {sid_dirty}'})}}]},
+             "arguments": json.dumps({"command": f'python3 -m trading.llm_trader.step start --force --session {sid_dirty}'})}}]},
             {"role": "tool", "content": f"report listing ... {sid_clean} ... {sid_dirty} ..."}]}),
     }
     monkeypatch.setattr(batchsim, "_recent_session_ids", lambda limit: list(exports))
     monkeypatch.setattr(batchsim, "_export_session", lambda hid: exports.get(hid))
     got = batchsim._resolve_batch_commands([sid_clean, sid_dirty])
     # clean leaf resolves to its OWN commands (only `step next`) via the marker — NOT the
-    # dirty session's double step start pulled in through the report-output mention
+    # dirty session's commands pulled in through the report-output mention
     assert "step next" in got[sid_clean]
-    assert got[sid_clean].count("step start") == 0
+    assert "--force" not in got[sid_clean]
     assert batchsim._scan_commands(got[sid_clean]) is None
     # dirty leaf still resolves to its own commands and is correctly flagged
-    assert got[sid_dirty].count("step start") == 2
-    assert batchsim._scan_commands(got[sid_dirty]) == "agent re-ran `step start` (re-seal / look-ahead)"
+    assert batchsim._scan_commands(got[sid_dirty]) == "agent force-re-sealed after revealing bars (look-ahead)"
 
 
 def test_resolve_batch_commands_unfound_is_none(monkeypatch):
@@ -295,20 +296,29 @@ def test_scan_commands_denylist_allows_benign_shell():
         'python3 -m trading.llm_trader.recorder finalize --session "/x/sim/20260706-KITT-abc"',
     ])
     assert batchsim._scan_commands(benign) is None
+    # naming a private file in an EXISTENCE check (the setup block's leak-hygiene step) is
+    # benign — only reading its content is a peek
+    assert batchsim._scan_commands("ls -la /x/sim/s/_sealed.jsonl /x/sim/s/_step.json 2>&1") is None
+    assert batchsim._scan_commands('test -f "$SDIR/_sealed.jsonl" && echo present') is None
+    # a plain re-run of step start (guarded no-op), and a --force re-seal BEFORE any reveal,
+    # are both harmless restarts — not look-ahead
+    assert batchsim._scan_commands("step start\nstep start") is None
+    assert batchsim._scan_commands("step start --force\nstep next\nstep next") is None
 
 
 def test_scan_commands_denylist_still_voids_lookahead():
     """The concrete look-ahead / determinism vectors still void, however they're wrapped."""
     assert batchsim._scan_commands("cd /x && cat /x/_sealed.jsonl") \
-        == "agent command referenced forbidden `_sealed.jsonl`"
-    assert batchsim._scan_commands('python3 -c "import _step" && cat a/_step.json') \
-        == "agent command referenced forbidden `_step.json`"
+        == "agent read forbidden `_sealed.jsonl`"
+    assert batchsim._scan_commands('grep foo a/_step.json') == "agent read forbidden `_step.json`"
+    assert batchsim._scan_commands("while read l; do :; done < /x/_sealed.jsonl") is not None
     # reconstructing bars from the raw data layer / cache is look-ahead
     assert batchsim._scan_commands('python3 -c "from trading.marketdata import bars"') is not None
     assert batchsim._scan_commands("cat /x/marketdata/data/AAPL.parquet") is not None
     assert batchsim._scan_commands("sqlite3 /x/entries.db 'select *'") is not None
-    # re-running step start (re-seal) and calling replay directly still void
-    assert batchsim._scan_commands("step start\nstep start") is not None
+    # re-seal AFTER revealing bars (reveal → reset → re-trade) and direct replay still void
+    assert batchsim._scan_commands("step next\nstep next\nstep start --force") \
+        == "agent force-re-sealed after revealing bars (look-ahead)"
     assert batchsim._scan_commands("python3 -m trading.llm_trader.replay AAPL") is not None
 
 

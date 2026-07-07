@@ -163,6 +163,39 @@ def test_resolve_batch_commands_matches_session_by_sid(monkeypatch):
     assert batchsim._scan_commands(got[sid_b]) is not None      # peeked
 
 
+def test_resolve_batch_commands_ignores_report_output_contamination(monkeypatch):
+    """A later run that prints another leaf's SDIR in `recorder report` OUTPUT must not
+    have its own commands attributed to that leaf. The owner (whose COMMANDS reference the
+    SDIR) wins over the mere mentioner — otherwise clean leaves get falsely voided."""
+    sid_clean = "20250101090000-AQMS-111111"   # a clean run
+    sid_dirty = "20250101093000-EVTV-222222"   # a run that re-ran step start AND printed AQMS's path
+    exports = {
+        # AQMS owner: commands reference its own SDIR; single clean step start
+        "20250101_090005_aaa": json.dumps({"messages": [
+            {"role": "assistant", "tool_calls": [{"function": {"name": "terminal",
+             "arguments": json.dumps({"command": f'SDIR="{sid_clean}" && step start --session "$SDIR"'})}}]},
+            {"role": "assistant", "tool_calls": [{"function": {"name": "terminal",
+             "arguments": json.dumps({"command": f'step next --session {sid_clean}'})}}]}]}),
+        # EVTV run: re-ran step start (bad) AND its OUTPUT prints AQMS's SDIR via a report
+        "20250101_093005_bbb": json.dumps({"messages": [
+            {"role": "assistant", "tool_calls": [{"function": {"name": "terminal",
+             "arguments": json.dumps({"command": f'step start --session {sid_dirty}'})}}]},
+            {"role": "assistant", "tool_calls": [{"function": {"name": "terminal",
+             "arguments": json.dumps({"command": f'step start --session {sid_dirty}'})}}]},
+            {"role": "tool", "content": f"report listing ... {sid_clean} ... {sid_dirty} ..."}]}),
+    }
+    monkeypatch.setattr(batchsim, "_recent_session_ids", lambda limit: list(exports))
+    monkeypatch.setattr(batchsim, "_export_session", lambda hid: exports.get(hid))
+    got = batchsim._resolve_batch_commands([sid_clean, sid_dirty])
+    # the clean leaf keeps ITS OWN commands (one step start), NOT the dirty session's
+    # double step start pulled in via the report-output mention (the contamination bug)
+    assert got[sid_clean].count("step start") == 1
+    assert "step next" in got[sid_clean]
+    # the dirty leaf still gets its own commands and is correctly flagged
+    assert got[sid_dirty].count("step start") == 2
+    assert batchsim._scan_commands(got[sid_dirty]) == "agent re-ran `step start` (re-seal / look-ahead)"
+
+
 def test_resolve_batch_commands_unfound_is_none(monkeypatch):
     monkeypatch.setattr(batchsim, "_recent_session_ids", lambda limit: [])
     got = batchsim._resolve_batch_commands(["20250101090000-AAA-111111"])

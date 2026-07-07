@@ -84,6 +84,17 @@ def start(
     sdir, sealed, stream, state = _paths(session_dir)
     sdir.mkdir(parents=True, exist_ok=True)
 
+    # Idempotency guard: never re-seal a session that was already started. A model
+    # that loses the $SDIR shell variable (a warned-about hazard in batch runs) and
+    # re-runs the setup block would otherwise silently re-seal the day here — a fresh
+    # sealed file with cursor reset to 0, discarding revealed progress. That re-seal is
+    # a determinism / look-ahead break the audit then voids. Refuse instead (unless
+    # --force), so the mistake is a harmless no-op rather than a run-killer.
+    if not force and sealed.exists() and state.exists():
+        print("STATUS already-started — this session is already sealed; refusing to "
+              "re-seal (pass --force to override). Continue with `step next`.", file=out)
+        return 0
+
     day = datetime.strptime(date, "%Y-%m-%d").date() if date else None
     h, m = (int(x) for x in after.split(":"))
     from datetime import time as dtime

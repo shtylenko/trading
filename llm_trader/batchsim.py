@@ -694,32 +694,37 @@ def _resolve_batch_commands(sids: list[str]) -> dict[str, Optional[str]]:
     remaining = set(s for s in sids if s)
     if not remaining:
         return result
-    saw_content = False
     recent_ids = _recent_session_ids(limit=max(20, 3 * len(sids)))
+
+    # Export every candidate session once, keeping (raw_text, parsed_commands).
+    exported: list[tuple[str, Optional[str]]] = []
     with _cf.ThreadPoolExecutor(max_workers=min(10, max(1, len(recent_ids)))) as pool:
         future_to_hid = {pool.submit(_export_session, hid): hid for hid in recent_ids}
         for future in _cf.as_completed(future_to_hid):
-            hid = future_to_hid[future]
             try:
                 text = future.result()
             except Exception:
                 text = None
-            if not text:
-                continue
-            matched = [s for s in remaining if s in text]
-            if not matched:
-                continue
-            saw_content = True
-            cmds = _parse_export(text)
-            if cmds is None:
-                print(f"⚠ audit: hermes session {hid} matched a run but yielded no parseable "
-                      f"tool calls — export schema mismatch? head:\n{text[:400]}", file=sys.stderr)
-            for s in matched:
-                result[s] = cmds
-                remaining.discard(s)
-            if not remaining:
-                break
-    if remaining and not saw_content:
+            if text:
+                exported.append((text, _parse_export(text)))
+
+    # Attribute each run to the session that OWNS it. Priority:
+    #   1. the run's SDIR appears in a session's executed COMMANDS — only the owner ever
+    #      *commands* its own SDIR (init/step/log --session <sdir>).
+    #   2. fallback: the SDIR appears only in the raw export (e.g. captured into $SDIR from
+    #      init output and never re-typed as a literal); prefer a session that has commands.
+    # This stops cross-contamination: an agent that runs `recorder report`/`ls` prints OTHER
+    # runs' SDIRs in its OUTPUT, which used to pull that session's commands (its own re-run
+    # `step start`, `_sealed` reference, …) onto innocent leaves and falsely void them.
+    for sid in list(remaining):
+        pick = next((c for _, c in exported if c and sid in c), None)
+        if pick is None:
+            pick = next((c for t, c in exported if c and sid in t), None)
+        if pick is not None:
+            result[sid] = pick
+            remaining.discard(sid)
+
+    if remaining and not any(v is not None for v in result.values()):
         print(f"⚠ audit: could not locate hermes sessions for {len(remaining)} run(s) by "
               "SDIR — `hermes sessions export` contract may not hold (see README smoke "
               "test); those runs will be voided as unverifiable.", file=sys.stderr)

@@ -98,3 +98,27 @@ def test_status_does_not_reveal(tmp_path, monkeypatch):
     _, ticks, _ = parse_stream(sdir / "stream.jsonl")
     assert ticks == []
     assert "cursor=0" in out.getvalue()
+
+
+def test_start_refuses_to_reseal_started_session(tmp_path, monkeypatch):
+    """A second `step start` on an already-sealed session must not re-seal: it
+    preserves revealed progress (no cursor reset / look-ahead) so a model that lost
+    $SDIR and re-ran the setup block is harmless, not voided. --force still overrides."""
+    _install_fake_provider(monkeypatch)
+    sdir = tmp_path / "sess"
+    step.start(sdir, seed=1, out=StringIO())
+    step.next_(sdir, out=StringIO())            # reveal bar 0
+    _, ticks, _ = parse_stream(sdir / "stream.jsonl")
+    assert [t["i"] for t in ticks] == [0]
+
+    # re-run start → no-op guard: progress preserved, clear STATUS message
+    out = StringIO()
+    assert step.start(sdir, seed=1, out=out) == 0
+    assert "already-started" in out.getvalue()
+    _, ticks, _ = parse_stream(sdir / "stream.jsonl")
+    assert [t["i"] for t in ticks] == [0]        # NOT reset to meta-only
+
+    # --force overrides and genuinely re-seals (cursor back to meta-only)
+    step.start(sdir, seed=1, force=True, out=StringIO())
+    _, ticks, end = parse_stream(sdir / "stream.jsonl")
+    assert ticks == [] and end is None

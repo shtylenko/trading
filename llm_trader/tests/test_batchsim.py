@@ -281,14 +281,35 @@ def test_resume_excludes_voided(tmp_path, monkeypatch):
     assert counts.get(("TK", "2025-01-02"), 0) == 0
 
 
-def test_allowed_command_whitelist_is_source_of_truth():
-    # Ensures audit and prompt stay aligned via the extracted data.
-    assert "python3 -m trading.llm_trader.step next --session \"$SDIR\"" in batchsim.ALLOWED_EXACT
-    assert any(p.startswith("SDIR=$(python3 -m") for p in batchsim.ALLOWED_PREFIXES)
-    assert batchsim._allowed_command_line('python3 -m trading.llm_trader.recorder finalize --session "$SDIR"')
-    assert batchsim._allowed_command_line('echo "foo"')
-    assert not batchsim._allowed_command_line("cat _sealed.jsonl")
-    assert not batchsim._allowed_command_line("ls")
+def test_scan_commands_denylist_allows_benign_shell():
+    """DENYLIST model: the audit voids only concrete look-ahead / determinism breaks. The
+    benign shell agents actually run — cd, env-load, viewer kill, journal heredoc writes,
+    literal-path trading commands, `python3 -c` step loops — must NOT void a run."""
+    benign = "\n".join([
+        'cd /Users/shtylenko/Projects && set -a && . trading/.env && set +a && python3 -c "import trading.llm_trader" && echo OK',
+        'lsof -nP -tiTCP:8765 -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null; sleep 1; echo killed',
+        'pkill -f "trading.llm_trader.viewer" 2>/dev/null',
+        'cd /Users/shtylenko/Projects && python3 -m trading.llm_trader.step next --session "/x/sim/20260706-KITT-abc"',
+        'for i in $(seq 1 20); do python3 -m trading.llm_trader.step next --session "$SDIR"; done',
+        "cat >> /x/sim/20260706-KITT-abc/journal.md << 'END'\nnice runner, watched the tape\nEND",
+        'python3 -m trading.llm_trader.recorder finalize --session "/x/sim/20260706-KITT-abc"',
+    ])
+    assert batchsim._scan_commands(benign) is None
+
+
+def test_scan_commands_denylist_still_voids_lookahead():
+    """The concrete look-ahead / determinism vectors still void, however they're wrapped."""
+    assert batchsim._scan_commands("cd /x && cat /x/_sealed.jsonl") \
+        == "agent command referenced forbidden `_sealed.jsonl`"
+    assert batchsim._scan_commands('python3 -c "import _step" && cat a/_step.json') \
+        == "agent command referenced forbidden `_step.json`"
+    # reconstructing bars from the raw data layer / cache is look-ahead
+    assert batchsim._scan_commands('python3 -c "from trading.marketdata import bars"') is not None
+    assert batchsim._scan_commands("cat /x/marketdata/data/AAPL.parquet") is not None
+    assert batchsim._scan_commands("sqlite3 /x/entries.db 'select *'") is not None
+    # re-running step start (re-seal) and calling replay directly still void
+    assert batchsim._scan_commands("step start\nstep start") is not None
+    assert batchsim._scan_commands("python3 -m trading.llm_trader.replay AAPL") is not None
 
 
 def test_at_time_pins_exact_setup(tmp_path):

@@ -59,34 +59,25 @@ ENTRIES_DB = DATA_DIR / "entries.db"
 TESTSET_DEFAULT = Path(__file__).parent / "batch" / "testset.json"
 BATCH_LOGS = recorder.SIM_ROOT / "_batch"   # captured agent transcripts, per cohort
 
-# patterns in a captured transcript that mean the agent broke no-look-ahead / determinism
-_PEEK_PATTERNS = ("_sealed.jsonl", "_step.json", "fetch_bars", "fetch_minute_bars")
+# The audit is a DENYLIST: a run is void only when a command shows a *concrete* look-ahead
+# or determinism break. Benign shell the agents wrap around the sanctioned tools — cd,
+# env-load, viewer management (lsof/kill), journal writes, `python3 -c` step loops — is NOT
+# policed, because none of it can reveal an unrevealed bar. (An earlier allowlist that voided
+# any unrecognized command systematically false-voided legitimate runs; agents' benign shell
+# is unbounded and can't be enumerated.) The vectors that CAN leak the future, all detected
+# below, are: touching the private sealed stream/state, reconstructing bars from the raw
+# market-data layer, or re-sealing the day.
+_LOOKAHEAD_PATTERNS = (
+    "_sealed.jsonl",       # the private full-day sealed stream (the future)
+    "_step.json",          # the private cursor/state file
+    "fetch_bars",
+    "fetch_minute_bars",
+    "trading.marketdata",  # importing the data layer to reconstruct future bars
+    "marketdata/data",     # reading the on-disk provider cache directly
+    "entries.db",          # the setup / universe database
+)
 _REPLAY_RE = "trading.llm_trader.replay"
 _STEP_START_RE = "step start"
-
-# Single source for the conservative whitelist used both by the batch prompt
-# instructions and by the post-hoc audit. Adding a new allowed shape requires
-# updating BOTH the prompt text in _prompt() AND this list (see test_batchsim).
-ALLOWED_EXACT = {
-    "step start",
-    "step next",
-    "recorder log",
-    "finalize",
-    "ROOT=$(pwd)",
-    'ls -la "$SDIR" | cat',
-    'python3 -m trading.llm_trader.step next --session "$SDIR"',
-    'python3 -m trading.llm_trader.step status --session "$SDIR"',
-    'python3 -m trading.llm_trader.recorder finalize --session "$SDIR"',
-    "python3 -m trading.llm_trader.step start --session X",  # unit-test shorthand
-}
-ALLOWED_PREFIXES = (
-    "echo ",
-    "SDIR=$(python3 -m trading.llm_trader.recorder init ",
-    'ls -la "$ROOT" | grep -E ',
-    'test -f "$SDIR/stream.jsonl" && echo ',
-    'python3 -m trading.llm_trader.step start --session "$SDIR" ',
-    'python3 -m trading.llm_trader.recorder log --session "$SDIR" --record ',
-)
 
 
 def _latest_version() -> str:
@@ -754,43 +745,39 @@ def _resolve_batch_commands(sids: list[str]) -> dict[str, Optional[str]]:
 
 
 def _scan_commands(commands: str) -> Optional[str]:
-    """Return a void reason if the executed commands break no-look-ahead / determinism,
-    else None. Operates on tool-call commands only (see ``_parse_export``)."""
-    lines = _command_lines(commands)
-    executable = "\n".join(lines)
-    for pat in _PEEK_PATTERNS:
+    """Return a void reason if the executed commands show look-ahead / a determinism break,
+    else None. DENYLIST model (see _LOOKAHEAD_PATTERNS): only concrete peek vectors void a
+    run — benign shell the agent wraps around the sanctioned tools (cd, env-load, viewer
+    management, journal writes, step loops) is not policed, since none of it can reveal an
+    unrevealed bar. Operates on tool-call commands only (see ``_parse_export``)."""
+    executable = "\n".join(_command_lines(commands))
+    for pat in _LOOKAHEAD_PATTERNS:
         if pat in executable:
             return f"agent command referenced forbidden `{pat}`"
     if _REPLAY_RE in executable:
         return "agent invoked replay directly (look-ahead)"
     if executable.count(_STEP_START_RE) > 1:
         return "agent re-ran `step start` (re-seal / look-ahead)"
-    for line in lines:
-        if not _allowed_command_line(line):
-            return f"agent executed unexpected command `{line[:120]}`"
     return None
 
 
 def _command_lines(commands: str) -> list[str]:
-    out = []
+    out: list[str] = []
+    pending = ""   # accumulates backslash-continued lines into one logical command
     for raw in (commands or "").splitlines():
         line = raw.strip()
+        if pending:
+            line = (pending + " " + line).strip()
+            pending = ""
+        if line.endswith("\\"):          # shell line continuation → join with the next line
+            pending = line[:-1].strip()
+            continue
         if not line or line.startswith("#"):
             continue
         out.append(line)
+    if pending:
+        out.append(pending)
     return out
-
-
-def _allowed_command_line(line: str) -> bool:
-    """Allow only the command shapes the batch prompt intentionally permits.
-
-    Uses the module-level ALLOWED_EXACT + ALLOWED_PREFIXES so the audit and
-    the injected prompt stay aligned. If you change the prompt block, update
-    these sets and add a regression test.
-    """
-    if line in ALLOWED_EXACT:
-        return True
-    return any(line.startswith(p) for p in ALLOWED_PREFIXES)
 
 
 def audit(tag: str) -> int:

@@ -158,6 +158,7 @@ async function loadAndRenderList() {
 const TABLE_COLS = [
   { key: "name",          label: "Session",       num: false },
   { key: "type",          label: "Type",          num: false },
+  { key: "status",        label: "Status",        num: false },
   { key: "version",       label: "Version",       num: false },
   { key: "model",         label: "Model",         num: false },
   { key: "last_activity", label: "Last activity", num: false },
@@ -241,9 +242,17 @@ async function renderSessionTable() {
     const voidCell = s.n_void != null
       ? (s.n_void > 0 ? `<span class="neg">${s.n_void}</span>` : "0")
       : "—";
+    // ongoing vs completed; while running, show finalized/planned progress
+    const running = s.status === "running";
+    const prog = (s.planned && s.n_complete != null && s.n_complete < s.planned)
+      ? ` ${s.n_complete}/${s.planned}` : "";
+    const statusCell = running
+      ? `<span class="badge running">● running${prog}</span>`
+      : `<span class="badge complete">done</span>`;
     return `<tr data-id="${escapeHtml(s.id)}">
       <td>${display}</td>
       <td><span class="badge ${isLive ? "live" : "sim"}">${isLive ? "live" : "sim"}</span></td>
+      <td>${statusCell}</td>
       <td>${s.version ? escapeHtml(s.version) : "—"}</td>
       <td>${s.model ? escapeHtml(s.model) : "—"}</td>
       <td>${escapeHtml(s.last_activity || "—")}</td>

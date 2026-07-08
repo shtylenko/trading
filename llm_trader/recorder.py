@@ -1047,9 +1047,12 @@ def list_sessions() -> list[dict]:
         last_activity = None
         name = None
         version = None
+        n_complete = 0   # leaf sessions that have finalized
         for d, ss in items:
             res = ss.get("result") or {}
             tickers.add(ss.get("ticker"))
+            if ss.get("status") == "complete":
+                n_complete += 1
             if res.get("traded"):
                 total_pnl += res.get("realized_pnl", 0) or 0.0
                 n_traded += 1
@@ -1069,6 +1072,17 @@ def list_sessions() -> list[dict]:
         # batch.json (keyed by the human tag = `name`) carries the hermes model
         # and the pinned skill version. Fall back to the leaf skill version.
         bmeta = _batch_meta(name) if name else {}
+        # Ongoing vs completed. Prefer the batch's own status flag (batchsim writes
+        # "running" at start, "complete" at finish); otherwise infer from the leaves:
+        # still running if any leaf hasn't finalized or fewer leaves exist than planned.
+        planned = bmeta.get("planned")
+        meta_status = bmeta.get("status")
+        if meta_status in ("running", "complete"):
+            status = meta_status
+        else:
+            leaves_pending = n_complete < len(items) or (
+                isinstance(planned, int) and len(items) < planned)
+            status = "running" if leaves_pending else "complete"
         # Edge metrics (expectancy, PF, dispersion) — same computation the tickers
         # detail view already shows, surfaced here so versions/models are rankable.
         metrics = _compute_batch_metrics([ss for _, ss in items])
@@ -1096,6 +1110,9 @@ def list_sessions() -> list[dict]:
             "n_planned": metrics.get("n_planned"),
             "n_void": metrics.get("n_void"),
             "last_activity": last_activity,
+            "status": status,
+            "n_complete": n_complete,
+            "planned": planned if isinstance(planned, int) else len(items),
         })
     out.sort(key=lambda x: (x.get("last_activity") or ""), reverse=True)
     return out

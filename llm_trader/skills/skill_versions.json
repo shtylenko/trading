@@ -28,5 +28,14 @@
   "2.1.0": {
     "content_hash": "sha256:e46b50a5",
     "first_seen": "2026-07-07T21:44:29"
+  },
+  "2.2.0": {
+    "content_hash": "sha256:205d017e",
+    "first_seen": "2026-07-07T22:25:23"
+  },
+  "2.2.1": {
+    "bumped_from": "2.2.0",
+    "content_hash": "sha256:1be9d2d1",
+    "first_seen": "2026-07-07T22:26:45"
   }
 }

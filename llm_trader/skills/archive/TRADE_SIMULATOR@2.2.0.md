@@ -1,6 +1,6 @@
 ---
 name: trade-simulator
-version: 2.2.1
+version: 2.2.0
 description: Paper-trade ONE recorded setup live, minute by minute — stream its 1-min bars at one tick per wall-clock minute and make Ross Cameron momentum long-side entry/management/exit decisions in real time, then write a trade journal. Use when the user wants to "simulate trading", "paper trade", or "trade a setup" from llm_trader.
 ---
 
@@ -209,22 +209,19 @@ read.) Score the four measurable pillars:
 | Gap | `gap_pct > 10` |
 
 - **Grade A** — all 4 pass. Trade the plan exactly as written below.
-- **Grade B** — price is in band and `rvol ≥ 2`, but one or more soft pillars miss
-  (`rvol` 2–5×, float ≥ 10M, or gap 5–10%), **or** `entry_time` is at/after
-  **11:30 ET** (late-morning follow-through is the corpus's weakest window; the
-  hard no-fresh-entry rule at 12:00 ET still applies on top). Trade it, but **only
-  on a flawless trigger**: every entry-checklist box must pass *decisively* — no
-  borderline judgment calls, no "fractionally above VWAP", no rationalizing a
-  wick. When in doubt on a B, stand down. A soft-pillar miss is a *caution flag*,
-  not a disqualifier — B-grade setups with clean triggers are still profitable;
-  what the grade buys you is refusing the *sloppy* trigger on a weak setup.
-- **Grade C (hard gate — structural, not judgment)** — `entry_px` outside
-  **$2–$20**, or `rvol < 2`. **STAND DOWN — no trade, regardless of how the bars
-  look.** Outside the price band the rule-set's stop math breaks: a $23 stock
-  makes a $0.10–$0.30 stop pure noise (the corpus uses $0.50–$1.00 stops there,
-  which the $40 risk budget can't afford), and `rvol < 2` is the corpus's hard
-  momentum floor. Log one `STAND_DOWN` record citing the failed pillar; you may
-  stop revealing bars and go to Step 4.
+- **Grade B** — 3 pass, and the misses are soft (`rvol` 2–5×, float 10–20M, or gap
+  5–10%). Trade it, but **only on a flawless trigger**: every entry-checklist box
+  must pass *decisively* — no borderline judgment calls, no "fractionally above
+  VWAP", no rationalizing a wick. When in doubt on a B, stand down.
+- **Grade C** — any of: `entry_px` outside $2–$20, `rvol < 2`, ≤2 pillars pass.
+  **STAND DOWN — no trade, regardless of how the bars look.** These are the
+  setups where the rule-set's stop distances and patterns don't apply (e.g. a $23
+  stock makes a $0.10–$0.30 stop pure noise — the corpus uses $0.50–$1.00 stops
+  there, which the $40 risk budget can't afford). Log one `STAND_DOWN` record
+  citing the failed pillars; you may stop revealing bars and go to Step 4.
+- **Demotion**: if `entry_time` is at/after **11:30 ET**, drop the grade one notch
+  (A→B, B→C) — late-morning follow-through is the corpus's weakest window, and the
+  hard no-entry rule at 12:00 ET still applies on top.
 
 A stood-down C is a **success** (the discipline is the edge), exactly like any
 other stand-down — journal why and move on.
@@ -594,7 +591,8 @@ holding above VWAP (or, for the sub-VWAP trap, the completed washout structure),
 with green-vol dominance re-established. Re-entering 1–2 bars after a bailout into
 the same chop is exactly the pattern that loses — the first exit told you the tape
 is choppy, and the corpus's answer to chop is *fewer* entries, not faster ones. If
-the setup can't survive a 3-bar wait, it was never an A-setup.
+the setup can't survive a 3-bar wait, it was never an A-setup. Grade-B sessions
+(Step 0.5): skip §C entirely — one round trip only.
 
 **Either** of the two patterns below qualifies — they are **alternatives, not a
 classification you must decide between**. You are not labelling the setup; you are just

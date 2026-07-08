@@ -1018,6 +1018,7 @@ def _session_entry(d: Path, s: dict) -> dict:
         "batch": s.get("batch"),
         "skill_version": (s.get("skill") or {}).get("version"),
         "void": s.get("void"),
+        "out_of_credits": s.get("out_of_credits"),
     }
 
     # For running sessions, include a current PnL snapshot (mtime-cached).
@@ -1109,6 +1110,7 @@ def list_sessions() -> list[dict]:
             "profit_factor_r": pf,
             "n_planned": metrics.get("n_planned"),
             "n_void": metrics.get("n_void"),
+            "n_out_of_credits": metrics.get("n_out_of_credits"),
             "last_activity": last_activity,
             "status": status,
             "n_complete": n_complete,
@@ -1145,6 +1147,12 @@ def _is_void(s: dict) -> bool:
     return bool(v) and v != "false"
 
 
+def _is_out_of_credits(s: dict) -> bool:
+    """A run whose agent never executed because the API was out of credits (HTTP 402).
+    An infrastructure failure — excluded from stats, shown distinctly from a void."""
+    return bool(s.get("out_of_credits"))
+
+
 def _compute_batch_metrics(members: list[dict]) -> dict:
     """Compute clean and effective metrics for a top-level batch from list of member session views.
     members are the dicts from _session_entry (have 'result', possibly 'live_pnl', 'void').
@@ -1153,10 +1161,17 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
     effective_rs: list[float] = []
     n_planned = 0
     n_void = 0
+    n_out_of_credits = 0
     n_stood = 0
     n_traded = 0
     total_pnl = 0.0
     for m in members:
+        # Out-of-credits runs are infra failures, not results: exclude entirely
+        # (no penalty, not a stand-down) so expectancy/PF/win-rate stay clean over
+        # the runs that actually executed.
+        if _is_out_of_credits(m):
+            n_out_of_credits += 1
+            continue
         n_planned += 1
         if _is_void(m):
             n_void += 1
@@ -1203,6 +1218,8 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
     # sequence drawdown using deterministic order by leaf id (stable across runs)
     ordered_eff = []
     for m in sorted(members, key=lambda x: x.get("id", "")):
+        if _is_out_of_credits(m):
+            continue  # infra failure — not part of the traded sequence
         if _is_void(m):
             ordered_eff.append(-1.0)
         else:
@@ -1233,6 +1250,7 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
         "n_planned": n_planned,
         "n_traded": n_traded,
         "n_void": n_void,
+        "n_out_of_credits": n_out_of_credits,
         "n_stood_down": n_stood,
         "sequence_drawdown_r": seq_dd,
         "recovery_factor_r": recovery,
@@ -1262,6 +1280,7 @@ def get_top_session_view(sess_id: str) -> dict:
         "leaf_id": None,
         "n_void": 0,       # leaf runs on this ticker the audit voided
         "void_reason": None,  # a representative void reason for the UI
+        "n_out_of_credits": 0,  # leaf runs that died on HTTP 402 (out of credits)
         "n_leaves": 0,     # total leaf runs on this ticker
         "n_complete": 0,   # of those, how many are finalized
         "running_any": False,
@@ -1288,7 +1307,9 @@ def get_top_session_view(sess_id: str) -> dict:
             td["stale_any"] = True
         else:
             td["running_any"] = True
-        if _is_void(s):
+        if _is_out_of_credits(s):
+            td["n_out_of_credits"] += 1
+        elif _is_void(s):
             td["n_void"] += 1
             if not td["void_reason"]:
                 td["void_reason"] = str(s.get("void"))
@@ -1310,9 +1331,13 @@ def get_top_session_view(sess_id: str) -> dict:
         # win% is winning runs over traded runs — not over fills (see list_sessions).
         wr = round((data["wins"] / n * 100), 1) if n > 0 else None
         # per-ticker rollup status: running while any leaf is still live, else complete
-        # (stale = a running leaf whose files went quiet, treated as abandoned).
+        # (stale = a running leaf whose files went quiet, treated as abandoned;
+        # out_of_credits = every leaf died on HTTP 402 without trading — infra failure).
         if data["running_any"]:
             tstatus = "running"
+        elif (data["n_out_of_credits"] > 0 and data["n_traded"] == 0
+              and data["n_void"] == 0):
+            tstatus = "out_of_credits"
         elif data["n_complete"] >= data["n_leaves"] and data["n_leaves"] > 0:
             tstatus = "complete"
         elif data["stale_any"]:
@@ -1333,6 +1358,7 @@ def get_top_session_view(sess_id: str) -> dict:
             "r": data.get("r"),
             "n_void": data["n_void"],
             "void_reason": data["void_reason"],
+            "n_out_of_credits": data["n_out_of_credits"],
             "status": tstatus,
             "n_leaves": data["n_leaves"],
             "n_complete": data["n_complete"],
@@ -1394,11 +1420,17 @@ def report_by_version(
             or "unversioned"
         b = buckets.setdefault(ver, {
             "version": ver, "n": 0, "wins": 0, "stood_down": 0, "n_void": 0,
+            "n_out_of_credits": 0,
             "pnl": 0.0, "r_sum": 0.0, "cap_sum": 0.0, "cap_n": 0, "hashes": set(),
         })
         h = pnl.get("skill_hash") or session.get("skill", {}).get("content_hash")
         if h:
             b["hashes"].add(h)
+        if _is_out_of_credits(session):
+            # Infra failure (HTTP 402), agent never traded — not a disciplined
+            # stand-down and not a void; exclude from the cohort entirely.
+            b["n_out_of_credits"] += 1
+            continue
         if session.get("void") or pnl.get("void"):
             b["n_void"] += 1          # audit-tainted → excluded from stats
             continue
@@ -1425,6 +1457,7 @@ def report_by_version(
             "n": n,
             "stood_down": b["stood_down"],
             "n_void": b["n_void"],
+            "n_out_of_credits": b["n_out_of_credits"],
             "win_pct": round(100 * b["wins"] / n) if n else None,
             "pnl": round(b["pnl"], 2),
             "avg_r": round(b["r_sum"] / n, 2) if n else None,
@@ -1450,6 +1483,8 @@ def _print_report(rows: list[dict]) -> None:
             notes.append(f"{r['stood_down']} stood down")
         if r.get("n_void"):
             notes.append(f"⚠ {r['n_void']} void")
+        if r.get("n_out_of_credits"):
+            notes.append(f"⚠ {r['n_out_of_credits']} out-of-credits")
         if len(r["hashes"]) > 1:
             notes.append(f"⚠ {len(r['hashes'])} distinct hashes (drift)")
         print(f"{r['version']:<14}{r['n']:>4}{win:>6}{pnl:>10}{avg:>7}{cap:>6}  "

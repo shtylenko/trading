@@ -246,9 +246,12 @@ async function renderSessionTable() {
     const running = s.status === "running";
     const prog = (s.planned && s.n_complete != null && s.n_complete < s.planned)
       ? ` ${s.n_complete}/${s.planned}` : "";
-    const statusCell = running
+    const ooc = s.n_out_of_credits > 0
+      ? ` <span class="badge out-of-credits" title="${s.n_out_of_credits} run(s) out of API credits (HTTP 402) — excluded from stats, not void">⚠ ${s.n_out_of_credits} no credits</span>`
+      : "";
+    const statusCell = (running
       ? `<span class="badge running">● running${prog}</span>`
-      : `<span class="badge complete">done</span>`;
+      : `<span class="badge complete">done</span>`) + ooc;
     return `<tr data-id="${escapeHtml(s.id)}">
       <td>${display}</td>
       <td><span class="badge ${isLive ? "live" : "sim"}">${isLive ? "live" : "sim"}</span></td>
@@ -385,21 +388,24 @@ function renderSessionTickers(v) {
       const pnlCls = t.pnl > 0 ? "pos" : t.pnl < 0 ? "neg" : "";
       const wr = t.win_rate != null ? `${t.win_rate}%` : "—";
       const rStr = t.r != null ? t.r.toFixed(2) + "R" : "—";
-      const voided = t.n_void > 0;
       const st = t.status || "complete";
+      const voided = t.n_void > 0;
+      const outOfCredits = st === "out_of_credits";
       const rep = t.n_leaves > 1 ? ` ${t.n_complete}/${t.n_leaves}` : "";
       let statusCell;
       if (st === "running") {
         statusCell = `<span class="badge running">running${rep}</span>`;
       } else if (st === "stale") {
         statusCell = `<span class="badge stale">stale</span>`;
+      } else if (st === "out_of_credits") {
+        statusCell = `<span class="badge out-of-credits" title="agent hit HTTP 402 (out of API credits) — excluded from stats, not a void">out of credits${t.n_out_of_credits > 1 ? ` ×${t.n_out_of_credits}` : ""}</span>`;
       } else if (voided) {
         statusCell = `<span class="void-badge" title="${escapeHtml(t.void_reason || "voided")}">VOID${t.n_void > 1 ? ` ×${t.n_void}` : ""}</span>`;
       } else {
         statusCell = `<span class="badge complete">complete</span>`;
       }
-      // dim only finalized-and-voided rows; a running row stays full-strength
-      const dim = voided && st !== "running" ? " voided" : "";
+      // dim finalized-and-voided rows; out-of-credits rows dim too (no result to show)
+      const dim = (voided || outOfCredits) && st !== "running" ? " voided" : "";
       return `<tr class="run${dim}" data-leaf="${escapeHtml(t.leaf_id)}" data-ticker="${escapeHtml(t.ticker)}">
         <td><b>${escapeHtml(t.ticker)}</b></td>
         <td>${t.n_trades}</td>

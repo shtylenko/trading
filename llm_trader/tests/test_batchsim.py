@@ -143,6 +143,56 @@ def test_audit_passes_clean_commands(tmp_path, monkeypatch):
     assert rows and rows[0]["n"] == 1 and rows[0]["n_void"] == 0
 
 
+# --- out-of-credits: an infra failure (HTTP 402), NOT a look-ahead void ---
+
+def test_text_out_of_credits_detector():
+    assert batchsim._text_out_of_credits("HTTP 402: Insufficient Balance")
+    assert batchsim._text_out_of_credits("...\nInsufficient balance\n")
+    assert batchsim._text_out_of_credits("error: insufficient credits")
+    assert not batchsim._text_out_of_credits("step next\nrecorder log\nOBSERVE")
+    assert not batchsim._text_out_of_credits("")
+    assert not batchsim._text_out_of_credits(None)
+
+
+def test_audit_marks_out_of_credits_not_void(tmp_path, monkeypatch):
+    # No command log (agent never ran), BUT its captured log shows HTTP 402 → the run
+    # is tagged out_of_credits and excluded from stats, not voided as unverifiable.
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    tag, sid, name = "b4", "20250102000000-TK-abc123", "batchsim-b4-TK-2025-01-02-r0"
+    d = _fake_session(tmp_path, tag, sid=sid)
+    logdir = tmp_path / "_batch" / tag
+    logdir.mkdir(parents=True, exist_ok=True)
+    (logdir / f"{name}.log").write_text("[exit 0]\n===== STDOUT =====\nHTTP 402: Insufficient Balance\n")
+    (logdir / "manifest.jsonl").write_text(
+        json.dumps({"sid": sid, "session_name": name, "status": "out-of-credits"}) + "\n")
+    monkeypatch.setattr(batchsim, "_resolve_batch_commands", lambda sids: {sid: None})
+
+    assert batchsim.audit(tag) == 0  # not counted as a void
+    s = json.loads((d / "session.json").read_text())
+    assert s.get("out_of_credits")   # tagged
+    assert not s.get("void")         # and NOT voided
+
+    # excluded from metrics: n_out_of_credits surfaced, run not in n_planned/n_traded
+    view = recorder.get_top_session_view(tag)  # leaves group under the batch tag
+    assert view["metrics"]["n_out_of_credits"] == 1
+    assert view["metrics"]["n_planned"] == 0
+    assert view["tickers"][0]["status"] == "out_of_credits"
+
+
+def test_run_one_stamps_out_of_credits(tmp_path, monkeypatch):
+    # _run_one detects the 402 in agent output and stamps the session out_of_credits.
+    sdir = tmp_path / "20250102000000-TK-abc123"
+    sdir.mkdir()
+    (sdir / "session.json").write_text(json.dumps(
+        {"id": sdir.name, "status": "complete", "ticker": "TK",
+         "historical_date": "2025-01-02", "void": "stale-should-be-cleared"}))
+    monkeypatch.setattr(recorder, "finalize", lambda p: None)
+    batchsim._stamp_out_of_credits(sdir)
+    s = json.loads((sdir / "session.json").read_text())
+    assert s["out_of_credits"] and "void" not in s
+
+
 def test_resolve_batch_commands_matches_session_by_sid(monkeypatch):
     # two runs; each hermes session's export contains that run's unique SDIR
     sid_a, sid_b = "20250101090000-AAA-111111", "20250101090100-BBB-222222"

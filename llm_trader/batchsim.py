@@ -121,6 +121,19 @@ _READ_VERB_RE = re.compile(
     r"\b(?:cat|head|tail|less|more|nl|od|xxd|hexdump|strings|grep|egrep|awk|sed|cut|"
     r"sort|uniq|wc|python|python3|open|read_text|readlines|load)\b")
 
+# The hermes API prints this (and exits 0) when the account has no balance. The agent
+# never runs a single tool call, so its session has no command log — which the audit
+# would otherwise mis-void as "unverifiable". This is an infrastructure failure, NOT a
+# look-ahead: we tag it `out_of_credits` and exclude it from stats instead of voiding.
+_OUT_OF_CREDITS_RE = re.compile(
+    r"HTTP\s*402|Insufficient\s+Balance|insufficient\s+(?:funds|credits?|balance)", re.I)
+_OUT_OF_CREDITS_LABEL = "out of credits (HTTP 402)"
+
+
+def _text_out_of_credits(text: Optional[str]) -> bool:
+    """True if agent output shows the account ran out of API credits."""
+    return bool(text and _OUT_OF_CREDITS_RE.search(text))
+
 
 def _latest_version() -> str:
     """Return the highest semver key from the skill registry (e.g. '2.0.3')."""
@@ -351,12 +364,14 @@ def _summarize_session(sid: Optional[str]) -> str:
 def _completed_counts(tag: str) -> dict[tuple, int]:
     """(ticker, date) → number of **clean** finalized sessions for this batch.
 
-    Voided sessions do NOT count as done, so ``--resume`` re-runs a setup whose only
-    prior attempt was audit-voided instead of leaving you a tainted cohort."""
+    Voided and out-of-credits sessions do NOT count as done, so ``--resume`` re-runs a
+    setup whose only prior attempt was audit-voided or died on HTTP 402 (out of
+    credits) instead of leaving you a tainted or incomplete cohort."""
     counts: dict[tuple, int] = defaultdict(int)
     for d in _sessions_for_batch(tag):
         s = recorder._load_json(d / "session.json", {}) or {}
-        if s.get("status") == "complete" and not s.get("void"):
+        if (s.get("status") == "complete"
+                and not s.get("void") and not s.get("out_of_credits")):
             counts[(s.get("ticker"), s.get("historical_date"))] += 1
     return counts
 
@@ -429,6 +444,11 @@ def _run_one(work: dict) -> dict:
             recorder.finalize(sdir)
         except Exception as e:  # noqa: BLE001 — never let finalize sink the batch
             extra["finalize_error"] = str(e)
+        if status == "out-of-credits":
+            # Stamp the session so the audit / viewer treat it as an infra failure
+            # (excluded from stats) rather than a look-ahead void. Done after finalize,
+            # which rewrites session.json.
+            _stamp_out_of_credits(sdir)
         base = {"item": work["item"], "session_name": name, "sid": sid,
                 "ticker": work["ticker"], "date": work["date"], "rep": work["rep"],
                 "status": status}
@@ -461,6 +481,10 @@ def _run_one(work: dict) -> dict:
             f"[exit {proc.returncode}]\n===== STDOUT =====\n{stdout}\n"
             f"===== STDERR =====\n{stderr}\n"
         )
+        # hermes exits 0 even when the API is out of credits (it just prints an
+        # HTTP 402), so check the output, not the return code, for this case.
+        if _text_out_of_credits(f"{stdout}\n{stderr}"):
+            return _result("out-of-credits", returncode=proc.returncode, log=str(log_path))
         return _result("ok" if proc.returncode == 0 else "err",
                        returncode=proc.returncode, log=str(log_path))
     except FileNotFoundError:
@@ -587,8 +611,14 @@ def run(
                         print(summ, file=sys.stderr)
 
     n_void = audit(tag)
+    n_ooc = sum(r.get("status") == "out-of-credits" for r in results)
     print(f"\nbatch {tag} done: {sum(r['status']=='ok' for r in results)}/{len(results)} "
-          f"agents ok, {n_void} sessions voided by audit", file=sys.stderr)
+          f"agents ok, {n_void} sessions voided by audit"
+          + (f", {n_ooc} out of credits (excluded, not void)" if n_ooc else ""),
+          file=sys.stderr)
+    if n_ooc:
+        print(f"⚠️  {n_ooc} run(s) hit HTTP 402 (out of API credits) and never traded — "
+              "top up credits and re-run with --resume to fill them in.", file=sys.stderr)
 
     # Loud guard: if (nearly) every finalized session voided as *unverifiable*, the
     # hermes export / --continue contract almost certainly isn't satisfied — the report
@@ -903,6 +933,38 @@ def _command_lines(commands: str) -> list[str]:
     return out
 
 
+def _stamp_out_of_credits(sdir: Path) -> None:
+    """Mark a finalized session as an out-of-credits infra failure (not a void)."""
+    sj = Path(sdir) / "session.json"
+    s = recorder._load_json(sj, {}) or {}
+    s["out_of_credits"] = _OUT_OF_CREDITS_LABEL
+    s.pop("void", None)  # a run is never both out-of-credits and voided
+    atomic_write_json(sj, s, indent=2)
+
+
+def _agent_log_for(tag: str, session_name: Optional[str]) -> Optional[Path]:
+    """The captured agent log for one run, if present (BATCH_LOGS/<tag>/<name>.log)."""
+    if not session_name:
+        return None
+    p = BATCH_LOGS / tag / f"{session_name}.log"
+    return p if p.exists() else None
+
+
+def _ran_out_of_credits(tag: str, session: dict, session_name: Optional[str]) -> bool:
+    """True if this run's session is already stamped out-of-credits, or its captured
+    agent log shows the API ran out of balance (retroactive detection for batches run
+    before the stamp existed)."""
+    if session.get("out_of_credits"):
+        return True
+    p = _agent_log_for(tag, session_name)
+    if not p:
+        return False
+    try:
+        return _text_out_of_credits(p.read_text(encoding="utf-8", errors="ignore"))
+    except OSError:
+        return False
+
+
 def audit(tag: str) -> int:
     """Void any session in the batch whose executed tool-call commands show look-ahead
     or a determinism break, or that can't be verified. Returns the number voided.
@@ -910,24 +972,38 @@ def audit(tag: str) -> int:
     The command source is the structured `hermes sessions export` tool calls for each
     run's session (located by the unique SDIR it contains) — NOT the free-form
     transcript, so the agent quoting its own rules no longer false-positives. A session
-    with no retrievable command log is voided as *unverifiable* rather than trusted.
+    with no retrievable command log is voided as *unverifiable* rather than trusted —
+    UNLESS its agent never ran because the API was out of credits (HTTP 402), which is
+    an infrastructure failure tagged `out_of_credits` and excluded from stats, not a
+    look-ahead void.
     """
     sessions = [d for d in _sessions_for_batch(tag)
                 if (recorder._load_json(d / "session.json", {}) or {}).get("status") == "complete"]
     cmd_map = _resolve_batch_commands([d.name for d in sessions])
+    # sid → session_name, so a run with no command log can still be matched to its
+    # captured agent log to distinguish out-of-credits from genuinely unverifiable.
+    name_map = {r.get("sid"): r.get("session_name") for r in _load_manifest(tag)}
     voided = 0
     for d in sessions:
         session = recorder._load_json(d / "session.json", {}) or {}
         commands = cmd_map.get(d.name)
+        if commands is None and _ran_out_of_credits(tag, session, name_map.get(d.name)):
+            # Infra failure, not a peek: mark out-of-credits, never void.
+            session["out_of_credits"] = _OUT_OF_CREDITS_LABEL
+            session.pop("void", None)
+            atomic_write_json(d / "session.json", session, indent=2)
+            continue
         reason = (
             "no agent command log to verify (unverifiable)"
             if commands is None else _scan_commands(commands)
         )
+        # A run that now has a real command log is no longer an out-of-credits stub.
+        stale_ooc = session.pop("out_of_credits", None) is not None
         if reason:
             session["void"] = reason
             atomic_write_json(d / "session.json", session, indent=2)
             voided += 1
-        elif session.pop("void", None) is not None:
+        elif session.pop("void", None) is not None or stale_ooc:
             atomic_write_json(d / "session.json", session, indent=2)  # now clean
     return voided
 

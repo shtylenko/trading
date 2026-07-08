@@ -385,3 +385,9 @@ header {
   color: var(--red); border: 1px solid var(--red); background: #2a1414;
   cursor: help;
 }
+
+/* Out of API credits: an infrastructure failure (HTTP 402), distinct from a
+   look-ahead void — amber/neutral, not red, and never counted against the run. */
+.badge.out-of-credits {
+  background: #2a2214; border-color: #6a5a2a; color: #d9b25a; cursor: help;
+}

@@ -6,6 +6,8 @@ import json
 import sqlite3
 from datetime import datetime
 
+import pytest
+
 from trading.llm_trader import batchsim, recorder, skillmeta
 
 
@@ -330,6 +332,61 @@ def test_resume_excludes_voided(tmp_path, monkeypatch):
     # a voided attempt must NOT count as done, so resume will re-run this slot
     counts = batchsim._completed_counts(tag)
     assert counts.get(("TK", "2025-01-02"), 0) == 0
+
+
+def test_resume_excludes_out_of_credits(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    tag = "b6"
+    d = _fake_session(tmp_path, tag, sid="s1-TK-aaa111")
+    s = json.loads((d / "session.json").read_text())
+    s["out_of_credits"] = "out of credits (HTTP 402)"
+    (d / "session.json").write_text(json.dumps(s))
+    # an out-of-credits run never traded — it must NOT count as done, so --resume re-runs it
+    assert batchsim._completed_counts(tag).get(("TK", "2025-01-02"), 0) == 0
+
+
+def test_existing_session_id_recovers_top_level_for_resume(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    tag = "b7"
+    d = _fake_session(tmp_path, tag, sid="20250102000000-TK-aaa111")
+    # tag the leaf with its top-level session id (what recorder.init stores)
+    s = json.loads((d / "session.json").read_text())
+    s["session"] = "20250102000000-BATCH-deadbe"
+    (d / "session.json").write_text(json.dumps(s))
+    # --resume must rejoin this exact top-level session, not fork a new one
+    assert batchsim._existing_session_id(tag) == "20250102000000-BATCH-deadbe"
+    assert batchsim._existing_session_id("no-such-tag") is None
+    # and the reverse: `--resume --session <id>` (no --tag) recovers the tag from it
+    assert batchsim._tag_for_session("20250102000000-BATCH-deadbe") == tag
+    assert batchsim._tag_for_session("no-such-session") is None
+
+
+def test_resume_recovers_config_from_batch_json(tmp_path, monkeypatch):
+    # `--resume --session <id>` with NO version/model/set: all recovered from batch.json.
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    tag = "9.9.9-20250102"
+    d = _fake_session(tmp_path, tag, sid="20250102000000-TK-aaa111")
+    s = json.loads((d / "session.json").read_text())
+    s["session"] = "20250102000000-BATCH-deadbe"
+    (d / "session.json").write_text(json.dumps(s))
+    ts = tmp_path / "myset.json"
+    ts.write_text(json.dumps({"setups": [
+        {"ticker": "TK", "date": "2025-01-02", "time_et": "09:35"}]}))
+    batchsim._write_batch_meta(tag, version="9.9.9", model="rec-model",
+                               testset=str(ts), repeats=1)
+    # archived skill for the recovered version must exist for run() to load it
+    monkeypatch.setattr(batchsim, "_archived_skill", lambda v: skillmeta.DEFAULT_SKILL_PATH)
+
+    # resume by session alone → recovers version/model/testset; dry-run so no agents spawn
+    out = batchsim.run(resume=True, session="20250102000000-BATCH-deadbe", dry_run=True)
+    assert out == tag  # rejoined the right batch
+
+
+def test_run_requires_model_without_resume():
+    # a fresh (non-resume) run still needs a model
+    with pytest.raises(SystemExit):
+        batchsim.run("2.0.2", dry_run=True)
 
 
 def test_scan_commands_denylist_allows_benign_shell():

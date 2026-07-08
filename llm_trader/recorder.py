@@ -1052,7 +1052,9 @@ def list_sessions() -> list[dict]:
         for d, ss in items:
             res = ss.get("result") or {}
             tickers.add(ss.get("ticker"))
-            if ss.get("status") == "complete":
+            # "complete" = finalized AND ran; an out-of-credits run finalized as an
+            # empty stub but never ran, so it does not count toward progress.
+            if ss.get("status") == "complete" and not _is_out_of_credits(ss):
                 n_complete += 1
             if res.get("traded"):
                 total_pnl += res.get("realized_pnl", 0) or 0.0
@@ -1299,17 +1301,18 @@ def get_top_session_view(sess_id: str) -> dict:
         res = s.get("result") or {}
         td = tickers[t]
         td["ticker"] = t
-        # progress: is this leaf finalized, still running, or stale (abandoned)?
+        # progress: is this leaf finalized-and-ran, still running, stale (abandoned),
+        # or out-of-credits (terminal, but never actually ran — so NOT "complete")?
         td["n_leaves"] += 1
-        if entry.get("status") == "complete":
+        if _is_out_of_credits(s):
+            td["n_out_of_credits"] += 1   # terminal; neither complete nor running
+        elif entry.get("status") == "complete":
             td["n_complete"] += 1
         elif entry.get("stale"):
             td["stale_any"] = True
         else:
             td["running_any"] = True
-        if _is_out_of_credits(s):
-            td["n_out_of_credits"] += 1
-        elif _is_void(s):
+        if _is_void(s):
             td["n_void"] += 1
             if not td["void_reason"]:
                 td["void_reason"] = str(s.get("void"))
@@ -1330,16 +1333,16 @@ def get_top_session_view(sess_id: str) -> dict:
         n = data["n_traded"]
         # win% is winning runs over traded runs — not over fills (see list_sessions).
         wr = round((data["wins"] / n * 100), 1) if n > 0 else None
-        # per-ticker rollup status: running while any leaf is still live, else complete
-        # (stale = a running leaf whose files went quiet, treated as abandoned;
-        # out_of_credits = every leaf died on HTTP 402 without trading — infra failure).
+        # per-ticker rollup status. "complete" means at least one leaf actually ran
+        # and finalized; a ticker whose only leaves hit HTTP 402 never ran, so it is
+        # "out_of_credits", NOT complete. (stale = a running leaf whose files went
+        # quiet, treated as abandoned.)
         if data["running_any"]:
             tstatus = "running"
-        elif (data["n_out_of_credits"] > 0 and data["n_traded"] == 0
-              and data["n_void"] == 0):
-            tstatus = "out_of_credits"
-        elif data["n_complete"] >= data["n_leaves"] and data["n_leaves"] > 0:
+        elif data["n_complete"] > 0:
             tstatus = "complete"
+        elif data["n_out_of_credits"] > 0:
+            tstatus = "out_of_credits"
         elif data["stale_any"]:
             tstatus = "stale"
         else:

@@ -452,13 +452,28 @@ function renderHeader(view) {
   document.getElementById("h-date").textContent =
     `${sess.historical_date || ""} · run ${sess.real_run_ts || ""}`;
 
+  // An out-of-credits run finalized as an empty stand-down (status "complete"), but it
+  // never actually ran — the API hit HTTP 402. Show that plainly instead of "complete /
+  // no trade", which would misrepresent an infra failure as a disciplined result.
+  const outOfCredits = !!sess.out_of_credits;
+
   const statusEl = document.getElementById("h-status");
-  statusEl.textContent = `${sess.mode || "simulated"} ${sess.status || "running"}`;
-  statusEl.className = `badge ${sess.status === "complete" ? "complete" : "running"}`;
+  if (outOfCredits) {
+    statusEl.textContent = `${sess.mode || "simulated"} · out of credits`;
+    statusEl.className = "badge out-of-credits";
+    statusEl.title = "agent hit HTTP 402 (out of API credits) — never ran; excluded from stats, not a void";
+  } else {
+    statusEl.textContent = `${sess.mode || "simulated"} ${sess.status || "running"}`;
+    statusEl.className = `badge ${sess.status === "complete" ? "complete" : "running"}`;
+    statusEl.title = "";
+  }
 
   const badge = document.getElementById("h-pnl");
   badge.className = "badge";
-  if (pnl && pnl.traded) {
+  if (outOfCredits) {
+    badge.textContent = "out of credits";
+    badge.classList.add("out-of-credits");
+  } else if (pnl && pnl.traded) {
     let txt = `${pnl.realized_pnl >= 0 ? "+" : ""}$${pnl.realized_pnl}  ·  ${pnl.r_multiple}R  ·  ${pnl.win ? "WIN" : "LOSS"}`;
     if (pnl.mae_per_share != null) txt += `  ·  MAE -${pnl.mae_per_share}`;
     badge.textContent = txt;

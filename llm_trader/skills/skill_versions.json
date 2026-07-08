@@ -37,5 +37,9 @@
     "bumped_from": "2.2.0",
     "content_hash": "sha256:1be9d2d1",
     "first_seen": "2026-07-07T22:26:45"
+  },
+  "2.3.0": {
+    "content_hash": "sha256:a70a7f01",
+    "first_seen": "2026-07-08T13:42:39"
   }
 }

@@ -492,12 +492,73 @@ def _run_one(work: dict) -> dict:
                 "status": "no-hermes", "error": "`hermes` CLI not found on PATH"}
 
 
+def _existing_session_id(tag: str) -> Optional[str]:
+    """The top-level session id (``…-BATCH-<hex>``) already used by this batch's
+    leaves, so ``--resume`` rejoins the original batch in the viewer instead of
+    forking a new top-level session. None if the batch has no leaves yet."""
+    for d in _sessions_for_batch(tag):
+        sid = (recorder._load_json(d / "session.json", {}) or {}).get("session")
+        if sid:
+            return sid
+    return None
+
+
+def _tag_for_session(session_id: str) -> Optional[str]:
+    """The batch `tag` (cohort key for manifest/logs) behind a top-level session id,
+    recovered from that session's leaves — so `--resume --session <id>` works without
+    also passing --tag. None if no leaf carries that session id."""
+    for _, s in recorder.iter_sessions():
+        if s.get("session") == session_id and s.get("batch"):
+            return s.get("batch")
+    return None
+
+
 def run(
-    version: Optional[str] = None, *, model: str, testset: Path = TESTSET_DEFAULT, parallel: int = 4,
+    version: Optional[str] = None, *, model: Optional[str] = None,
+    testset: Optional[Path] = None, parallel: int = 4,
     repeats: int = 1, tag: Optional[str] = None, timeout: int = 900,
-    resume: bool = False, dry_run: bool = False,
+    resume: bool = False, dry_run: bool = False, session: Optional[str] = None,
 ) -> str:
     """Run the batch: spawn agents for every (setup × repeat), then audit + report."""
+    # ── Resolve the batch identity FIRST (before touching skill/testset) so a --resume
+    # can recover the batch's recorded config. A batch is keyed internally by its `tag`
+    # (manifest/logs/batch.json) and displayed under its top-level `session` id
+    # (…-BATCH-…). Name it by EITHER; the missing one is derived from the other's
+    # existing leaves — so `--resume --session <id>` needs no --tag, and vice versa.
+    if session and not tag:
+        tag = _tag_for_session(session)
+        if tag:
+            print(f"--session {session}: resolved batch tag {tag}", file=sys.stderr)
+        elif resume:
+            raise SystemExit(
+                f"cannot resume: no existing runs found for session {session} "
+                "(nothing to derive the batch tag from). Check the session id, or "
+                "pass --tag as well.")
+
+    # On --resume, fill in version / model / testset / repeats from what the batch
+    # recorded in batch.json, so you don't have to repeat them. Explicit CLI values win.
+    if resume:
+        if not tag:
+            raise SystemExit("cannot resume without a batch to resume — pass --session "
+                             "<id> or --tag <tag>.")
+        bmeta = _read_batch_meta(tag)
+        if not bmeta:
+            raise SystemExit(f"cannot resume: no recorded batch config (batch.json) for "
+                             f"tag {tag}.")
+        version = version or bmeta.get("version")
+        model = model or bmeta.get("model")
+        if testset is None and bmeta.get("testset"):
+            testset = Path(bmeta["testset"])
+        if repeats == 1 and isinstance(bmeta.get("repeats"), int):
+            repeats = bmeta["repeats"]
+        print(f"--resume: using version={version} model={model} "
+              f"set={testset} repeats={repeats} (from batch.json)", file=sys.stderr)
+
+    if not model:
+        raise SystemExit("--model is required (resume did not recover one from batch.json).")
+    if testset is None:
+        testset = TESTSET_DEFAULT
+
     # Source the skill from the LIVE working copy by default so a batch tests the
     # current rules. Its text is inlined into every agent prompt (see _prompt), so
     # the agent never reads a skill file — that agent-side file read is exactly what
@@ -512,10 +573,19 @@ def run(
               file=sys.stderr)
     skill_text = skill_path.read_text(encoding="utf-8")
     setups = load_testset(testset)
+
     tag = tag or f"{version}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-    # Top-level session always gets a long unique ID (like leaf session IDs).
-    # The `tag` is a human-readable name/label.
-    session_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}-BATCH-{secrets.token_hex(3)}"
+
+    if session:
+        session_id = session
+    elif resume and (recovered := _existing_session_id(tag)):
+        session_id = recovered
+        print(f"--resume: rejoining existing session {session_id}", file=sys.stderr)
+    else:
+        session_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}-BATCH-{secrets.token_hex(3)}"
+        if resume:
+            print(f"--resume: no existing leaves for tag {tag}; starting fresh session "
+                  f"{session_id}", file=sys.stderr)
 
     # exact-setup pinning requires time_et on every row; a missing one would silently
     # revert to an unseeded same-day pick (the finding-5 bug). Fail loudly instead.
@@ -579,7 +649,7 @@ def run(
     # accurate planned total (len(setups)×repeats, not len(work) which drops resumed
     # items) from the moment it starts — before any session finalizes.
     _write_batch_meta(
-        tag, version=version, model=model,
+        tag, version=version, model=model, testset=str(testset),
         planned=len(setups) * repeats, repeats=repeats,
         started_ts=datetime.now().isoformat(timespec="seconds"),
         finished_ts=None, status="running",
@@ -642,6 +712,18 @@ def run(
 
 def _batch_meta_path(tag: str) -> Path:
     return BATCH_LOGS / tag / "batch.json"
+
+
+def _read_batch_meta(tag: str) -> dict:
+    """The batch's recorded config (version, model, testset, repeats, …) from
+    batch.json, so --resume can recover what to run. Empty dict if none."""
+    p = _batch_meta_path(tag)
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) or {}
+    except (json.JSONDecodeError, OSError, TypeError):
+        return {}
 
 
 def _write_batch_meta(tag: str, **fields) -> None:
@@ -1033,12 +1115,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pb.add_argument("--db", default=str(ENTRIES_DB))
 
     pr = sub.add_parser("run", help="spawn agents for one version/batch")
-    pr.add_argument("--version", help="skill version to pin (archived); defaults to latest in registry")
-    pr.add_argument("--model", required=True, help="hermes model id (the local executor)")
-    pr.add_argument("--set", dest="testset", default=str(TESTSET_DEFAULT))
+    pr.add_argument("--version", help="skill version to pin (archived); defaults to latest "
+                    "in registry. On --resume, recovered from the batch if omitted.")
+    pr.add_argument("--model", help="hermes model id (the local executor). Required for a "
+                    "new batch; on --resume, recovered from the batch if omitted.")
+    pr.add_argument("--set", dest="testset", default=None,
+                    help="testset JSON (default: the bundled set). On --resume, recovered "
+                    "from the batch if omitted.")
     pr.add_argument("--parallel", type=int, default=4)
     pr.add_argument("--repeats", type=int, default=1)
-    pr.add_argument("--tag", help="batch cohort tag (default: <version>-<timestamp>)")
+    pr.add_argument("--tag", help="batch cohort tag (default: <version>-<timestamp>). "
+                    "Optional when --session identifies an existing batch to resume.")
+    pr.add_argument("--session", help="top-level session id (…-BATCH-<hex>) to (re)join. "
+                    "With --resume you can pass this ALONE (no --tag) to resume that "
+                    "batch; the tag, version, model and testset are recovered from it.")
     pr.add_argument("--timeout", type=int, default=900, help="per-setup seconds")
     pr.add_argument("--resume", action="store_true", help="skip already-finalized items")
     pr.add_argument("--dry-run", action="store_true",
@@ -1060,9 +1150,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         write_testset(setups, Path(args.out), args.seed)
         print(f"wrote {len(setups)} setups → {args.out}")
     elif args.cmd == "run":
-        run(args.version, model=args.model, testset=Path(args.testset),
+        run(args.version, model=args.model,
+            testset=Path(args.testset) if args.testset else None,
             parallel=args.parallel, repeats=args.repeats, tag=args.tag,
-            timeout=args.timeout, resume=args.resume, dry_run=args.dry_run)
+            timeout=args.timeout, resume=args.resume, dry_run=args.dry_run,
+            session=args.session)
     elif args.cmd == "audit":
         n = audit(args.tag)
         print(f"voided {n} session(s) in batch {args.tag}")

@@ -9,6 +9,23 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
 
 ---
 
+### 2.5.0 — objectify the §B.2 soft-bailout OR-chain  ⏳ CANDIDATE — NOT YET VALIDATED
+- **Hypothesis:** after entry (2.3.0) and stop (2.4.0) were objectified, the last big
+  feel-call multiplying R is the manage-step-2 exit. The prose OR-chain ("failed break /
+  lost VWAP / topping tail / MACD rollover / time stop") let two runs disagree on *whether
+  the break failed*, producing different exits from the same tape. Replace with an **ordered
+  4-predicate ladder** over revealed fields + own state — (a) failed break `c<break_level`
+  (`k≤1`); (b) lost VWAP `c<vwap` (`k≥2`); (c) topping-tail (red + tested new high +
+  `upper_wick≥2×body` and `≥0.5×stop_dist`); (d) time stop (`k≥5`, no new high, `<¼R` green).
+  MACD removed as a stand-alone exit (§4 confirmation only). New state: `break_level`,
+  `made_nh_since_entry`.
+- **Expected delta:** lower run-to-run exit variance; fewer premature MACD-noise bails
+  (should *help* MFE-capture / median R); crisper failed-break exits (should cut avg loser).
+- **Test:** ⏳ **pending.** Requires a paired 100-set batch vs the 2.4.x baseline through
+  `batchsim compare` (blocked: hermes out of credits as of 2026-07-08). **2.4.1 remains the
+  accepted baseline until this passes the gate.** Archived at `archive/TRADE_SIMULATOR@2.5.0.md`.
+- **Decision:** ⏳ HOLD — do not treat as promoted; run `compare --a 2.4.x-<batch> --b 2.5.0-<batch>` first.
+
 ### 2.4.1 — fix broken canon path + report hygiene (non-behavioral)
 - **Change:** point the skill's strategy-doc reference at the real path
   `library/ross_cameron/all_content_structured.md` (was a broken

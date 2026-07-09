@@ -74,11 +74,15 @@ Promotion gate: paired mean ΔR > 0 **and** (sign-test p<0.05 or bootstrap 95% C
 
 ## TIER 3 — next rule change (drafted; validate via the new gate)
 
-- [ ] **3A. Objectify the soft-bailout OR-chain (§B.2)** — all three reviewers name this the next
+- [~] **3A. Objectify the soft-bailout OR-chain (§B.2)** — all three reviewers name this the next
   "variance dragon": entry/stop are now formulas but the manage-step-2 exit is still a prose
   OR-list ("failed break / lost VWAP / topping tail / MACD rollover / time stop"). Convert to a
   strict priority list of boolean predicates over revealed bars, as crisp as the stop formula.
   Minor bump (2.5.0). **Requires a paid validation batch through `batchsim compare` before promotion.**
+  **DRAFTED & SHIPPED as candidate 2.5.0** (4-predicate ladder a–d; MACD off the ladder; new state
+  `break_level`/`made_nh_since_entry`; RULE_TRACE `manage.soft_bailout_ladder`; CHANGELOG entry
+  marked ⏳ CANDIDATE). Archived. **Still needs the paired 100-set `compare` vs 2.4.x — BLOCKED on
+  hermes credits. 2.4.1 stays the accepted baseline until it passes.**
 - [ ] **3B.** (candidate, after 3A) objectify free-trade BE timing on the fill bar — agents
   currently freestyle when the stop jumps to break-even.
 

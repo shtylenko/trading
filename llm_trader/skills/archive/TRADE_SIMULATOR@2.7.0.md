@@ -1,6 +1,6 @@
 ---
 name: trade-simulator
-version: 2.4.1
+version: 2.7.0
 description: Paper-trade ONE recorded setup live, minute by minute — stream its 1-min bars at one tick per wall-clock minute and make Ross Cameron momentum long-side entry/management/exit decisions in real time, then write a trade journal. Use when the user wants to "simulate trading", "paper trade", or "trade a setup" from llm_trader.
 ---
 
@@ -270,9 +270,17 @@ The agent drives this loop automatically: reveal bar N, decide, log, reveal bar 
 repeat. No user prompting between bars.
 
 Keep a small **state**: `position ∈ {flat, long}`, `shares`, `avg_entry`, `stop`,
-`high_water` (best price since entry), `realized_pnl`, `bars_since_entry`,
-`re_entries_used` (0; caps at 1 per §C), `armed_trigger` (a buy-stop level you set
-on a *previous* bar, or none — §A), a rolling **5-minute candle** aggregate
+`high_water` (best price since entry), `realized_pnl`, `bars_since_entry` (**your own**
+count; the bar you filled on is `0`), `re_entries_used` (0; caps at 1 per §C),
+`armed_trigger` (a buy-stop level you set on a *previous* bar, or none — §A),
+`break_level` (**the price you bought** — your `armed_trigger` for an armed fill, or
+your fill close `avg_entry` for a confirmed-close entry; the §B.2 failed-break test
+reads this — note it is *never* the bar's high), `made_nh_since_entry`
+(bool — `true` once **any completed bar with `k ≥ 1` closes above your entry bar's
+high** (`c > entry-bar h`); pure arithmetic on your own state — do **not** read the
+tick's `new_high` flag for this, it is measured against `session_high` and breaks for
+§C re-entries below the day's high; the §B.2 time stop reads this), a rolling
+**5-minute candle** aggregate
 (`bars5` — §B.5), and a running bar index `i` (starts at 0). Persist each turn with `recorder log` (below) —
 that file is your durable journal, so you don't keep one in your head.
 
@@ -536,10 +544,10 @@ disciplined outcome; journal why).
 **PER-BAR PROCEDURE — on every bar while long, walk this list top-to-bottom and act on
 the FIRST item that applies, then log and move to the next bar:**
 1. Hard stop hit (`l ≤ stop`)? → **exit all at `stop`**, trade over.
-2. Soft bailout (failed break: entry/next bar closed back below the break level / closed below VWAP / topping-tail rejection / MACD rollover+price / time stop)? → **exit all at close**, trade over.
-3. Not yet at break-even and price popped ~+$0.10? → **raise stop to `avg_entry`** (free trade).
+2. Soft bailout — walk the §B.2 **predicate ladder** (failed break → lost VWAP → topping-tail rejection → time stop); the first predicate `true` on the *closed* bar → **exit all at close**, trade over.
+3. `stop < avg_entry` and `high_water ≥ avg_entry + min($0.10, stop_distance/3)`? → **raise stop to `avg_entry`** (free trade, §B.3).
 4. Reached a scale level (+1R, then +2R / resistance)? → **sell ⅓** there, stop to break-even.
-5. Holding the runner and a completed red **5-min** candle closed below the prior green 5-min candle's low? → **sell the remainder at close**.
+5. Holding the runner and a completed red **5-min** candle closed below the **most recent completed green** 5-min candle's low (skip intervening reds)? → **sell the remainder at close**.
 6. (Optional) strong continuation and you have conviction? → **add** (pyramid), then re-anchor the stop.
 7. None of the above → **hold**, log `OBSERVE`.
 
@@ -548,33 +556,50 @@ behind the scale levels as its last item):
 
 1. **HARD STOP (intra-bar, highest priority)** — if `l ≤ stop`, you are **out at
    `stop`**. No close check; the level was hit. This is the bailout.
-2. **SOFT BAILOUT (close-confirmed, exit all)** if, on the *closed* bar, any of:
-   - **failed break (breakout-or-bailout — check this FIRST, on the entry bar and the
-     bar after it)**: the bar **closes back below the level you bought** (your
-     `armed_trigger`, or the breakout bar's high for a close entry). Cameron's
-     decision tree is literal: *entry candle closes green AND above the breakout
-     level → hold; anything else → bail immediately.* The pattern gets 1–2 bars to
-     prove itself — do not wait for VWAP to be lost or the hard stop to be hit; a
-     break that doesn't hold is already a failed pattern and the cheapest exit is
-     **now**, or
-   - price **closes back below VWAP** after the move (`above_vwap` flips false) —
-     trend broken, or
-   - a **large red candle / topping tail** rejects a push (big upper wick: `h` far
-     above `c`, bar red) — distribution into strength, or
-   - **MACD rolls over** — `macd_hist` clearly negative on **2+ consecutive closed
-     bars** / `macd` crosses below
-     `macd_signal` after the move: momentum has faded (one bar of negative histogram
-     on a 1-min feed is noise — require persistence). On its own this is a *tighten
-     the stop / take profits into it* signal (a confirmation, per §4.6), not a
-     stand-alone panic exit — combine it with price (lost VWAP, red rejection), or
-   - **time stop**: **5+ bars since *your own* fill** (count from your entry bar in
-     your state — not the tick's `bars_since_entry`, per the callout above) **and**
-     the position has **not made a new high** since entry **and** is not meaningfully
-     green ("almost immediate resolution" — if it just sits, get out).
-3. **FREE TRADE (move to break-even early)** — the "10-cent" rule. If, within the
-   **first bar or two** after entry, your `high_water` (best price since entry)
-   reaches ~**avg_entry + $0.10** (or +~1/3 of your stop_distance, whichever comes
-   first) and price holds, **raise the stop to your `avg_entry`**. Now the trade is risk-free ("essentially a free trade"), so a fade
+2. **SOFT BAILOUT — the predicate ladder (close-confirmed, exit all at `c`).**
+   On every *completed* bar while `long`, evaluate the four predicates **in order**;
+   the **first** one that is `true` exits the whole position at the bar's close, trade
+   over. Every predicate reads only revealed fields and your own state
+   (`avg_entry`, `stop_distance`, `break_level`, `bars_since_entry`, `high_water`,
+   `made_nh_since_entry`) — **no feel-call.** This objectifies Cameron's
+   breakout-or-bailout tree into a reproducible ladder (why: two runs of the same
+   version diverged on "did the break fail?" — see `IMPROVING.md` §2).
+
+   Let `k = bars_since_entry` (your own count; the bar you filled on is `k = 0`).
+
+   - **(a) Failed break** — *only while `k ≤ 1`* (the entry bar and the one after):
+     `c < break_level`. The bar closed back below the price you bought → the pattern
+     failed; the cheapest exit is now. Cameron's tree is literal: *entry candle closes
+     green AND above the breakout level → hold; anything else → bail.* Do **not** wait
+     for VWAP loss or the hard stop. (`break_level` semantics per Step 2: armed fill →
+     `armed_trigger`, so `k = 0` *can* fire — the bar that touched your trigger closed
+     back below it; confirmed-close fill → `avg_entry`, so on `k = 0` the predicate is
+     trivially false — `c = avg_entry` — and the test effectively runs on `k = 1`:
+     did the next bar close back through the price you paid.)
+   - **(b) Lost VWAP** — *only while `k ≥ 2`* (after the break has had its 1–2 bars):
+     `c < vwap` (i.e. `above_vwap` is false) on the completed bar → trend broken, exit.
+   - **(c) Topping-tail rejection** — a completed **red** bar that tested a new high and
+     got sold. All four must hold, with `upper_wick = h − max(o, c)` and
+     `body = |c − o|`:
+     `c < o` **and** `h ≥ high_water` **and** `upper_wick ≥ 2 × body` **and**
+     `upper_wick ≥ 0.5 × stop_distance`. (A real distribution wick off the highs, not a
+     one-tick noise wick.)
+   - **(d) Time stop** — `k ≥ 5` **and** `made_nh_since_entry` is false **and**
+     `c < avg_entry + 0.25 × stop_distance` (five bars, no new high, not even ¼R green →
+     "almost immediate resolution" failed; stop paying the time premium).
+
+   **MACD is deliberately NOT on this ladder.** `macd_hist < 0` on **2+ consecutive
+   closed bars** is, on its own, a *tighten-the-stop-to-break-even / take-profits-into-it*
+   confirmation (§4), **never** a stand-alone soft-bailout trigger — one bar of negative
+   histogram on a 1-min feed is noise, and a genuine momentum failure will already trip
+   (b) lost-VWAP or (c) red-rejection. Never bail on MACD alone.
+3. **FREE TRADE (move to break-even early)** — the "10-cent" rule, as a single
+   predicate checked on **every** completed bar while long (no "first bar or two"
+   window — the earliest bar it fires on is the one that moves the stop):
+   `stop < avg_entry` **and** `high_water ≥ avg_entry + min($0.10, stop_distance / 3)`
+   → **raise the stop to `avg_entry`**. `high_water` is intra-bar (best `h` since
+   your fill), so a touch counts — there is no additional "price holds" condition.
+   Now the trade is risk-free ("essentially a free trade"), so a fade
    back through entry takes you out flat instead of at a full stop. This is *before*
    any scale-out and is the single biggest cut to average-loss size. Never move the
    stop back down.
@@ -604,8 +629,11 @@ behind the scale levels as its last item):
      `c` = last bar's `c`, `v` = Σ`v`. A 5-min candle is **complete** only when
      you've revealed its last 1-min bar (or the stream ends).
    - **Exit signal**: the first **completed red 5-min candle** that closes below
-     the prior **green 5-min candle's low** → sell the remainder at the current
-     1-min bar's `c`.
+     the low of the **most recent completed GREEN 5-min candle** — "prior green"
+     means exactly that: walk back from the current candle and take the first green
+     one you hit, **skipping any intervening red candles** (so a two-red-candle
+     collapse still compares against the last green's low and the exit can always
+     fire). Sell the remainder at the current 1-min bar's `c`.
    - Everything else stays on the 1-min feed: the hard break-even stop, scale-out
      touch levels, the VWAP soft bailout. The runner is already risk-free behind
      the break-even stop — giving it 5-min room risks nothing below your entry.
@@ -648,8 +676,14 @@ on its own merits, not revenge).
 **Cooldown (mandatory): a re-entry is never the same fight re-joined.** After any
 exit — failed-break bailout, stop-out, or soft bailout — you must see **at least 3
 full bars flat** before entering again, and those bars must show a **fresh base**:
-holding above VWAP (or, for the sub-VWAP trap, the completed washout structure),
-with green-vol dominance re-established. Re-entering 1–2 bars after a bailout into
+- for the above-VWAP patterns: each cooldown bar closes `above_vwap`;
+- for the sub-VWAP trap, a **completed washout structure**: track
+  `washout_low` = the lowest `l` printed while `above_vwap` was false since your
+  exit; the structure is complete when the 3 cooldown bars' lows all hold at/above
+  `washout_low` (the flush has stopped making new lows);
+- in both cases **green-vol dominance re-established** — the exact §A volume test
+  as written there (green-bar vol > red-bar vol over the last ~5 bars).
+Re-entering 1–2 bars after a bailout into
 the same chop is exactly the pattern that loses — the first exit told you the tape
 is choppy, and the corpus's answer to chop is *fewer* entries, not faster ones. If
 the setup can't survive a 3-bar wait, it was never an A-setup.

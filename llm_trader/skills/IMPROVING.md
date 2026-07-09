@@ -78,9 +78,11 @@ Start from **which repeated-state decision is unstable and expensive**:
 6. **Then** check the canon and write a thesis. Invent the rule from the top
    disagreement cluster, not from intuition about Cameron.
 
-Known remaining feel-calls (as of v2.4, from the review): the **soft-bailout OR-chain
-(§B.2)** — top priority; **free-trade BE timing on the fill bar**; grade-B
-"decisively"; "A+ bar" late morning; scale "or first clear resistance".
+Known remaining feel-calls (as of v2.6): **scale "or first clear resistance"** (which
+level counts as the first resistance is still a judgment call); pyramiding "conviction" /
+"healthy rvol_bar" (§B.6); "still near the trigger" in the not-extended box. (The v2.4-era
+list — soft-bailout OR-chain, free-trade BE timing, grade-B "decisively", "A+ bar" —
+was objectified in 2.5.0/2.6.0; see CHANGELOG.)
 
 ---
 
@@ -96,6 +98,34 @@ delta and expected metric movement; the dev setups you'll inspect. Then:
 - `diff` against the previous `archive/TRADE_SIMULATOR@<prev>.md` snapshot.
 - Batch-harness prompt changes in `batchsim.py` that affect agent behavior count as
   skill changes — bump too (see `MAINTAINING.md`).
+
+### 4.1 Pre-batch clarity review (mandatory before any PAID batch)
+
+Before a candidate goes to a paid validation batch, run an **executing-model clarity
+review** of the full skill text: give a fresh LLM (ideally the same model that runs the
+batches) the prompt at `peer_reviews/skill_clarity_review_prompt.md` and have it read
+the candidate `TRADE_SIMULATOR.md` cold.
+
+Why this is a gate, not a nicety: the 2.5.0 candidate shipped with a structural bug —
+`break_level` defined as the breakout bar's high made the failed-break predicate fire
+on the fill bar of every confirmed-close entry — that the author (who "knew what was
+meant") could not see. The review caught it *before* a batch was paid for; without it,
+the comparison would have measured the bug, not the hypothesis. Author blindness to
+own drafts is exactly what a cold reader is for.
+
+Protocol:
+1. Run the review on the **candidate** text (post-edit, pre-batch).
+2. Triage findings the way 2.6.0 did: accept / accept-the-problem-change-the-fix /
+   reject — and **hold the reviewer to the same constraints** (no new tuned
+   thresholds, no strategy redesign, prefer predicates over revealed fields). A
+   reviewer suggestion is a *finding*, not a patch to apply verbatim.
+3. Fold accepted fixes into the same candidate version **before** it batches (a
+   clarity fix to an un-batched candidate is a rewrite of that candidate, not a new
+   hypothesis — bundle freely; §2's one-hypothesis rule applies to *behavioral*
+   theses, not to de-ambiguification of their wording).
+4. Log in `CHANGELOG.md` which findings were accepted and which rejected (and why) —
+   rejected findings are precedent for the next reviewer pass.
+5. Only then spend on the batch.
 
 ---
 
@@ -117,6 +147,7 @@ to one representative per key (prefers a completed non-void non-ooc leaf).
 → **excluded from the pair** but reported as a guardrail.
 
 **Promotion bar (all must hold):**
+- [ ] Candidate passed the **pre-batch clarity review** (§4.1) before its batch ran.
 - [ ] Same model, same testset file, pinned archived versions, **≥ 80 paired keys**
       (use the 100-set; the 30-set is smoke only).
 - [ ] Paired **mean ΔR > 0** and **median ΔR ≥ 0**.

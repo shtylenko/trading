@@ -1,6 +1,6 @@
 ---
 name: trade-simulator
-version: 2.4.1
+version: 2.8.0
 description: Paper-trade ONE recorded setup live, minute by minute — stream its 1-min bars at one tick per wall-clock minute and make Ross Cameron momentum long-side entry/management/exit decisions in real time, then write a trade journal. Use when the user wants to "simulate trading", "paper trade", or "trade a setup" from llm_trader.
 ---
 
@@ -213,9 +213,13 @@ read.) Score the four measurable pillars:
   (`rvol` 2–5×, float ≥ 10M, or gap 5–10%), **or** `entry_time` is at/after
   **11:30 ET** (late-morning follow-through is the corpus's weakest window; the
   hard no-fresh-entry rule at 12:00 ET still applies on top). Trade it, but **only
-  on a flawless trigger**: every entry-checklist box must pass *decisively* — no
-  borderline judgment calls, no "fractionally above VWAP", no rationalizing a
-  wick. When in doubt on a B, stand down. A soft-pillar miss is a *caution flag*,
+  on a flawless trigger** — concretely, two boxes tighten (the binary boxes
+  `new_high` / `above_vwap` / green pass at their nominal true/false values; do
+  **not** re-judge them):
+  - **volume**: `green_vol_sum ≥ 1.3 × red_vol_sum` over the same 5-completed-bar
+    window (not merely `>`), and if `rvol_bar` is populated, `rvol_bar ≥ 2.0`;
+  - **candle shape**: `h − c < (h − l)/4` (tighter than the standard ⅓ wick rule).
+  When either tightened box fails, stand down. A soft-pillar miss is a *caution flag*,
   not a disqualifier — B-grade setups with clean triggers are still profitable;
   what the grade buys you is refusing the *sloppy* trigger on a weak setup.
 - **Grade C (hard gate — structural, not judgment)** — `entry_px` outside
@@ -403,11 +407,11 @@ next bar.**
 - [ ] `new_high` is true (this bar makes a new session high — the break)
 - [ ] bar is **green** (`c ≥ o`)
 - [ ] `above_vwap` is true
-- [ ] **volume expansion**: green-bar volume > red-bar volume over the last ~5 bars — **and** `rvol_bar ≳ 1.5–2×` *once it is populated* (see the null-rvol note below; a null `rvol_bar` on the early bars does **not** fail this box)
+- [ ] **volume expansion**: green-bar volume > red-bar volume over the **last 5 completed bars** (or all revealed bars when fewer than 5 exist) — **and** `rvol_bar ≥ 1.5` *once it is populated* (see the null-rvol note below; a null `rvol_bar` on the early bars does **not** fail this box)
 - [ ] **clean candle shape**: closes in the upper part of its range, `h − c < (h − l)/3` (no topping tail)
 - [ ] **not extended**: this bar is the trigger (first bar all boxes align), or price is still near it — **not** a 3rd–4th bar *past a confirmed trigger* (see "Which bar is the breakout")
-- [ ] **time OK**: before ~10:30–11:00 ET (or an A+ bar if later); **never** a fresh entry at/after 12:00 ET
-- [ ] **MACD not against you**: `macd_hist ≥ 0` (if clearly negative, stand down)
+- [ ] **time OK**: bar `time` **< 10:30 ET** → pass; **10:30 ≤ time < 12:00 ET** → pass only on an **A+ bar** (every other box passes AND `rvol_bar ≥ 2.0` — it is always populated by then); **time ≥ 12:00 ET** → hard fail, never a fresh entry
+- [ ] **MACD not against you**: `macd_hist ≥ 0` on the closed trigger bar (`macd_hist < 0` fails this box — binary, no "barely negative" reading)
 
 Each box is explained below. Confirm them on the current (closed) bar before committing:
 
@@ -415,10 +419,11 @@ Each box is explained below. Confirm them on the current (closed) bar before com
 - bar is **green** (`c >= o`), **and**
 - `above_vwap` is true (uptrend confirmation), **and**
 - **volume expansion** — the recent **green bars carry more volume than the red bars**
-  (buyers in control, not distribution — §9), **and** `rvol_bar` is clearly elevated
-  (**≳1.5–2×**) *once it exists*. To judge the green/red half concretely: over roughly
-  the **last ~5 revealed bars**, sum `v` on the green bars (`c ≥ o`) vs the red bars
-  (`c < o`) — green total should be the larger.
+  (buyers in control, not distribution — §9), **and** `rvol_bar ≥ 1.5` (single
+  threshold, no range) *once it exists*. To judge the green/red half concretely:
+  over the **last 5 completed bars** (or all revealed bars when fewer than 5 exist —
+  exact count, not "roughly"), sum `v` on the green bars (`c ≥ o`) and the red bars
+  (`c < o`) — pass requires `green_vol_sum > red_vol_sum`.
   > **Null `rvol_bar` (critical — this is where the early breakout gets missed).**
   > `rvol_bar` is each bar's volume ÷ a **trailing-20-bar** average, so it is `null`
   > until ~20 bars have been revealed — i.e. for most of the prime 9:30–10:00 window
@@ -427,7 +432,7 @@ Each box is explained below. Confirm them on the current (closed) bar before com
   > judge participation from it alone and take the trigger. Do **not** stand down on an
   > otherwise-perfect breakout merely because `rvol_bar` hasn't warmed up yet; that
   > waits out the entire early move and forces a late, wide-stop chase. Apply the
-  > `≳1.5–2×` threshold only on bars where `rvol_bar` is actually populated. **And**
+  > `≥ 1.5` threshold only on bars where `rvol_bar` is actually populated. **And**
 - **clean candle shape — the bar held its break** ("let it break, hold, then enter"
   — §18). The breakout bar must **close in the upper portion of its range** (upper
   wick < ~⅓ of the bar's range, i.e. `h − c < (h − l)/3`). A **topping tail /
@@ -449,16 +454,24 @@ Each box is explained below. Confirm them on the current (closed) bar before com
 
 **Time-of-day (volume fades late morning).** These are morning gap-ups, so most
 breakouts fire early. But follow-through weakens as the session ages: the open and
-first ~90 minutes are prime; after **~10:30–11:00 ET** volume dries up and breakouts
-fade. If the `time` on your breakout bar is late morning, demand an A+ bar (strong
-`rvol_bar`, clean green, well clear of VWAP) or **stand down**. Never open a fresh
-momentum entry around/after **12:00 ET**.
+first ~90 minutes are prime; late morning volume dries up and breakouts fade. The
+gate is a single numeric ladder — no reading between the lines:
+
+- `time < 10:30 ET` — normal window, the box passes.
+- `10:30 ≤ time < 12:00 ET` — pass **only on an A+ bar**, defined as: **every other
+  entry-checklist box passes at its stated threshold AND `rvol_bar ≥ 2.0`** (by this
+  hour `rvol_bar` is always populated — bar ~20+ — so no null fallback applies).
+  Anything less: **stand down**.
+- `time ≥ 12:00 ET` — **hard fail.** Never a fresh momentum entry, regardless of bar
+  quality.
 
 **MACD confirmation (filter, not a trigger — §4.6):** do **not** enter *against* the
-MACD. Prefer `macd_hist ≥ 0` (MACD line at/above signal). If `macd_hist` is clearly
-negative (a fresh bearish crossover / fading momentum) while the criteria above
-fire, treat the breakout as suspect — demand a cleaner bar or stand down. Never let a
-positive MACD *alone* pull you into a trade; it only confirms a pattern already firing.
+MACD. The test is binary: `macd_hist ≥ 0` on the closed trigger bar → box passes;
+`macd_hist < 0` → box fails, no entry on this bar (a later bar with `macd_hist ≥ 0`
+and all other boxes passing is a fresh, valid trigger). No "barely negative" carve-out
+— that judgment call is exactly the divergence this checklist exists to kill. Never
+let a positive MACD *alone* pull you into a trade; it only confirms a pattern already
+firing.
 
 If all hold → **GO LONG** (confirmed-close mode), fill at this bar's `c` — **this
 close is your `avg_entry`** (not `anchor_px`).
@@ -496,7 +509,7 @@ entry with the rule that fired.
 
 When flat and you can see a setup **coiling** on the bars you've already revealed —
 a 1–3 bar micro-pullback or flat base holding **above VWAP**, green-bar volume still
-dominant over the last ~5 bars, `macd_hist ≥ 0`, time-of-day OK, not extended —
+dominant over the last 5 completed bars (the §A test), `macd_hist ≥ 0`, time-of-day OK, not extended —
 **arm a buy-stop** instead of waiting for the breakout bar to close:
 
 - `armed_trigger = (high of the base / the session_high being coiled under) + $0.01`

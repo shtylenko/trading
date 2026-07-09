@@ -1,5 +1,12 @@
 # Skill clarity review — TRADE_SIMULATOR.md
 
+> **Standing gate** — this review is a mandatory pre-batch step for every candidate
+> version (`skills/IMPROVING.md` §4.1). Run it on the candidate text with a fresh LLM
+> before spending on a validation batch. Track record: the first pass (2026-07-08)
+> caught a structural `break_level` bug in the un-batched 2.5.0 draft plus 13
+> ambiguities → folded into 2.6.0. Reviewer suggestions are findings, not patches —
+> triage them against the constraints below.
+
 You are reviewing an instruction document that **you yourself will execute**. Read it as
 the agent who has to act on it, bar by bar, in real time.
 

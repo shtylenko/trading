@@ -74,7 +74,7 @@ Promotion gate: paired mean ΔR > 0 **and** (sign-test p<0.05 or bootstrap 95% C
 
 ## TIER 3 — next rule change (drafted; validate via the new gate)
 
-- [~] **3A. Objectify the soft-bailout OR-chain (§B.2)** — all three reviewers name this the next
+- [x] **3A. Objectify the soft-bailout OR-chain (§B.2)** — all three reviewers name this the next
   "variance dragon": entry/stop are now formulas but the manage-step-2 exit is still a prose
   OR-list ("failed break / lost VWAP / topping tail / MACD rollover / time stop"). Convert to a
   strict priority list of boolean predicates over revealed bars, as crisp as the stop formula.
@@ -82,9 +82,21 @@ Promotion gate: paired mean ΔR > 0 **and** (sign-test p<0.05 or bootstrap 95% C
   **DRAFTED & SHIPPED as candidate 2.5.0** (4-predicate ladder a–d; MACD off the ladder; new state
   `break_level`/`made_nh_since_entry`; RULE_TRACE `manage.soft_bailout_ladder`; CHANGELOG entry
   marked ⏳ CANDIDATE). Archived. **Superseded by 2.6.0** (external clarity review caught a
-  `break_level` bug in the 2.5.0 draft + 13 other ambiguities — see CHANGELOG 2.6.0; both
-  validate together). **Still needs the paired 100-set `compare` vs 2.4.x — BLOCKED on
-  hermes credits. 2.4.1 stays the accepted baseline until it passes.**
+  `break_level` bug in the 2.5.0 draft + 13 other ambiguities — see CHANGELOG 2.6.0).
+  **VALIDATED 2026-07-09 → ❌ REJECT** (`compare 2.4.0-20260708181528 2.6.0-20260708224608`,
+  94 keys: mean ΔR −0.046, median 0, 17/30/47, sign-p 0.079). Avg loser improved ($−15→$−12)
+  but stood-down rose (10→14) and the ladder clips runners → net flat-negative.
+  **2.4.1 remains the accepted baseline.**
+- [~] **3A-follow. Decompose the 2.6.0 REJECT.** The bundle mixed (i) bug fix + de-ambiguification,
+  (ii) bailout-ladder objectification, (iii) entry-gate *tightening* (Grade-B thresholds, A+
+  `rvol≥2.0`, binary MACD). REJECT was broad-small-negative + more stand-downs. **BUILT off 2.4.1
+  (2026-07-09):** **(3A-i = 2.7.0)** exit-side only — bailout ladder + `break_level` bug fix +
+  free-trade predicate + runner "prior green" + washout; entry verbatim 2.4.1.
+  **(3A-ii = 2.8.0)** entry-side only — exact volume window, `rvol≥1.5`, time ladder + A+ def,
+  binary MACD, Grade-B thresholds; manage/exit verbatim 2.4.1. `2.7.0 ⊕ 2.8.0 ≈ 2.6.0`. Both
+  archived. **NEXT: §4.1 clarity-review pass on each, then a paid `compare` vs the 2.4.0 baseline
+  batch.** Whichever half shows a broad mean ΔR > 0 is the keeper; recombine winners after.
+  `break_level` fix is in 2.7.0 (correctness, not a lever). 2.4.1 stays the accepted baseline.
 - [ ] **3B.** (candidate, after 3A) objectify free-trade BE timing on the fill bar — agents
   currently freestyle when the stop jumps to break-even.
 

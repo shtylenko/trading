@@ -9,7 +9,33 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
 
 ---
 
-### 2.5.0 — objectify the §B.2 soft-bailout OR-chain  ⏳ CANDIDATE — NOT YET VALIDATED
+### 2.6.0 — clarity-review fixes (external LLM review of the skill text)  ⏳ CANDIDATE — NOT YET VALIDATED
+- **Source:** an executing-model clarity review (prompt: `peer_reviews/skill_clarity_review_prompt.md`)
+  returned 14 findings; all were judged genuine, ~half of the suggested fixes were modified.
+- **Bug fix (the big one):** 2.5.0's `break_level` for a confirmed-close entry was defined as
+  "the breakout bar's high" → ladder (a) `c < break_level` fired **on the fill bar itself**
+  (`c < h` on any wicked candle). Now `break_level = avg_entry` for confirmed-close
+  (`armed_trigger` for armed fills, where k=0 firing is correct).
+- **Definitions pinned (were fuzzy → now single-reading):** `made_nh_since_entry` = any `k≥1`
+  bar `c >` entry-bar `h` (not the session-anchored `new_high` flag); volume window = exactly
+  the last 5 completed bars; `rvol_bar ≥ 1.5` (was "≳1.5–2×"); time gate = `<10:30` /
+  `10:30–<12:00` A+ only / `≥12:00` never, with **A+ defined** (all boxes + `rvol_bar ≥ 2.0`);
+  MACD box strictly binary (dropped "clearly negative"); free-trade BE = every-bar predicate
+  `high_water ≥ avg_entry + min($0.10, stop_dist/3)` (dropped "first bar or two" + "price
+  holds"); Grade B "decisively" = green_vol ≥ 1.3× red_vol + wick < ¼ range, binary boxes at
+  nominal; runner "prior green" = most recent completed green 5-min candle (skip reds);
+  re-entry "washout structure" = cooldown lows hold ≥ tracked `washout_low`; stop formula
+  scoped to confirmed-close (armed keeps arm-time stop).
+- **Rejected from the review:** 10%-parity caution flag (new tuned threshold); 2-consecutive-bar
+  MACD entry rule (new rule, no canon warrant for entries); tick-`new_high` for
+  `made_nh_since_entry` (breaks re-entries); adjacency reading of "prior green" (dead zone);
+  "rvol ≥ 1.5 also satisfies" re-entry loosening.
+- **Test:** ⏳ **pending** — supersedes 2.5.0 as the candidate; both validate together in ONE
+  paired 100-set batch vs 2.4.x when hermes credits return. **2.4.1 remains the accepted
+  baseline.** Archived at `archive/TRADE_SIMULATOR@2.6.0.md` (`sha256:ee6f108e`).
+- **Decision:** ⏳ HOLD — run `compare --a 2.4.x-<batch> --b 2.6.0-<batch>` first.
+
+### 2.5.0 — objectify the §B.2 soft-bailout OR-chain  ⚠️ SUPERSEDED by 2.6.0 (never batched; contained the `break_level` bug above)
 - **Hypothesis:** after entry (2.3.0) and stop (2.4.0) were objectified, the last big
   feel-call multiplying R is the manage-step-2 exit. The prose OR-chain ("failed break /
   lost VWAP / topping tail / MACD rollover / time stop") let two runs disagree on *whether

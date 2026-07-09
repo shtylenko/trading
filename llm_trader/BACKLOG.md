@@ -81,7 +81,9 @@ Promotion gate: paired mean ΔR > 0 **and** (sign-test p<0.05 or bootstrap 95% C
   Minor bump (2.5.0). **Requires a paid validation batch through `batchsim compare` before promotion.**
   **DRAFTED & SHIPPED as candidate 2.5.0** (4-predicate ladder a–d; MACD off the ladder; new state
   `break_level`/`made_nh_since_entry`; RULE_TRACE `manage.soft_bailout_ladder`; CHANGELOG entry
-  marked ⏳ CANDIDATE). Archived. **Still needs the paired 100-set `compare` vs 2.4.x — BLOCKED on
+  marked ⏳ CANDIDATE). Archived. **Superseded by 2.6.0** (external clarity review caught a
+  `break_level` bug in the 2.5.0 draft + 13 other ambiguities — see CHANGELOG 2.6.0; both
+  validate together). **Still needs the paired 100-set `compare` vs 2.4.x — BLOCKED on
   hermes credits. 2.4.1 stays the accepted baseline until it passes.**
 - [ ] **3B.** (candidate, after 3A) objectify free-trade BE timing on the fill bar — agents
   currently freestyle when the stop jumps to break-even.

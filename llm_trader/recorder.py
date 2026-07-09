@@ -121,8 +121,13 @@ class PositionEngine:
         dq: Optional[int],
         stop: Optional[float],
         close: Optional[float],
+        low: Optional[float] = None,
     ) -> tuple[Optional[dict], dict]:
-        """Process one decision. Returns (action_row or None, timeline_row)."""
+        """Process one decision. Returns (action_row or None, timeline_row).
+
+        ``low`` is the bar's low, used for MAE (max adverse excursion) — the worst
+        the position sat through is an *intra-bar* level, so it is measured from the
+        bar low, not the close. Falls back to ``close`` when a low isn't supplied."""
         action = action or "OBSERVE"
         has_fill = bool(dq)
         self._validate_action(i, action, has_fill, dq)
@@ -180,8 +185,14 @@ class PositionEngine:
             if (self.shares and close is not None)
             else 0.0
         )
-        if self.shares > 0 and close is not None:
-            vs_entry = close - self.avg_entry
+        # MAE is intra-bar: measure the worst excursion from the bar LOW (the deepest
+        # heat the open position actually sat through), not the close. Skip the entry
+        # bar itself — a confirmed-close entry fills at that bar's close, so its low is
+        # PRE-entry and never real heat. Only bars strictly after entry count.
+        mae_ref = low if low is not None else close
+        if (self.shares > 0 and mae_ref is not None
+                and self.entry_i is not None and i > self.entry_i):
+            vs_entry = mae_ref - self.avg_entry
             if vs_entry < self.worst_price_vs_entry:
                 self.worst_price_vs_entry = vs_entry
         timeline_row = {
@@ -544,6 +555,7 @@ def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
     """Average-cost position/P&L walk using PositionEngine. Returns (actions, timeline, pnl)."""
     date_str = meta["date"]
     close_by_i = {b["i"]: b["c"] for b in bars}
+    low_by_i = {b["i"]: b.get("l") for b in bars}
 
     engine = PositionEngine()
     actions: list[dict] = []
@@ -557,8 +569,9 @@ def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
         dq = d.get("shares_delta")
         stop = d.get("stop")
         close = close_by_i.get(i)
+        low = low_by_i.get(i)
 
-        action_row, timeline_row = engine.step(i, hhmm, action, fill, dq, stop, close)
+        action_row, timeline_row = engine.step(i, hhmm, action, fill, dq, stop, close, low)
 
         # fill epoch times (kept out of engine for pure time math)
         if action_row is not None:
@@ -1155,10 +1168,22 @@ def _is_out_of_credits(s: dict) -> bool:
     return bool(s.get("out_of_credits"))
 
 
+def _resolved_slots(members: list[dict]) -> set:
+    """(ticker, historical_date) slots that have a genuinely completed, non-void,
+    non-out-of-credits leaf. `--resume` reruns a failed slot into a NEW leaf directory
+    without deleting the old stub, so a stale out-of-credits/void leaf can outlive the
+    clean run that superseded it — this tells the metrics/badges which stubs to ignore."""
+    return {
+        (m.get("ticker"), m.get("historical_date")) for m in members
+        if m.get("status") == "complete" and not _is_void(m) and not _is_out_of_credits(m)
+    }
+
+
 def _compute_batch_metrics(members: list[dict]) -> dict:
     """Compute clean and effective metrics for a top-level batch from list of member session views.
     members are the dicts from _session_entry (have 'result', possibly 'live_pnl', 'void').
     """
+    resolved = _resolved_slots(members)
     clean_rs: list[float] = []
     effective_rs: list[float] = []
     n_planned = 0
@@ -1168,6 +1193,13 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
     n_traded = 0
     total_pnl = 0.0
     for m in members:
+        slot = (m.get("ticker"), m.get("historical_date"))
+        # A void/out-of-credits leaf whose slot was later resolved by a clean --resume
+        # run is a stale historical stub, not a result — exclude it entirely (the
+        # resolved leaf already contributes its own counts), so old failed attempts
+        # stop lingering in aggregate stats/badges after a successful resume.
+        if (_is_void(m) or _is_out_of_credits(m)) and slot in resolved:
+            continue
         # Out-of-credits runs are infra failures, not results: exclude entirely
         # (no penalty, not a stand-down) so expectancy/PF/win-rate stay clean over
         # the runs that actually executed.
@@ -1220,6 +1252,9 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
     # sequence drawdown using deterministic order by leaf id (stable across runs)
     ordered_eff = []
     for m in sorted(members, key=lambda x: x.get("id", "")):
+        slot = (m.get("ticker"), m.get("historical_date"))
+        if (_is_void(m) or _is_out_of_credits(m)) and slot in resolved:
+            continue  # stale stub superseded by a later resume — not a real result
         if _is_out_of_credits(m):
             continue  # infra failure — not part of the traded sequence
         if _is_void(m):
@@ -1424,8 +1459,19 @@ def report_by_version(
         b = buckets.setdefault(ver, {
             "version": ver, "n": 0, "wins": 0, "stood_down": 0, "n_void": 0,
             "n_out_of_credits": 0,
-            "pnl": 0.0, "r_sum": 0.0, "cap_sum": 0.0, "cap_n": 0, "hashes": set(),
+            "pnl": 0.0, "r_sum": 0.0, "eff_r_sum": 0.0, "eff_n": 0,
+            "cap_sum": 0.0, "cap_n": 0, "hashes": set(),
+            "batches": set(), "models": set(),
         })
+        # Track the batch tags and models feeding this version's row, so the printer can
+        # warn when a version is aggregated across multiple cohorts (mixing batches/models
+        # makes the row invalid for ranking — use `batchsim compare` for that).
+        sbtag = session.get("batch") or pnl.get("batch")
+        if sbtag:
+            b["batches"].add(sbtag)
+        bmeta = _batch_meta(sbtag) if sbtag else {}
+        if bmeta.get("model"):
+            b["models"].add(bmeta["model"])
         h = pnl.get("skill_hash") or session.get("skill", {}).get("content_hash")
         if h:
             b["hashes"].add(h)
@@ -1437,9 +1483,13 @@ def report_by_version(
         if session.get("void") or pnl.get("void"):
             b["n_void"] += 1          # audit-tainted → excluded from stats
             continue
+        # Effective R (deployment view): stood-down counts as 0R, so a version can't look
+        # good merely by refusing marginal-but-profitable trades. Traded uses realized R.
+        b["eff_n"] += 1
         if not pnl.get("traded"):
             b["stood_down"] += 1
             continue
+        b["eff_r_sum"] += pnl.get("r_multiple") or 0.0
         b["n"] += 1
         b["wins"] += 1 if pnl.get("win") else 0
         b["pnl"] += pnl.get("realized_pnl") or 0.0
@@ -1463,8 +1513,11 @@ def report_by_version(
             "n_out_of_credits": b["n_out_of_credits"],
             "win_pct": round(100 * b["wins"] / n) if n else None,
             "pnl": round(b["pnl"], 2),
-            "avg_r": round(b["r_sum"] / n, 2) if n else None,
+            "avg_r": round(b["r_sum"] / n, 2) if n else None,          # clean (traded only)
+            "eff_r": round(b["eff_r_sum"] / b["eff_n"], 2) if b["eff_n"] else None,  # deployment
             "avg_capture": round(b["cap_sum"] / b["cap_n"], 2) if b["cap_n"] else None,
+            "n_batches": len(b["batches"]),
+            "n_models": len(b["models"]),
             "hashes": sorted(b["hashes"]),
         })
     rows.sort(key=lambda r: r["version"])
@@ -1475,10 +1528,13 @@ def _print_report(rows: list[dict]) -> None:
     if not rows:
         print("no finalized sessions to report")
         return
-    print(f"{'version':<14}{'n':>4}{'win%':>6}{'P&L':>10}{'avgR':>7}{'capt':>6}  notes")
+    # cleanR = mean R over traded leaves; effR = deployment mean (stood-down = 0R).
+    print(f"{'version':<14}{'n':>4}{'win%':>6}{'P&L':>10}{'cleanR':>8}{'effR':>7}{'capt':>6}  notes")
+    mixed = False
     for r in rows:
         win = f"{r['win_pct']}%" if r["win_pct"] is not None else "—"
         avg = f"{r['avg_r']:.2f}" if r["avg_r"] is not None else "—"
+        eff = f"{r['eff_r']:.2f}" if r.get("eff_r") is not None else "—"
         cap = f"{r['avg_capture']:.2f}" if r.get("avg_capture") is not None else "—"
         pnl = f"${r['pnl']:.2f}"
         notes = []
@@ -1488,10 +1544,19 @@ def _print_report(rows: list[dict]) -> None:
             notes.append(f"⚠ {r['n_void']} void")
         if r.get("n_out_of_credits"):
             notes.append(f"⚠ {r['n_out_of_credits']} out-of-credits")
+        # A version aggregated across >1 batch or >1 model is NOT a valid ranking row.
+        if r.get("n_batches", 0) > 1:
+            notes.append(f"⚠ {r['n_batches']} batches MIXED"); mixed = True
+        if r.get("n_models", 0) > 1:
+            notes.append(f"⚠ {r['n_models']} models MIXED"); mixed = True
         if len(r["hashes"]) > 1:
             notes.append(f"⚠ {len(r['hashes'])} distinct hashes (drift)")
-        print(f"{r['version']:<14}{r['n']:>4}{win:>6}{pnl:>10}{avg:>7}{cap:>6}  "
+        print(f"{r['version']:<14}{r['n']:>4}{win:>6}{pnl:>10}{avg:>8}{eff:>7}{cap:>6}  "
               f"{', '.join(notes)}")
+    if mixed:
+        print("\n⚠  Rows marked MIXED aggregate multiple batches/models and are NOT valid "
+              "for ranking versions.\n   Rank a version pair with `batchsim compare --a <tagA> "
+              "--b <tagB>` (paired, one batch each).")
 
 
 # ───────────────────────────── CLI ──────────────────────────────────────────

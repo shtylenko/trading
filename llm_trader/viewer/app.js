@@ -1068,9 +1068,8 @@ async function main() {
   const topSessions = await loadAndRenderList() || [];
   const topIds = new Set(topSessions.map(s => s.id));
 
-  // Sessions header chip doubles as a refresh of the list
-  const tabSessions = document.getElementById("tab-sessions");
-  if (tabSessions) tabSessions.onclick = () => loadAndRenderList();
+  // "Sessions" header chip is now a plain link to the main viewer instance
+  // (http://127.0.0.1:8770/viewer/index.html) — no click handler needed.
 
   // Wire global refresh button
   const refreshList = document.getElementById("refresh-list-btn");

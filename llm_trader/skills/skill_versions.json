@@ -45,5 +45,9 @@
   "2.4.0": {
     "content_hash": "sha256:3a6a92ff",
     "first_seen": "2026-07-08T17:42:36"
+  },
+  "2.4.1": {
+    "content_hash": "sha256:aaf54b09",
+    "first_seen": "2026-07-08T21:39:14"
   }
 }

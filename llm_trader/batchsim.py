@@ -153,8 +153,16 @@ def _hhmm_after(t: str, after: str) -> bool:
     return (t or "") >= after
 
 
+def _load_keys(path: Path) -> set:
+    """(ticker, date) keys from an existing testset JSON — for --exclude holdouts."""
+    data = json.loads(Path(path).read_text())
+    setups = data.get("setups", data) if isinstance(data, dict) else data
+    return {(s["ticker"], s["date"]) for s in setups}
+
+
 def build_set(
-    n: int = 30, *, seed: int = 13, db: Path = ENTRIES_DB, after: str = "09:30"
+    n: int = 30, *, seed: int = 13, db: Path = ENTRIES_DB, after: str = "09:30",
+    exclude: Optional[set] = None,
 ) -> list[dict]:
     """Stratified, deterministic sample of ~``n`` setups from ``entries.db``.
 
@@ -164,16 +172,23 @@ def build_set(
     set every run, which is what makes version comparison apples-to-apples.
     Deduped to one setup per (ticker, date) so `step start --ticker --date` is
     unambiguous.
+
+    ``exclude`` is a set of ``(ticker, date)`` keys to leave out — pass the dev set's
+    keys to carve a **disjoint holdout** (see IMPROVING.md §6 / BACKLOG DX).
     """
+    exclude = exclude or set()
     with sqlite3.connect(str(db)) as conn:
         conn.row_factory = sqlite3.Row
         rows = [dict(r) for r in conn.execute("SELECT * FROM entries")]
     rows = [r for r in rows if _hhmm_after(r.get("time_et", ""), after)]
 
-    # dedupe to one per (ticker, date)
+    # dedupe to one per (ticker, date), skipping excluded keys
     seen: dict[tuple, dict] = {}
     for r in rows:
-        seen.setdefault((r["ticker"], r["date"]), r)
+        key = (r["ticker"], r["date"])
+        if key in exclude:
+            continue
+        seen.setdefault(key, r)
     rows = list(seen.values())
 
     def bucket(r: dict) -> tuple:
@@ -1098,6 +1113,138 @@ def _print_batch_report(tag: str) -> None:
     recorder._print_report(recorder.report_by_version(batch=tag))
 
 
+# ───────────────────────────── compare (the promotion gate) ──────────────────
+
+import math as _math
+
+
+def _leaves_by_key(tag: str) -> dict:
+    """One representative leaf per (ticker, date) for a batch, so resume duplicates and
+    void/out-of-credits stubs don't double-count. Prefers a completed, non-void,
+    non-out-of-credits leaf; else the most recent leaf. Returns {(ticker,date): pnl+flags}."""
+    best: dict = {}
+    for d in _sessions_for_batch(tag):
+        s = recorder._load_json(d / "session.json", {}) or {}
+        key = (s.get("ticker"), s.get("historical_date"))
+        if key == (None, None):
+            continue
+        p = recorder._load_json(d / "pnl.json", {}) or {}
+        rec = {
+            "void": bool(s.get("void")), "ooc": bool(s.get("out_of_credits")),
+            "status": s.get("status"), "ts": s.get("real_run_ts") or "",
+            "traded": bool(p.get("traded")), "r": p.get("r_multiple"),
+            "pnl": p.get("realized_pnl"), "win": bool(p.get("win")),
+        }
+        def clean(r): return r["status"] == "complete" and not r["void"] and not r["ooc"]
+        prev = best.get(key)
+        if (prev is None or (clean(rec) and not clean(prev))
+                or (clean(rec) == clean(prev) and rec["ts"] > prev["ts"])):
+            best[key] = rec
+    return best
+
+
+def _effective_r(rec: dict) -> Optional[float]:
+    """Deployment R for one leaf: traded → realized R; stood-down → 0R; void/ooc → None
+    (excluded from the pair). None if a completed traded leaf is missing its R."""
+    if rec["void"] or rec["ooc"] or rec["status"] != "complete":
+        return None
+    if not rec["traded"]:
+        return 0.0
+    return rec["r"] if isinstance(rec["r"], (int, float)) else None
+
+
+def _sign_test_p(n_up: int, n_down: int) -> Optional[float]:
+    """Two-sided binomial sign-test p-value (H0: p=0.5), ties excluded. None if no pairs."""
+    n = n_up + n_down
+    if n == 0:
+        return None
+    k = min(n_up, n_down)
+    tail = sum(_math.comb(n, i) for i in range(0, k + 1)) / (2 ** n)
+    return min(1.0, 2 * tail)
+
+
+def compare(tag_a: str, tag_b: str) -> dict:
+    """Paired promotion gate: is candidate B better than baseline A on shared setups?
+    A/B are batch tags. Pairs on (ticker,date), effective R (stood-down=0R, void/ooc
+    excluded), sign test, tail-guard, and per-batch guardrails."""
+    A, B = _leaves_by_key(tag_a), _leaves_by_key(tag_b)
+    keys = sorted(set(A) & set(B))
+    pairs = []  # (key, rA, rB, dR)
+    for k in keys:
+        ra, rb = _effective_r(A[k]), _effective_r(B[k])
+        if ra is None or rb is None:
+            continue
+        pairs.append((k, ra, rb, rb - ra))
+    drs = [p[3] for p in pairs]
+    n = len(drs)
+    mean_d = sum(drs) / n if n else 0.0
+    med_d = sorted(drs)[n // 2] if n else 0.0
+    up = sum(1 for x in drs if x > 0.05)
+    down = sum(1 for x in drs if x < -0.05)
+    eq = n - up - down
+    p_sign = _sign_test_p(up, down)
+    # tail-guard: does a handful of setups explain the whole positive delta?
+    pos = sorted((p for p in pairs if p[3] > 0), key=lambda p: -p[3])
+    sum_pos = sum(p[3] for p in pos)
+    top3_share = (sum(p[3] for p in pos[:3]) / sum_pos) if sum_pos > 0 else 0.0
+
+    def batch_stats(leaves: dict) -> dict:
+        vals = list(leaves.values())
+        traded = [r for r in vals if _effective_r(r) is not None and r["traded"]]
+        losers = [r["pnl"] for r in traded if not r["win"] and (r["pnl"] or 0) != 0]
+        return {
+            "n_keys": len(vals),
+            "void": sum(1 for r in vals if r["void"] and not r["ooc"]),
+            "ooc": sum(1 for r in vals if r["ooc"]),
+            "stood": sum(1 for r in vals if _effective_r(r) == 0.0 and not r["traded"]),
+            "avg_loser": (sum(losers) / len(losers)) if losers else None,
+        }
+
+    return {
+        "tag_a": tag_a, "tag_b": tag_b, "n_pairs": n,
+        "mean_dR": round(mean_d, 3), "median_dR": round(med_d, 3),
+        "better": up, "worse": down, "equal": eq, "sign_p": p_sign,
+        "top3_share": round(top3_share, 2),
+        "top_contributors": [(k, round(dr, 2)) for k, _, _, dr in
+                             sorted(pairs, key=lambda p: -abs(p[3]))[:8]],
+        "stats_a": batch_stats(A), "stats_b": batch_stats(B),
+    }
+
+
+def _print_compare(r: dict) -> None:
+    a, b = r["stats_a"], r["stats_b"]
+    print(f"=== compare  A(baseline)={r['tag_a']}  vs  B(candidate)={r['tag_b']} ===")
+    print(f"paired on {r['n_pairs']} shared setups (effective R; stood-down=0R; void/ooc excluded)\n")
+    print(f"  mean ΔR (B−A) : {r['mean_dR']:+.3f}")
+    print(f"  median ΔR     : {r['median_dR']:+.3f}")
+    print(f"  better/worse/≈: {r['better']} / {r['worse']} / {r['equal']}")
+    sp = f"{r['sign_p']:.4f}" if r["sign_p"] is not None else "—"
+    print(f"  sign-test p   : {sp}  (two-sided, ties excluded)")
+    print(f"  tail-guard    : top-3 winners = {int(r['top3_share']*100)}% of positive ΔR")
+    print("  top movers    : " + ", ".join(f"{k[0]} {dr:+.2f}" for k, dr in r["top_contributors"]))
+    print(f"\n  guardrails            A={r['tag_a']:<28} B={r['tag_b']}")
+    al_a = f"${a['avg_loser']:.0f}" if a['avg_loser'] is not None else "—"
+    al_b = f"${b['avg_loser']:.0f}" if b['avg_loser'] is not None else "—"
+    print(f"    keys / void / ooc   {a['n_keys']}/{a['void']}/{a['ooc']:<24} {b['n_keys']}/{b['void']}/{b['ooc']}")
+    print(f"    stood-down          {a['stood']:<28} {b['stood']}")
+    print(f"    avg loser           {al_a:<28} {al_b}")
+
+    # verdict (the gate: broad, significant, not tail-driven, guardrails not worse)
+    sig = r["sign_p"] is not None and r["sign_p"] < 0.05
+    broad = r["median_dR"] >= 0 and r["top3_share"] <= 0.5
+    guard_ok = (b["void"] <= a["void"] + 2 and b["ooc"] == 0)
+    if r["mean_dR"] > 0 and sig and broad and guard_ok:
+        verdict = "✅ ACCEPT — B is broadly better and clears the gate."
+    elif r["mean_dR"] > 0 and (sig or r["median_dR"] > 0):
+        verdict = ("🟡 INVESTIGATE — positive but not a clean pass "
+                   "(tail-driven, marginal significance, or a guardrail slipped).")
+    else:
+        verdict = "❌ REJECT — B is not a broad improvement over A."
+    print(f"\n  VERDICT: {verdict}")
+    if r["n_pairs"] < 80:
+        print(f"  ⚠  only {r['n_pairs']} paired setups — use the 100-set for a promotable result.")
+
+
 # ───────────────────────────── CLI ──────────────────────────────────────────
 
 
@@ -1113,6 +1260,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pb.add_argument("--seed", type=int, default=13)
     pb.add_argument("--out", default=str(TESTSET_DEFAULT))
     pb.add_argument("--db", default=str(ENTRIES_DB))
+    pb.add_argument("--exclude", action="append", default=[],
+                    help="testset JSON whose (ticker,date) keys to leave out; repeatable. "
+                    "Pass the dev set to carve a disjoint holdout (see IMPROVING.md §6).")
 
     pr = sub.add_parser("run", help="spawn agents for one version/batch")
     pr.add_argument("--version", help="skill version to pin (archived); defaults to latest "
@@ -1140,15 +1290,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
     prep = sub.add_parser("report", help="profitability for one batch cohort")
     prep.add_argument("--tag", required=True)
     prep.add_argument("--format", choices=["table", "json"], default="table")
+
+    pc = sub.add_parser("compare", help="paired promotion gate: candidate B vs baseline A")
+    pc.add_argument("--a", required=True, help="baseline batch tag (accepted version)")
+    pc.add_argument("--b", required=True, help="candidate batch tag")
+    pc.add_argument("--format", choices=["table", "json"], default="table")
     return p
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     if args.cmd == "build-set":
-        setups = build_set(n=args.n, seed=args.seed, db=Path(args.db))
+        exclude: set = set()
+        for p in args.exclude:
+            exclude |= _load_keys(Path(p))
+        setups = build_set(n=args.n, seed=args.seed, db=Path(args.db), exclude=exclude)
         write_testset(setups, Path(args.out), args.seed)
-        print(f"wrote {len(setups)} setups → {args.out}")
+        extra = f" (excluded {len(exclude)} keys)" if exclude else ""
+        print(f"wrote {len(setups)} setups → {args.out}{extra}")
     elif args.cmd == "run":
         run(args.version, model=args.model,
             testset=Path(args.testset) if args.testset else None,
@@ -1164,6 +1323,12 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(json.dumps(rows, indent=2))
         else:
             _print_batch_report(args.tag)
+    elif args.cmd == "compare":
+        result = compare(args.a, args.b)
+        if args.format == "json":
+            print(json.dumps(result, indent=2, default=list))
+        else:
+            _print_compare(result)
     return 0
 
 

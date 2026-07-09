@@ -1,7 +1,7 @@
 """Scan configuration — parameters for the Warrior entry scanner.
 
 Defaults encode Ross Cameron's documented thresholds for the small-account
-profile (see ``library/analyst_warrior_trading_strategy.md`` and ``SPEC.md``).
+profile (see ``library/ross_cameron/all_content_structured.md`` and ``SPEC.md``).
 """
 
 from __future__ import annotations

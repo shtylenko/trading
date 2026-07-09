@@ -1,0 +1,36 @@
+# RULE_TRACE — TRADE_SIMULATOR rule → Ross Cameron canon
+
+Every **behavioral** rule in `TRADE_SIMULATOR.md` must trace to the canon
+(`library/ross_cameron/all_content_structured.md`). **Update this table on every
+behavioral version bump** (it's a gate — see `IMPROVING.md` §1, §4).
+
+**Type** legend:
+- **direct** — the rule is Cameron's, stated ~as taught.
+- **operationalization** — our precise translation of a Cameron idea onto the 1-min
+  sealed feed (must say *how it maps* and, if it narrows his discretion, *why*).
+- **sim-constraint** — imposed by the simulator (fills, no L2, one position).
+- **guardrail** — empirical safety rail, not from the canon.
+
+| Rule (stable id) | Skill location | Canon cite | Type | Note / how it maps | Since |
+|---|---|---|---|---|---|
+| `select.5pillars_grade` | Step 0.5 grading | §2 pillars (`all_content_structured.md` §2, price/float/RVOL/gap thresholds) | direct + operationalization | Grades on the 4 *measurable* pillars from the meta line; catalyst & rate-of-change are unavailable → inferred. C = hard gate. | 2.2.0 |
+| `entry.trigger_bar` | §A "Which bar is the breakout?" | §3.1 first-candle-new-high / ACD; §18 "let it break, hold, then enter" | operationalization | 1-min proxy for the 5-min ACD: trigger = **first revealed bar where every entry box is simultaneously true**. Removes the "which new-high bar?" ambiguity (LLM reproducibility). | 2.3.0 |
+| `entry.volume_null_rvol` | §A volume-expansion box | §2 RVOL; §9 green-vol > red-vol | operationalization | `rvol_bar` is a trailing-20-bar ratio → null early; when null the **green>red dominance test is the volume gate**. Prevents missing the prime-window breakout. | 2.3.0 |
+| `entry.confirmed_close_vs_arm` | §A entry modes | §3.1 "the moment price breaks… I don't wait for the candle to close" | operationalization + sim-constraint | Armed buy-stop = his immediate-break entry (touch-fill at trigger); confirmed-close is the fallback when confirmation only completes on the bar. | 2.1.0 |
+| `stop.initial_formula` | §A "Where the stop goes" | §3.1 / §22 "my stop is the low of that pullback, it's as simple as that" | operationalization | `stop = min(trigger-bar low, prior-bar low) − $0.01`. **Not a Cameron quote** — a 1-min two-bar-structure translation of "low of the pullback." **Narrows** his discretion to kill noise-tight stops that inflate size (see `IMPROVING.md` §7). `anchor_px` (5-min level) banned from placement. | 2.4.0 |
+| `size.risk_over_stop` | Step 3 | §5 "Position Size = Max $ Risk ÷ Risk per Share"; §20.1 stops are a $ cap | direct | `shares = min(risk_budget/stop_dist, buying_power/entry)`; wide stop ⇒ small size (accept it), not a tighter stop. | ≤2.0 |
+| `manage.breakout_or_bailout` | §B per-bar procedure | §4 breakout-vs-bailout; "almost immediate resolution" | direct | Walk the priority list; act on the first item that applies. | ≤2.0 |
+| `manage.failed_break_bailout` | §B.2 (first clause) | §4 bailout tree: entry candle closes green AND above break level, else exit | direct | Bail if entry/next bar closes back below the level bought. | 2.1.0 |
+| `manage.free_trade_be` | §B.3 | §4 "up at least 10 cents within the first minute → stop at break-even, free trade" | operationalization | +$0.10 **or** +⅓ stop_distance, whichever first. On wide stops ⅓-dist > 10¢ (slower BE); on tight stops 10¢ may exceed risk. | ≤2.0 |
+| `manage.scale_thirds` | §B.4 | §4 / §10 scale out in thirds into strength | direct | 1/3 at ~+1R, 1/3 extended, runner. | ≤2.0 |
+| `manage.runner_exit_5min` | §B.5 | §4 "first red candle that closes below the prior green candle's low"; §9/§20.8 5-min primary | operationalization | Runner exit judged on **rolling 5-min** candles (Cameron's primary chart), not every 1-min bar. | 2.1.0 |
+| `manage.pyramid` | §B.6 | §10 scale into winners, never average down | direct | Add only to a green, confirmed continuation; re-anchor stop. | 2.1.0 |
+| `reentry.sub_vwap_trap` | §C | §3.7 washout long; §8.2 sub-VWAP trap (his favorites) | direct | Reclaim-VWAP or fresh-base second leg; ≤1 re-entry. | 2.1.0 |
+| `reentry.cooldown` | §C cooldown | §4 "I can always get back in if there's another setup" (not revenge) | operationalization + guardrail | ≥3 bars flat + fresh base before re-entry; kills same-chop revenge re-entry. | 2.2.0 |
+| `risk.time_of_day` | §A time box | §1/§17 first 2 hrs prime; stop by ~10:30–11:00; never fresh after 12:00 | direct | Demote/deny late-morning entries. | ≤2.0 |
+| `fill.model` | §A/§B fill cheat-sheet | — | sim-constraint | Hard levels (stop/target) fill intra-bar on low/high; soft signals on close. No slippage / L2. Changing this is a **major** bump. | ≤2.0 |
+
+## When a rule has no clean canon cite
+
+If a proposed rule can't cite the canon, it is a **guardrail** (label it so) or it
+doesn't belong. Do not smuggle a fitted 100-set threshold in as "Cameron."

@@ -56,6 +56,29 @@ def test_build_set_different_seed_differs(tmp_path):
     assert a != b
 
 
+def test_build_set_exclude_carves_disjoint_holdout(tmp_path):
+    db = tmp_path / "entries.db"
+    _make_entries_db(db, _rows())
+    dev = batchsim.build_set(n=100, db=db, seed=7)
+    dev_keys = {(s["ticker"], s["date"]) for s in dev}
+    holdout = batchsim.build_set(n=100, db=db, seed=7, exclude=dev_keys)
+    hold_keys = {(s["ticker"], s["date"]) for s in holdout}
+    # holdout shares no key with the excluded dev set
+    assert dev_keys.isdisjoint(hold_keys)
+
+
+def test_load_keys_reads_setups_and_top_level_list(tmp_path):
+    p = tmp_path / "ts.json"
+    p.write_text(json.dumps({"setups": [
+        {"ticker": "AAA", "date": "2025-01-02"},
+        {"ticker": "BBB", "date": "2025-03-04"},
+    ]}))
+    assert batchsim._load_keys(p) == {("AAA", "2025-01-02"), ("BBB", "2025-03-04")}
+    p2 = tmp_path / "ts2.json"
+    p2.write_text(json.dumps([{"ticker": "CCC", "date": "2025-05-06"}]))
+    assert batchsim._load_keys(p2) == {("CCC", "2025-05-06")}
+
+
 def _fake_session(root, tag, sid="20250102000000-TK-abc123", ticker="TK",
                   date="2025-01-02", void=None):
     d = root / sid
@@ -493,3 +516,50 @@ def test_prompt_is_preseal_step_next_only():
     assert "trading.llm_trader.step next" in p                # the one data command
     assert "FAIL CLOSED" in p                                 # explicit fail-closed rule
     assert f"BATCHSIM_SID={sdir}" in p                        # audit anchor marker
+
+
+# --- compare: the paired promotion gate ---
+
+def test_sign_test_p_two_sided():
+    # 42 up / 20 down (the real 2.4.0 vs 2.2.1 result) → p ≈ 0.007
+    assert batchsim._sign_test_p(42, 20) == pytest.approx(0.0071, abs=5e-4)
+    # symmetric split → not significant
+    assert batchsim._sign_test_p(10, 10) > 0.5
+    assert batchsim._sign_test_p(0, 0) is None
+
+
+def test_effective_r_stood_down_is_zero_void_excluded():
+    assert batchsim._effective_r({"void": False, "ooc": False, "status": "complete",
+                                  "traded": True, "r": 1.5}) == 1.5
+    # stood-down (completed, not traded) contributes 0R, not exclusion
+    assert batchsim._effective_r({"void": False, "ooc": False, "status": "complete",
+                                  "traded": False, "r": None}) == 0.0
+    # void / out-of-credits / unfinished are excluded from the pair
+    assert batchsim._effective_r({"void": True, "ooc": False, "status": "complete",
+                                  "traded": True, "r": 1.0}) is None
+    assert batchsim._effective_r({"void": False, "ooc": True, "status": "complete",
+                                  "traded": False, "r": None}) is None
+
+
+def test_compare_pairs_and_verdicts(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+
+    def mk(tag, ticker, date, r, sid, traded=True):
+        d = tmp_path / sid
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "session.json").write_text(json.dumps(
+            {"id": sid, "status": "complete", "ticker": ticker,
+             "historical_date": date, "batch": tag, "real_run_ts": sid}))
+        (d / "pnl.json").write_text(json.dumps(
+            {"traded": traded, "win": (r or 0) > 0, "realized_pnl": (r or 0) * 40,
+             "r_multiple": r}))
+
+    # baseline A all 0R; candidate B all +1R on the same 3 setups → B clearly better
+    for i, (tk, dt) in enumerate([("AA", "2025-01-01"), ("BB", "2025-01-02"), ("CC", "2025-01-03")]):
+        mk("baseA", tk, dt, 0.0, f"a{i}-{tk}-x", traded=True)
+        mk("candB", tk, dt, 1.0, f"b{i}-{tk}-x", traded=True)
+    r = batchsim.compare("baseA", "candB")
+    assert r["n_pairs"] == 3
+    assert r["mean_dR"] == pytest.approx(1.0)
+    assert r["better"] == 3 and r["worse"] == 0

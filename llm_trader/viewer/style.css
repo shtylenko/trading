@@ -359,6 +359,7 @@ header {
   font: inherit; font-weight: 600; font-size: 12px;
   padding: 3px 9px; border: 1px solid var(--accent); border-radius: 5px;
   background: #1c2433; color: var(--txt); cursor: pointer;
+  display: inline-block; text-decoration: none;
 }
 .sidebar-title-btn:hover { background: #232d40; }
 

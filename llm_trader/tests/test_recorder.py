@@ -140,6 +140,27 @@ def test_enter_scale_exit_pnl(tmp_path):
     assert (sdir / "journal.md").exists()
 
 
+def test_mae_uses_bar_low_not_close(tmp_path):
+    # Enter at 3.75; the next bar dips to a LOW of 3.40 (−$0.35 heat) but CLOSES back at
+    # 3.72. MAE must reflect the intra-bar low (0.35/sh), not the close (0.03/sh).
+    ticks = [
+        ("10:20", 3.60, 3.80, 3.50, 3.75, 100),  # i0 entry bar
+        ("10:21", 3.75, 3.78, 3.40, 3.72, 90),   # i1 deep wick down, closes near flat
+        ("10:22", 3.72, 4.10, 3.70, 4.05, 80),   # i2 exit in profit
+    ]
+    decisions = [
+        {"i": 0, "time": "10:20", "action": "ENTER", "fill_px": 3.75, "shares_delta": 100, "stop": 3.30, "thought": "in"},
+        {"i": 1, "time": "10:21", "action": "OBSERVE", "thought": "wick down, holding"},
+        {"i": 2, "time": "10:22", "action": "EXIT", "fill_px": 4.05, "shares_delta": -100, "stop": 3.30, "thought": "out"},
+    ]
+    sdir = _session(tmp_path, ticks, decisions=decisions)
+    recorder.finalize(sdir)
+    pnl = json.loads((sdir / "pnl.json").read_text())
+    # worst intra-trade excursion is the 3.40 low vs 3.75 entry = 0.35/sh, NOT 3.72 close.
+    # The entry bar's own low (3.50) is pre-entry and must NOT count.
+    assert pnl["mae_per_share"] == pytest.approx(0.35, abs=1e-6)
+
+
 def test_blended_entry_and_actual_r(tmp_path):
     # ENTER 100@3.75 (stop 3.55 → risk 100*0.20 = $20), ADD 100@3.95, EXIT 200@4.15
     ticks = [

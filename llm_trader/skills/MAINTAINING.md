@@ -4,6 +4,17 @@
 > trade.** If you are running a simulation, ignore this — versioning is fully
 > automatic and requires nothing from you. Go back to `TRADE_SIMULATOR.md`.
 
+> ## ⚠ Improving performance ≠ versioning
+>
+> This file only covers **version mechanics**. Versioning a change does not make it
+> an improvement. **Before any behavioral rule change, follow [`IMPROVING.md`](IMPROVING.md)**
+> (hypothesis → objectify the feel-call → paired batch gate → RULE_TRACE citation).
+>
+> **Never rank skill versions from a mixed `recorder report --by-version` table** — it
+> aggregates leaves across batches/models (rows flagged `MIXED`) and will manufacture
+> false regressions. Rank a pair with `batchsim compare --a <tagA> --b <tagB>` on one
+> batch each. See `IMPROVING.md` §5 (the promotion gate).
+
 ## For AI assistants and automated code editors (IMPORTANT)
 
 **Any modification to the content of `TRADE_SIMULATOR.md` (including examples,

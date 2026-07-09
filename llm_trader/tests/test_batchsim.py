@@ -251,6 +251,42 @@ def test_timed_out_excluded_from_stats_and_rerun(tmp_path, monkeypatch):
     assert batchsim._completed_counts(tag) == {}
 
 
+def test_stamp_finalize_error(tmp_path, monkeypatch):
+    # _stamp_finalize_error marks the session broken (status="error", not "running")
+    # and clears any stale void — finalize() never wrote session.json itself since it
+    # raised, so this is the only place the leaf's terminal state gets recorded.
+    sdir = tmp_path / "20250102000000-TK-abc123"
+    sdir.mkdir()
+    (sdir / "session.json").write_text(json.dumps(
+        {"id": sdir.name, "status": "running", "ticker": "TK",
+         "historical_date": "2025-01-02", "void": "stale-should-be-cleared"}))
+    batchsim._stamp_finalize_error(sdir, "turn i=2: selling 114 but only 0 held")
+    s = json.loads((sdir / "session.json").read_text())
+    assert s["status"] == "error"
+    assert "selling 114" in s["finalize_error"]
+    assert "void" not in s
+
+
+def test_finalize_error_excluded_from_stats_and_rerun(tmp_path, monkeypatch):
+    # A finalize-error run must NOT be a clean "complete": excluded from metrics,
+    # shown distinctly, and re-run by --resume (never counted as done) — same
+    # treatment as timeout/out-of-credits, not an orphaned "running" leaf forever.
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    tag = "bt"
+    d = _fake_session(tmp_path, tag, sid="20250102000000-TK-abc123")
+    batchsim._stamp_finalize_error(d, "turn i=2: selling 114 but only 0 held")
+
+    view = recorder.get_top_session_view(tag)
+    assert view["tickers"][0]["status"] == "finalize_error"
+    assert view["tickers"][0]["n_finalize_error"] == 1
+    assert view["metrics"]["n_planned"] == 0
+    assert view["metrics"]["n_traded"] == 0
+
+    # resume must re-run it: a finalize-error leaf does NOT count as a completed slot
+    assert batchsim._completed_counts(tag) == {}
+
+
 def test_resolve_batch_commands_matches_session_by_sid(monkeypatch):
     # two runs; each hermes session's export contains that run's unique SDIR
     sid_a, sid_b = "20250101090000-AAA-111111", "20250101090100-BBB-222222"
@@ -563,17 +599,25 @@ def test_sign_test_p_two_sided():
 
 def test_effective_r_stood_down_is_zero_void_excluded():
     assert batchsim._effective_r({"void": False, "ooc": False, "timeout": False,
+                                  "finalize_error": False,
                                   "status": "complete", "traded": True, "r": 1.5}) == 1.5
     # stood-down (completed, not traded) contributes 0R, not exclusion
     assert batchsim._effective_r({"void": False, "ooc": False, "timeout": False,
+                                  "finalize_error": False,
                                   "status": "complete", "traded": False, "r": None}) == 0.0
-    # void / out-of-credits / timed-out / unfinished are excluded from the pair
+    # void / out-of-credits / timed-out / finalize-error / unfinished are excluded
     assert batchsim._effective_r({"void": True, "ooc": False, "timeout": False,
+                                  "finalize_error": False,
                                   "status": "complete", "traded": True, "r": 1.0}) is None
     assert batchsim._effective_r({"void": False, "ooc": True, "timeout": False,
+                                  "finalize_error": False,
                                   "status": "complete", "traded": False, "r": None}) is None
     assert batchsim._effective_r({"void": False, "ooc": False, "timeout": True,
+                                  "finalize_error": False,
                                   "status": "complete", "traded": True, "r": 1.0}) is None
+    assert batchsim._effective_r({"void": False, "ooc": False, "timeout": False,
+                                  "finalize_error": True,
+                                  "status": "error", "traded": True, "r": 1.0}) is None
 
 
 def test_compare_pairs_and_verdicts(tmp_path, monkeypatch):

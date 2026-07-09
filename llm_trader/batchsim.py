@@ -131,6 +131,15 @@ _OUT_OF_CREDITS_LABEL = "out of credits (HTTP 402)"
 _TIMEOUT_LABEL = "killed after per-setup timeout"
 _DEFAULT_RETRIES = 1  # extra attempts on a timeout before giving up (0 = no retry)
 
+# recorder.finalize() replays decisions.jsonl through the fill engine and raises
+# ValueError if the agent logged an inconsistent sequence (e.g. an EXIT with no
+# matching prior ENTER — seen when a model collapses an "armed fill immediately
+# followed by a failed-break bailout" same-bar event into a single decision row).
+# Left unhandled, the exception left session.json stuck at status "running"
+# forever: invisible to stats/audit/resume, indistinguishable from a session that
+# is still legitimately in flight. Stamp it instead, same pattern as timeout/ooc.
+_FINALIZE_ERROR_LABEL = "finalize failed — inconsistent decision log (see finalize_error)"
+
 
 def _text_out_of_credits(text: Optional[str]) -> bool:
     """True if agent output shows the account ran out of API credits."""
@@ -496,7 +505,14 @@ def _run_one(work: dict) -> dict:
         try:
             recorder.finalize(sdir)
         except Exception as e:  # noqa: BLE001 — never let finalize sink the batch
+            # finalize() raised BEFORE writing session.json, so status is still
+            # whatever it was pre-run ("running") — stamp it directly so the leaf
+            # is visibly broken (not mistaken for a still-live session) and
+            # excluded/re-run like any other infra failure, instead of silently
+            # vanishing with only an in-memory (never-persisted) error string.
             extra["finalize_error"] = str(e)
+            status = "finalize-error"
+            _stamp_finalize_error(sdir, str(e))
         if status == "out-of-credits":
             # Stamp the session so the audit / viewer treat it as an infra failure
             # (excluded from stats) rather than a look-ahead void. Done after finalize,
@@ -1132,6 +1148,20 @@ def _stamp_timeout(sdir: Path) -> None:
     atomic_write_json(sj, s, indent=2)
 
 
+def _stamp_finalize_error(sdir: Path, message: str) -> None:
+    """Mark a session whose finalize() replay raised (status never reached
+    "complete") so it is a visibly broken, re-runnable infra failure — not an
+    orphaned "running" leaf that looks like it's still live. Sets status
+    explicitly (finalize never got to write it) so the viewer/audit stop
+    treating it as in-progress."""
+    sj = Path(sdir) / "session.json"
+    s = recorder._load_json(sj, {}) or {}
+    s["status"] = "error"
+    s["finalize_error"] = message
+    s.pop("void", None)
+    atomic_write_json(sj, s, indent=2)
+
+
 def _agent_log_for(tag: str, session_name: Optional[str]) -> Optional[Path]:
     """The captured agent log for one run, if present (BATCH_LOGS/<tag>/<name>.log)."""
     if not session_name:
@@ -1167,7 +1197,21 @@ def audit(tag: str) -> int:
     an infrastructure failure tagged `out_of_credits` and excluded from stats, not a
     look-ahead void.
     """
-    sessions = [d for d in _sessions_for_batch(tag)
+    all_dirs = _sessions_for_batch(tag)
+    # Backfill leaves orphaned by the finalize-swallowing bug fixed alongside this
+    # audit pass: pre-fix, a leaf whose finalize() raised was left stuck at status
+    # "running" forever (indistinguishable from a genuinely live session) with the
+    # exception silently dropped. Retry finalize now; if it still raises, stamp it
+    # a visible, re-runnable finalize-error instead of leaving it orphaned.
+    for d in all_dirs:
+        session = recorder._load_json(d / "session.json", {}) or {}
+        if session.get("status") == "running" and not session.get("finalize_error"):
+            try:
+                recorder.finalize(d)
+            except Exception as e:  # noqa: BLE001
+                _stamp_finalize_error(d, str(e))
+
+    sessions = [d for d in all_dirs
                 if (recorder._load_json(d / "session.json", {}) or {}).get("status") == "complete"]
     cmd_map = _resolve_batch_commands([d.name for d in sessions])
     # sid → session_name, so a run with no command log can still be matched to its
@@ -1236,12 +1280,14 @@ def _leaves_by_key(tag: str) -> dict:
         rec = {
             "void": bool(s.get("void")), "ooc": bool(s.get("out_of_credits")),
             "timeout": bool(s.get("timed_out")),
+            "finalize_error": bool(s.get("finalize_error")),
             "status": s.get("status"), "ts": s.get("real_run_ts") or "",
             "traded": bool(p.get("traded")), "r": p.get("r_multiple"),
             "pnl": p.get("realized_pnl"), "win": bool(p.get("win")),
         }
         def clean(r):
-            return r["status"] == "complete" and not r["void"] and not r["ooc"] and not r["timeout"]
+            return (r["status"] == "complete" and not r["void"] and not r["ooc"]
+                    and not r["timeout"] and not r["finalize_error"])
         prev = best.get(key)
         if (prev is None or (clean(rec) and not clean(prev))
                 or (clean(rec) == clean(prev) and rec["ts"] > prev["ts"])):
@@ -1252,7 +1298,8 @@ def _leaves_by_key(tag: str) -> dict:
 def _effective_r(rec: dict) -> Optional[float]:
     """Deployment R for one leaf: traded → realized R; stood-down → 0R; void/ooc/timeout
     → None (excluded from the pair). None if a completed traded leaf is missing its R."""
-    if rec["void"] or rec["ooc"] or rec["timeout"] or rec["status"] != "complete":
+    if (rec["void"] or rec["ooc"] or rec["timeout"] or rec["finalize_error"]
+            or rec["status"] != "complete"):
         return None
     if not rec["traded"]:
         return 0.0
@@ -1303,6 +1350,7 @@ def compare(tag_a: str, tag_b: str) -> dict:
             "void": sum(1 for r in vals if r["void"] and not r["ooc"] and not r["timeout"]),
             "ooc": sum(1 for r in vals if r["ooc"]),
             "timeout": sum(1 for r in vals if r["timeout"]),
+            "finalize_error": sum(1 for r in vals if r["finalize_error"]),
             "stood": sum(1 for r in vals if _effective_r(r) == 0.0 and not r["traded"]),
             "avg_loser": (sum(losers) / len(losers)) if losers else None,
         }
@@ -1321,7 +1369,7 @@ def compare(tag_a: str, tag_b: str) -> dict:
 def _print_compare(r: dict) -> None:
     a, b = r["stats_a"], r["stats_b"]
     print(f"=== compare  A(baseline)={r['tag_a']}  vs  B(candidate)={r['tag_b']} ===")
-    print(f"paired on {r['n_pairs']} shared setups (effective R; stood-down=0R; void/ooc/timeout excluded)\n")
+    print(f"paired on {r['n_pairs']} shared setups (effective R; stood-down=0R; void/ooc/timeout/fin-err excluded)\n")
     print(f"  mean ΔR (B−A) : {r['mean_dR']:+.3f}")
     print(f"  median ΔR     : {r['median_dR']:+.3f}")
     print(f"  better/worse/≈: {r['better']} / {r['worse']} / {r['equal']}")
@@ -1332,16 +1380,17 @@ def _print_compare(r: dict) -> None:
     print(f"\n  guardrails            A={r['tag_a']:<28} B={r['tag_b']}")
     al_a = f"${a['avg_loser']:.0f}" if a['avg_loser'] is not None else "—"
     al_b = f"${b['avg_loser']:.0f}" if b['avg_loser'] is not None else "—"
-    kv_a = f"{a['n_keys']}/{a['void']}/{a['ooc']}/{a['timeout']}"
-    kv_b = f"{b['n_keys']}/{b['void']}/{b['ooc']}/{b['timeout']}"
-    print(f"    keys/void/ooc/t.out {kv_a:<28} {kv_b}")
+    kv_a = f"{a['n_keys']}/{a['void']}/{a['ooc']}/{a['timeout']}/{a['finalize_error']}"
+    kv_b = f"{b['n_keys']}/{b['void']}/{b['ooc']}/{b['timeout']}/{b['finalize_error']}"
+    print(f"    keys/void/ooc/t.out/fin-err {kv_a:<28} {kv_b}")
     print(f"    stood-down          {a['stood']:<28} {b['stood']}")
     print(f"    avg loser           {al_a:<28} {al_b}")
 
     # verdict (the gate: broad, significant, not tail-driven, guardrails not worse)
     sig = r["sign_p"] is not None and r["sign_p"] < 0.05
     broad = r["median_dR"] >= 0 and r["top3_share"] <= 0.5
-    guard_ok = (b["void"] <= a["void"] + 2 and b["ooc"] == 0 and b["timeout"] == 0)
+    guard_ok = (b["void"] <= a["void"] + 2 and b["ooc"] == 0 and b["timeout"] == 0
+                and b["finalize_error"] == 0)
     if r["mean_dR"] > 0 and sig and broad and guard_ok:
         verdict = "✅ ACCEPT — B is broadly better and clears the gate."
     elif r["mean_dR"] > 0 and (sig or r["median_dR"] > 0):

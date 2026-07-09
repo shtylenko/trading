@@ -1033,6 +1033,7 @@ def _session_entry(d: Path, s: dict) -> dict:
         "void": s.get("void"),
         "out_of_credits": s.get("out_of_credits"),
         "timed_out": s.get("timed_out"),
+        "finalize_error": s.get("finalize_error"),
     }
 
     # For running sessions, include a current PnL snapshot (mtime-cached).
@@ -1130,6 +1131,7 @@ def list_sessions() -> list[dict]:
             "n_void": metrics.get("n_void"),
             "n_out_of_credits": metrics.get("n_out_of_credits"),
             "n_timed_out": metrics.get("n_timed_out"),
+            "n_finalize_error": metrics.get("n_finalize_error"),
             "last_activity": last_activity,
             "status": status,
             "n_complete": n_complete,
@@ -1179,10 +1181,20 @@ def _is_timed_out(s: dict) -> bool:
     return bool(s.get("timed_out"))
 
 
+def _is_finalize_error(s: dict) -> bool:
+    """A run whose finalize() replay raised (e.g. an inconsistent decision log —
+    an EXIT with no matching prior ENTER). status never reached "complete", so
+    this is stamped explicitly (batchsim._stamp_finalize_error) rather than left
+    as an orphaned "running" leaf. Infra failure: excluded from stats, re-run by
+    ``--resume``, never a clean 'complete no-trade'."""
+    return bool(s.get("finalize_error"))
+
+
 def _is_infra_fail(s: dict) -> bool:
-    """Any non-result infra failure (out-of-credits OR timeout): the agent didn't run
-    to a real decision, so the run is excluded from stats rather than scored."""
-    return _is_out_of_credits(s) or _is_timed_out(s)
+    """Any non-result infra failure (out-of-credits, timeout, or finalize error):
+    the agent didn't run to a real decision, so the run is excluded from stats
+    rather than scored."""
+    return _is_out_of_credits(s) or _is_timed_out(s) or _is_finalize_error(s)
 
 
 def _is_archived(s: dict) -> bool:
@@ -1241,6 +1253,7 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
     n_void = 0
     n_out_of_credits = 0
     n_timed_out = 0
+    n_finalize_error = 0
     n_stood = 0
     n_traded = 0
     total_pnl = 0.0
@@ -1260,6 +1273,9 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
             continue
         if _is_timed_out(m):
             n_timed_out += 1
+            continue
+        if _is_finalize_error(m):
+            n_finalize_error += 1
             continue
         n_planned += 1
         if _is_void(m):
@@ -1344,6 +1360,7 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
         "n_void": n_void,
         "n_out_of_credits": n_out_of_credits,
         "n_timed_out": n_timed_out,
+        "n_finalize_error": n_finalize_error,
         "n_stood_down": n_stood,
         "sequence_drawdown_r": seq_dd,
         "recovery_factor_r": recovery,
@@ -1375,6 +1392,7 @@ def get_top_session_view(sess_id: str) -> dict:
         "void_reason": None,  # a representative void reason for the UI
         "n_out_of_credits": 0,  # leaf runs that died on HTTP 402 (out of credits)
         "n_timed_out": 0,  # leaf runs the harness killed for exceeding the timeout
+        "n_finalize_error": 0,  # leaf runs whose finalize() replay raised
         "n_leaves": 0,     # total leaf runs on this ticker
         "n_complete": 0,   # of those, how many are finalized
         "running_any": False,
@@ -1402,6 +1420,8 @@ def get_top_session_view(sess_id: str) -> dict:
             td["n_out_of_credits"] += 1   # terminal; neither complete nor running
         elif _is_timed_out(s):
             td["n_timed_out"] += 1        # terminal infra failure; never "complete"
+        elif _is_finalize_error(s):
+            td["n_finalize_error"] += 1   # terminal infra failure; never "complete"
         elif entry.get("status") == "complete":
             td["n_complete"] += 1
         elif entry.get("stale"):
@@ -1441,6 +1461,8 @@ def get_top_session_view(sess_id: str) -> dict:
             tstatus = "out_of_credits"
         elif data["n_timed_out"] > 0:
             tstatus = "timeout"
+        elif data["n_finalize_error"] > 0:
+            tstatus = "finalize_error"
         elif data["stale_any"]:
             tstatus = "stale"
         else:
@@ -1461,6 +1483,7 @@ def get_top_session_view(sess_id: str) -> dict:
             "void_reason": data["void_reason"],
             "n_out_of_credits": data["n_out_of_credits"],
             "n_timed_out": data["n_timed_out"],
+            "n_finalize_error": data["n_finalize_error"],
             "status": tstatus,
             "n_leaves": data["n_leaves"],
             "n_complete": data["n_complete"],
@@ -1507,8 +1530,34 @@ def report_by_version(
     ``mode`` restricts to simulated/live. ``batch`` restricts to one backtest cohort
     (matched against ``session.batch`` / ``pnl.batch``) — the apples-to-apples view.
     """
+    # `--resume` reruns a failed/voided (batch,ticker,date) slot into a NEW leaf dir
+    # without deleting the old stub, so a stale void/out-of-credits/timed-out/
+    # finalize-error stub can outlive the clean run that superseded it. Without this,
+    # both the stub and its replacement get counted, inflating `n` past `planned` and
+    # showing phantom failures a resume already fixed. Same slot-resolution concept as
+    # `_resolved_slots` (used by the per-session-view metrics), scoped here by
+    # (batch, ticker, date) since this aggregates across many top-level sessions.
+    resolved_slots: set[tuple] = set()
+    for _, s in iter_sessions():
+        if s.get("status") == "complete" and not _is_void(s) and not _is_infra_fail(s):
+            resolved_slots.add((s.get("batch"), s.get("ticker"), s.get("historical_date")))
+
     buckets: dict[str, dict] = {}
+    fin_err_buckets: dict[str, int] = defaultdict(int)
     for d, session in iter_sessions():
+        slot = (session.get("batch"), session.get("ticker"), session.get("historical_date"))
+        if _is_finalize_error(session):
+            if slot in resolved_slots:
+                continue  # stale stub superseded by a later --resume — not a real result
+            # finalize() never wrote pnl.json / status="complete" for these, so they'd
+            # otherwise vanish below with no count anywhere — track them by the pinned
+            # skill version (finalize errors happen pre-pnl, so read it off session.skill).
+            if mode is None or session.get("mode", "simulated") == mode:
+                sbatch = session.get("batch")
+                if batch is None or sbatch == batch:
+                    ver = session.get("skill", {}).get("version") or "unversioned"
+                    fin_err_buckets[ver] += 1
+            continue
         pnl = _load_json(d / "pnl.json")
         if pnl is None or session.get("status") != "complete":
             continue  # skip running/abandoned/unfinalized sessions
@@ -1517,12 +1566,14 @@ def report_by_version(
         sbatch = session.get("batch") or pnl.get("batch")
         if batch is not None and sbatch != batch:
             continue
+        if (_is_void(session) or _is_infra_fail(session)) and slot in resolved_slots:
+            continue  # stale void/ooc/timeout stub superseded by a later --resume
 
         ver = pnl.get("skill_version") or session.get("skill", {}).get("version") \
             or "unversioned"
         b = buckets.setdefault(ver, {
             "version": ver, "n": 0, "wins": 0, "stood_down": 0, "n_void": 0,
-            "n_out_of_credits": 0, "n_timed_out": 0,
+            "n_out_of_credits": 0, "n_timed_out": 0, "n_finalize_error": 0,
             "pnl": 0.0, "r_sum": 0.0, "eff_r_sum": 0.0, "eff_n": 0,
             "cap_sum": 0.0, "cap_n": 0, "hashes": set(),
             "batches": set(), "models": set(),
@@ -1581,6 +1632,7 @@ def report_by_version(
             "n_void": b["n_void"],
             "n_out_of_credits": b["n_out_of_credits"],
             "n_timed_out": b["n_timed_out"],
+            "n_finalize_error": fin_err_buckets.pop(b["version"], 0),
             "win_pct": round(100 * b["wins"] / n) if n else None,
             "pnl": round(b["pnl"], 2),
             "avg_r": round(b["r_sum"] / n, 2) if n else None,          # clean (traded only)
@@ -1589,6 +1641,15 @@ def report_by_version(
             "n_batches": len(b["batches"]),
             "n_models": len(b["models"]),
             "hashes": sorted(b["hashes"]),
+        })
+    # a version whose ONLY leaves are finalize-errors has no bucket above (never
+    # traded/stood-down) — still surface it so the failure isn't invisible.
+    for ver, n_fe in fin_err_buckets.items():
+        rows.append({
+            "version": ver, "n": 0, "stood_down": 0, "n_void": 0,
+            "n_out_of_credits": 0, "n_timed_out": 0, "n_finalize_error": n_fe,
+            "win_pct": None, "pnl": 0.0, "avg_r": None, "eff_r": None,
+            "avg_capture": None, "n_batches": 0, "n_models": 0, "hashes": [],
         })
     rows.sort(key=lambda r: r["version"])
     return rows
@@ -1616,6 +1677,8 @@ def _print_report(rows: list[dict]) -> None:
             notes.append(f"⚠ {r['n_out_of_credits']} out-of-credits")
         if r.get("n_timed_out"):
             notes.append(f"⚠ {r['n_timed_out']} timed-out")
+        if r.get("n_finalize_error"):
+            notes.append(f"⚠ {r['n_finalize_error']} finalize-error")
         # A version aggregated across >1 batch or >1 model is NOT a valid ranking row.
         if r.get("n_batches", 0) > 1:
             notes.append(f"⚠ {r['n_batches']} batches MIXED"); mixed = True

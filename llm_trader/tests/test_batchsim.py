@@ -218,6 +218,39 @@ def test_run_one_stamps_out_of_credits(tmp_path, monkeypatch):
     assert s["out_of_credits"] and "void" not in s
 
 
+def test_stamp_timeout(tmp_path, monkeypatch):
+    # _stamp_timeout marks the session timed_out and clears any stale void.
+    sdir = tmp_path / "20250102000000-TK-abc123"
+    sdir.mkdir()
+    (sdir / "session.json").write_text(json.dumps(
+        {"id": sdir.name, "status": "complete", "ticker": "TK",
+         "historical_date": "2025-01-02", "void": "stale-should-be-cleared"}))
+    batchsim._stamp_timeout(sdir)
+    s = json.loads((sdir / "session.json").read_text())
+    assert s["timed_out"] and "void" not in s
+
+
+def test_timed_out_excluded_from_stats_and_rerun(tmp_path, monkeypatch):
+    # A timed-out run must NOT be a clean "complete": excluded from metrics, shown as a
+    # timeout, and re-run by --resume (never counted as done).
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    tag = "bt"
+    d = _fake_session(tmp_path, tag, sid="20250102000000-TK-abc123")
+    # stamp it timed_out (as _run_one would after exhausting retries)
+    batchsim._stamp_timeout(d)
+
+    # excluded from metrics: surfaced as n_timed_out, not counted as planned/traded
+    view = recorder.get_top_session_view(tag)
+    assert view["metrics"]["n_timed_out"] == 1
+    assert view["metrics"]["n_planned"] == 0
+    assert view["metrics"]["n_traded"] == 0
+    assert view["tickers"][0]["status"] == "timeout"
+
+    # resume must re-run it: a timed-out leaf does NOT count as a completed slot
+    assert batchsim._completed_counts(tag) == {}
+
+
 def test_resolve_batch_commands_matches_session_by_sid(monkeypatch):
     # two runs; each hermes session's export contains that run's unique SDIR
     sid_a, sid_b = "20250101090000-AAA-111111", "20250101090100-BBB-222222"
@@ -529,16 +562,18 @@ def test_sign_test_p_two_sided():
 
 
 def test_effective_r_stood_down_is_zero_void_excluded():
-    assert batchsim._effective_r({"void": False, "ooc": False, "status": "complete",
-                                  "traded": True, "r": 1.5}) == 1.5
+    assert batchsim._effective_r({"void": False, "ooc": False, "timeout": False,
+                                  "status": "complete", "traded": True, "r": 1.5}) == 1.5
     # stood-down (completed, not traded) contributes 0R, not exclusion
-    assert batchsim._effective_r({"void": False, "ooc": False, "status": "complete",
-                                  "traded": False, "r": None}) == 0.0
-    # void / out-of-credits / unfinished are excluded from the pair
-    assert batchsim._effective_r({"void": True, "ooc": False, "status": "complete",
-                                  "traded": True, "r": 1.0}) is None
-    assert batchsim._effective_r({"void": False, "ooc": True, "status": "complete",
-                                  "traded": False, "r": None}) is None
+    assert batchsim._effective_r({"void": False, "ooc": False, "timeout": False,
+                                  "status": "complete", "traded": False, "r": None}) == 0.0
+    # void / out-of-credits / timed-out / unfinished are excluded from the pair
+    assert batchsim._effective_r({"void": True, "ooc": False, "timeout": False,
+                                  "status": "complete", "traded": True, "r": 1.0}) is None
+    assert batchsim._effective_r({"void": False, "ooc": True, "timeout": False,
+                                  "status": "complete", "traded": False, "r": None}) is None
+    assert batchsim._effective_r({"void": False, "ooc": False, "timeout": True,
+                                  "status": "complete", "traded": True, "r": 1.0}) is None
 
 
 def test_compare_pairs_and_verdicts(tmp_path, monkeypatch):

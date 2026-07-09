@@ -1,0 +1,807 @@
+{
+  "created": "2026-07-09T13:32:10",
+  "seed": 100,
+  "n": 100,
+  "setups": [
+    {
+      "ticker": "ACET",
+      "date": "2024-01-29",
+      "time_et": "09:40",
+      "pattern": "acd_orb",
+      "float_shares": 7425831.0,
+      "gap_pct": 5.14
+    },
+    {
+      "ticker": "ACXP",
+      "date": "2026-03-11",
+      "time_et": "10:00",
+      "pattern": "acd_orb",
+      "float_shares": 4169150.0,
+      "gap_pct": 20.0
+    },
+    {
+      "ticker": "AEHL",
+      "date": "2026-05-13",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 1495251.0,
+      "gap_pct": 43.36
+    },
+    {
+      "ticker": "AKAN",
+      "date": "2026-04-29",
+      "time_et": "11:35",
+      "pattern": "acd_orb",
+      "float_shares": 537663.0,
+      "gap_pct": 11.26
+    },
+    {
+      "ticker": "AMCI",
+      "date": "2025-12-15",
+      "time_et": "11:35",
+      "pattern": "acd_orb",
+      "float_shares": 4720312.0,
+      "gap_pct": 33.58
+    },
+    {
+      "ticker": "APM",
+      "date": "2024-03-14",
+      "time_et": "09:45",
+      "pattern": "acd_orb",
+      "float_shares": 5359325.0,
+      "gap_pct": 29.33
+    },
+    {
+      "ticker": "AQMS",
+      "date": "2025-10-14",
+      "time_et": "11:55",
+      "pattern": "acd_orb",
+      "float_shares": 3035353.0,
+      "gap_pct": 70.53
+    },
+    {
+      "ticker": "ASTI",
+      "date": "2026-04-23",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 8933441.0,
+      "gap_pct": 10.66
+    },
+    {
+      "ticker": "ATPC",
+      "date": "2026-06-18",
+      "time_et": "09:55",
+      "pattern": "acd_orb",
+      "float_shares": 433301.0,
+      "gap_pct": 19.78
+    },
+    {
+      "ticker": "AZI",
+      "date": "2026-06-10",
+      "time_et": "09:45",
+      "pattern": "acd_orb",
+      "float_shares": 1729957.0,
+      "gap_pct": 18.92
+    },
+    {
+      "ticker": "BATL",
+      "date": "2026-02-19",
+      "time_et": "09:40",
+      "pattern": "acd_orb",
+      "float_shares": 16168000.0,
+      "gap_pct": 8.2
+    },
+    {
+      "ticker": "BFRG",
+      "date": "2024-01-22",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 16106020.0,
+      "gap_pct": 17.59
+    },
+    {
+      "ticker": "BGMS",
+      "date": "2025-07-15",
+      "time_et": "10:15",
+      "pattern": "acd_orb",
+      "float_shares": 3460478.0,
+      "gap_pct": 38.37
+    },
+    {
+      "ticker": "BIVI",
+      "date": "2024-10-22",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 7501943.0,
+      "gap_pct": 14.07
+    },
+    {
+      "ticker": "BLNE",
+      "date": "2025-09-05",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 17325699.0,
+      "gap_pct": 5.76
+    },
+    {
+      "ticker": "BMGL",
+      "date": "2025-05-15",
+      "time_et": "09:55",
+      "pattern": "acd_orb",
+      "float_shares": 6017076.0,
+      "gap_pct": 5.26
+    },
+    {
+      "ticker": "BNAI",
+      "date": "2026-01-02",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 4060927.0,
+      "gap_pct": 7.76
+    },
+    {
+      "ticker": "BQ",
+      "date": "2025-12-02",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 2923881.0,
+      "gap_pct": 10.77
+    },
+    {
+      "ticker": "BZFD",
+      "date": "2024-06-26",
+      "time_et": "11:45",
+      "pattern": "acd_orb",
+      "float_shares": 12387281.0,
+      "gap_pct": 6.23
+    },
+    {
+      "ticker": "CDLX",
+      "date": "2025-03-13",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 4995104.0,
+      "gap_pct": 12.12
+    },
+    {
+      "ticker": "CGTL",
+      "date": "2026-01-12",
+      "time_et": "09:45",
+      "pattern": "acd_orb",
+      "float_shares": 16374992.0,
+      "gap_pct": 5.75
+    },
+    {
+      "ticker": "CISS",
+      "date": "2025-10-07",
+      "time_et": "09:45",
+      "pattern": "acd_orb",
+      "float_shares": 323160.0,
+      "gap_pct": 45.7
+    },
+    {
+      "ticker": "CRVO",
+      "date": "2026-06-18",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 6574246.0,
+      "gap_pct": 22.83
+    },
+    {
+      "ticker": "CUPR",
+      "date": "2026-06-30",
+      "time_et": "10:50",
+      "pattern": "acd_orb",
+      "float_shares": 920634.0,
+      "gap_pct": 25.56
+    },
+    {
+      "ticker": "DCX",
+      "date": "2025-11-24",
+      "time_et": "11:25",
+      "pattern": "acd_orb",
+      "float_shares": 19819212.0,
+      "gap_pct": 29.47
+    },
+    {
+      "ticker": "DOMH",
+      "date": "2025-02-13",
+      "time_et": "10:25",
+      "pattern": "acd_orb",
+      "float_shares": 7841555.0,
+      "gap_pct": 20.67
+    },
+    {
+      "ticker": "DRUG",
+      "date": "2024-10-15",
+      "time_et": "09:40",
+      "pattern": "acd_orb",
+      "float_shares": 5126802.0,
+      "gap_pct": 5.22
+    },
+    {
+      "ticker": "DTSS",
+      "date": "2024-03-05",
+      "time_et": "10:45",
+      "pattern": "acd_orb",
+      "float_shares": 4211143.0,
+      "gap_pct": 8.35
+    },
+    {
+      "ticker": "DXST",
+      "date": "2026-06-02",
+      "time_et": "10:00",
+      "pattern": "acd_orb",
+      "float_shares": 998034.0,
+      "gap_pct": 85.62
+    },
+    {
+      "ticker": "EDHL",
+      "date": "2025-06-27",
+      "time_et": "11:15",
+      "pattern": "acd_orb",
+      "float_shares": 541273.0,
+      "gap_pct": 7.17
+    },
+    {
+      "ticker": "EHGO",
+      "date": "2026-06-24",
+      "time_et": "10:00",
+      "pattern": "acd_orb",
+      "float_shares": 1151428.0,
+      "gap_pct": 17.25
+    },
+    {
+      "ticker": "ELPW",
+      "date": "2026-04-22",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 1175756.0,
+      "gap_pct": 29.3
+    },
+    {
+      "ticker": "EPSM",
+      "date": "2025-11-21",
+      "time_et": "10:05",
+      "pattern": "acd_orb",
+      "float_shares": 2072651.0,
+      "gap_pct": 8.74
+    },
+    {
+      "ticker": "EVTV",
+      "date": "2026-01-13",
+      "time_et": "10:20",
+      "pattern": "acd_orb",
+      "float_shares": 12549004.0,
+      "gap_pct": 32.67
+    },
+    {
+      "ticker": "FLWS",
+      "date": "2025-07-23",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 10261526.0,
+      "gap_pct": 15.49
+    },
+    {
+      "ticker": "FNUC",
+      "date": "2025-10-13",
+      "time_et": "09:50",
+      "pattern": "acd_orb",
+      "float_shares": 7436204.0,
+      "gap_pct": 5.36
+    },
+    {
+      "ticker": "FOXX",
+      "date": "2026-06-04",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 978655.0,
+      "gap_pct": 77.62
+    },
+    {
+      "ticker": "FRMM",
+      "date": "2025-08-12",
+      "time_et": "10:55",
+      "pattern": "acd_orb",
+      "float_shares": 6158661.0,
+      "gap_pct": 79.04
+    },
+    {
+      "ticker": "GLMD",
+      "date": "2024-09-17",
+      "time_et": "09:45",
+      "pattern": "acd_orb",
+      "float_shares": 6368087.0,
+      "gap_pct": 38.5
+    },
+    {
+      "ticker": "GOVX",
+      "date": "2024-08-16",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 3200192.0,
+      "gap_pct": 8.66
+    },
+    {
+      "ticker": "GRI",
+      "date": "2025-04-02",
+      "time_et": "09:50",
+      "pattern": "acd_orb",
+      "float_shares": 1770838.0,
+      "gap_pct": 7.43
+    },
+    {
+      "ticker": "GRPN",
+      "date": "2025-05-08",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 17719527.0,
+      "gap_pct": 10.1
+    },
+    {
+      "ticker": "GXAI",
+      "date": "2024-12-09",
+      "time_et": "11:45",
+      "pattern": "acd_orb",
+      "float_shares": 9997548.0,
+      "gap_pct": 40.0
+    },
+    {
+      "ticker": "HTCO",
+      "date": "2026-06-03",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 3713884.0,
+      "gap_pct": 15.07
+    },
+    {
+      "ticker": "IBG",
+      "date": "2025-09-30",
+      "time_et": "11:25",
+      "pattern": "acd_orb",
+      "float_shares": 412331.0,
+      "gap_pct": 27.3
+    },
+    {
+      "ticker": "IBO",
+      "date": "2025-03-21",
+      "time_et": "10:30",
+      "pattern": "acd_orb",
+      "float_shares": 11488352.0,
+      "gap_pct": 51.92
+    },
+    {
+      "ticker": "INBS",
+      "date": "2024-02-09",
+      "time_et": "09:40",
+      "pattern": "acd_orb",
+      "float_shares": 2171366.0,
+      "gap_pct": 12.15
+    },
+    {
+      "ticker": "INDO",
+      "date": "2025-06-23",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 9922512.0,
+      "gap_pct": 30.43
+    },
+    {
+      "ticker": "INHD",
+      "date": "2025-08-27",
+      "time_et": "10:00",
+      "pattern": "acd_orb",
+      "float_shares": 2518569.0,
+      "gap_pct": 7.83
+    },
+    {
+      "ticker": "JEM",
+      "date": "2026-06-29",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 457974.0,
+      "gap_pct": 10.22
+    },
+    {
+      "ticker": "KITT",
+      "date": "2025-01-15",
+      "time_et": "10:05",
+      "pattern": "acd_orb",
+      "float_shares": 4581429.0,
+      "gap_pct": 11.62
+    },
+    {
+      "ticker": "KXIN",
+      "date": "2024-12-31",
+      "time_et": "09:50",
+      "pattern": "acd_orb",
+      "float_shares": 1418651.0,
+      "gap_pct": 5.71
+    },
+    {
+      "ticker": "LFWD",
+      "date": "2025-02-11",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 1545702.0,
+      "gap_pct": 11.23
+    },
+    {
+      "ticker": "LOVE",
+      "date": "2025-04-10",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 10513019.0,
+      "gap_pct": 15.0
+    },
+    {
+      "ticker": "LPSN",
+      "date": "2024-01-09",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 10650858.0,
+      "gap_pct": 5.25
+    },
+    {
+      "ticker": "MASK",
+      "date": "2026-05-08",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 689388.0,
+      "gap_pct": 13.31
+    },
+    {
+      "ticker": "MBRX",
+      "date": "2025-02-14",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 5292005.0,
+      "gap_pct": 59.06
+    },
+    {
+      "ticker": "MFI",
+      "date": "2025-06-05",
+      "time_et": "09:55",
+      "pattern": "acd_orb",
+      "float_shares": 525594.0,
+      "gap_pct": 7.77
+    },
+    {
+      "ticker": "MNTS",
+      "date": "2026-04-15",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 8449971.0,
+      "gap_pct": 9.27
+    },
+    {
+      "ticker": "MTEN",
+      "date": "2026-06-15",
+      "time_et": "10:00",
+      "pattern": "acd_orb",
+      "float_shares": 3867578.0,
+      "gap_pct": 10.12
+    },
+    {
+      "ticker": "NUWE",
+      "date": "2024-11-04",
+      "time_et": "09:40",
+      "pattern": "acd_orb",
+      "float_shares": 47976.0,
+      "gap_pct": 63.97
+    },
+    {
+      "ticker": "OLOX",
+      "date": "2025-11-19",
+      "time_et": "09:40",
+      "pattern": "acd_orb",
+      "float_shares": 549954.0,
+      "gap_pct": 21.7
+    },
+    {
+      "ticker": "OM",
+      "date": "2024-05-06",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 15496392.0,
+      "gap_pct": 9.55
+    },
+    {
+      "ticker": "OPAD",
+      "date": "2025-07-21",
+      "time_et": "11:20",
+      "pattern": "acd_orb",
+      "float_shares": 4136243.0,
+      "gap_pct": 8.41
+    },
+    {
+      "ticker": "OSRH",
+      "date": "2025-04-03",
+      "time_et": "11:15",
+      "pattern": "acd_orb",
+      "float_shares": 14654229.0,
+      "gap_pct": 40.82
+    },
+    {
+      "ticker": "PHUN",
+      "date": "2024-10-25",
+      "time_et": "09:45",
+      "pattern": "acd_orb",
+      "float_shares": 19683708.0,
+      "gap_pct": 8.37
+    },
+    {
+      "ticker": "PLCE",
+      "date": "2025-09-08",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 7678459.0,
+      "gap_pct": 11.03
+    },
+    {
+      "ticker": "POLA",
+      "date": "2026-03-31",
+      "time_et": "09:50",
+      "pattern": "acd_orb",
+      "float_shares": 2830078.0,
+      "gap_pct": 17.44
+    },
+    {
+      "ticker": "PTHS",
+      "date": "2025-01-21",
+      "time_et": "10:35",
+      "pattern": "acd_orb",
+      "float_shares": 1396167.0,
+      "gap_pct": 13.68
+    },
+    {
+      "ticker": "PUSA",
+      "date": "2026-05-04",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 14702634.0,
+      "gap_pct": 6.95
+    },
+    {
+      "ticker": "QMCO",
+      "date": "2024-11-25",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 14363127.0,
+      "gap_pct": 49.62
+    },
+    {
+      "ticker": "QNTM",
+      "date": "2026-03-30",
+      "time_et": "09:40",
+      "pattern": "acd_orb",
+      "float_shares": 5931866.0,
+      "gap_pct": 5.87
+    },
+    {
+      "ticker": "RBNE",
+      "date": "2025-06-17",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 6456087.0,
+      "gap_pct": 26.27
+    },
+    {
+      "ticker": "RNAZ",
+      "date": "2025-02-05",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 865763.0,
+      "gap_pct": 6.82
+    },
+    {
+      "ticker": "RVSN",
+      "date": "2024-03-06",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 2090425.0,
+      "gap_pct": 16.75
+    },
+    {
+      "ticker": "RYOJ",
+      "date": "2026-05-22",
+      "time_et": "09:45",
+      "pattern": "acd_orb",
+      "float_shares": 2544003.0,
+      "gap_pct": 20.9
+    },
+    {
+      "ticker": "SDEV",
+      "date": "2025-12-19",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 7155819.0,
+      "gap_pct": 5.08
+    },
+    {
+      "ticker": "SHMD",
+      "date": "2026-05-08",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 15530464.0,
+      "gap_pct": 5.82
+    },
+    {
+      "ticker": "SKYQ",
+      "date": "2026-04-10",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 4070750.0,
+      "gap_pct": 6.31
+    },
+    {
+      "ticker": "SNGX",
+      "date": "2025-08-18",
+      "time_et": "10:00",
+      "pattern": "acd_orb",
+      "float_shares": 14718329.0,
+      "gap_pct": 36.69
+    },
+    {
+      "ticker": "SST",
+      "date": "2026-04-01",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 4489852.0,
+      "gap_pct": 5.63
+    },
+    {
+      "ticker": "STEM",
+      "date": "2025-07-28",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 8683856.0,
+      "gap_pct": 6.07
+    },
+    {
+      "ticker": "SURG",
+      "date": "2025-03-26",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 16998479.0,
+      "gap_pct": 73.91
+    },
+    {
+      "ticker": "TDIC",
+      "date": "2026-05-13",
+      "time_et": "10:10",
+      "pattern": "acd_orb",
+      "float_shares": 248652.0,
+      "gap_pct": 26.48
+    },
+    {
+      "ticker": "TGL",
+      "date": "2025-04-16",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 1644339.0,
+      "gap_pct": 77.88
+    },
+    {
+      "ticker": "TKNO",
+      "date": "2024-07-24",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 10879895.0,
+      "gap_pct": 16.73
+    },
+    {
+      "ticker": "TMDE",
+      "date": "2026-03-05",
+      "time_et": "11:25",
+      "pattern": "acd_orb",
+      "float_shares": 4155452.0,
+      "gap_pct": 13.57
+    },
+    {
+      "ticker": "TNON",
+      "date": "2024-09-25",
+      "time_et": "10:05",
+      "pattern": "acd_orb",
+      "float_shares": 10290976.0,
+      "gap_pct": 20.4
+    },
+    {
+      "ticker": "TNXP",
+      "date": "2025-11-19",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 15013684.0,
+      "gap_pct": 5.46
+    },
+    {
+      "ticker": "TRT",
+      "date": "2026-06-18",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 6718103.0,
+      "gap_pct": 8.84
+    },
+    {
+      "ticker": "TTEC",
+      "date": "2026-03-10",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 19769900.0,
+      "gap_pct": 8.03
+    },
+    {
+      "ticker": "VCIG",
+      "date": "2026-05-27",
+      "time_et": "10:20",
+      "pattern": "acd_orb",
+      "float_shares": 16882.0,
+      "gap_pct": 18.28
+    },
+    {
+      "ticker": "VELO",
+      "date": "2026-05-13",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 13801440.0,
+      "gap_pct": 19.06
+    },
+    {
+      "ticker": "VIVO",
+      "date": "2026-03-25",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 1767214.0,
+      "gap_pct": 11.11
+    },
+    {
+      "ticker": "VRAX",
+      "date": "2025-01-06",
+      "time_et": "10:25",
+      "pattern": "acd_orb",
+      "float_shares": 239060.0,
+      "gap_pct": 5.76
+    },
+    {
+      "ticker": "VRME",
+      "date": "2025-01-13",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 10406961.0,
+      "gap_pct": 26.08
+    },
+    {
+      "ticker": "WAFU",
+      "date": "2025-02-25",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 1274519.0,
+      "gap_pct": 83.8
+    },
+    {
+      "ticker": "WATT",
+      "date": "2026-04-15",
+      "time_et": "09:40",
+      "pattern": "acd_orb",
+      "float_shares": 5490704.0,
+      "gap_pct": 15.85
+    },
+    {
+      "ticker": "YDKG",
+      "date": "2025-08-29",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 5454158.0,
+      "gap_pct": 17.1
+    },
+    {
+      "ticker": "ZNB",
+      "date": "2025-09-04",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 1506504.0,
+      "gap_pct": 64.96
+    }
+  ]
+}

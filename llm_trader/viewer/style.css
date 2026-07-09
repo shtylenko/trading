@@ -313,6 +313,31 @@ header {
   font-size: 13px;
   color: var(--txt);
 }
+/* Dropdown filter bar above the session table */
+.table-filters {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.table-filters .tf {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.table-filters select {
+  background: #1d2430;
+  color: var(--txt);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.table-filters select:hover { border-color: var(--accent); }
+#tf-count { margin-left: auto; }
+
 .session-table th.num, .session-table td.num { text-align: right; }
 .session-table td.pos { color: var(--green); }
 .session-table td.neg { color: var(--red); }
@@ -365,6 +390,7 @@ header {
 
 /* Session-detail header/table (used by the tickers view: .bd-head, .bd-table, …) */
 .bd-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.bd-archive { margin-left: auto; }
 .bd-head h2 { margin: 0; font-size: 18px; letter-spacing: .3px; }
 .bd-meta { color: var(--muted); font-size: 12px; margin: 6px 0 16px; }
 .bd-progress { font-size: 12px; margin: 4px 0 8px; color: var(--txt); display: flex; align-items: center; gap: 8px; }
@@ -391,4 +417,7 @@ header {
    look-ahead void — amber/neutral, not red, and never counted against the run. */
 .badge.out-of-credits {
   background: #2a2214; border-color: #6a5a2a; color: #d9b25a; cursor: help;
+}
+.badge.timeout {
+  background: #2a1a22; border-color: #6a2a4a; color: #d95a9a; cursor: help;
 }

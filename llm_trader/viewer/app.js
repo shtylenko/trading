@@ -189,70 +189,68 @@ function sessionCmp(key, dir) {
   };
 }
 
-// Render the default full-page, sortable session table into #no-session.
-// Row click fully navigates to ?session=<id> (no dynamic swap); Cmd/Ctrl/
-// middle-click opens it in a new tab. Header click re-sorts via URL + reload.
-async function renderSessionTable() {
-  document.getElementById("app").classList.add("table-view");
+// Full unfiltered session list for the table view. The dropdown filters re-render
+// the table from this without re-fetching.
+let allSessions = [];
 
-  const host = document.getElementById("no-session");
-  host.classList.add("session-table-mode");
-  host.classList.remove("hidden");
-  host.style.display = "";
-  host.innerHTML = `<div class="muted" style="padding:8px">Loading sessions…</div>`;
+// Dropdown filters shown above the session table. `norm` maps a session row to the
+// value the dropdown filters on (and shows as its option label); nulls collapse to "—".
+const TABLE_FILTERS = [
+  { key: "type",    label: "Type",    norm: (s) => s.type || "simulated" },
+  { key: "version", label: "Version", norm: (s) => s.version || "—" },
+  { key: "model",   label: "Model",   norm: (s) => s.model || "—" },
+];
 
-  let sessions = [];
-  try {
-    const data = await getJSON("/api/sessions");
-    sessions = data.sessions || [];
-  } catch (e) {
-    host.innerHTML = `<div class="muted" style="padding:12px;color:#f88">Failed to load sessions: ${escapeHtml(String(e))}</div>`;
-    return;
-  }
+// Distinct filter values present across all sessions, sorted for a stable dropdown.
+const distinctFilterVals = (norm) =>
+  [...new Set(allSessions.map(norm))].sort((a, b) => String(a).localeCompare(String(b)));
 
-  // Sort state lives in the URL so it survives the full-page reload and is
-  // deep-linkable. Default: most recent first.
-  const sortKey = TABLE_COLS.some((c) => c.key === qs("sort")) ? qs("sort") : "last_activity";
-  const sortDir = qs("dir") === "asc" ? "asc" : "desc";
-  sessions.sort(sessionCmp(sortKey, sortDir));
+// Predicate combining every active (non-"All") dropdown. Selections live in the URL
+// so a sort-reload preserves them and the view is deep-linkable.
+function sessionFilterFn() {
+  const active = TABLE_FILTERS
+    .map((f) => ({ f, val: qs(f.key) }))
+    .filter((x) => x.val && x.val !== "All");
+  return (s) => active.every((x) => x.f.norm(s) === x.val);
+}
 
-  if (!sessions.length) {
-    host.innerHTML = `<div class="muted" style="padding:12px">No sessions yet.</div>`;
-    return;
-  }
-
-  const head = TABLE_COLS.map((c) => {
+function sessionHeadHtml(sortKey, sortDir) {
+  return TABLE_COLS.map((c) => {
     const cls = [c.num ? "num" : "", c.key === sortKey ? `sorted-${sortDir}` : ""].filter(Boolean).join(" ");
     return `<th data-key="${c.key}"${cls ? ` class="${cls}"` : ""}>${c.label}</th>`;
   }).join("");
+}
 
-  const rows = sessions.map((s) => {
-    const type = s.type || "simulated";
-    const isLive = type === "live";
-    const display = s.name && s.name !== s.id ? `${escapeHtml(s.name)} <span class="muted small">(${escapeHtml(s.id)})</span>` : escapeHtml(s.id);
-    const pnlCls = s.pnl > 0 ? "pos" : s.pnl < 0 ? "neg" : "";
-    const wr = s.win_rate != null ? `${s.win_rate}%` : "—";
-    const rCls = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
-    // Expectancy cell: clean expectancy (= mean R) with std dispersion appended.
-    const expCell = s.expectancy_r != null
-      ? `${s.expectancy_r.toFixed(2)}${s.std_r != null ? ` <span class="muted small">±${s.std_r.toFixed(2)}</span>` : ""}`
-      : "—";
-    const effCell = s.effective_r != null ? s.effective_r.toFixed(2) : "—";
-    const pfCell = s.profit_factor_r != null ? s.profit_factor_r.toFixed(2) : "—";
-    const voidCell = s.n_void != null
-      ? (s.n_void > 0 ? `<span class="neg">${s.n_void}</span>` : "0")
-      : "—";
-    // ongoing vs completed; while running, show finalized/planned progress
-    const running = s.status === "running";
-    const prog = (s.planned && s.n_complete != null && s.n_complete < s.planned)
-      ? ` ${s.n_complete}/${s.planned}` : "";
-    const ooc = s.n_out_of_credits > 0
-      ? ` <span class="badge out-of-credits" title="${s.n_out_of_credits} run(s) out of API credits (HTTP 402) — excluded from stats, not void">⚠ ${s.n_out_of_credits} no credits</span>`
-      : "";
-    const statusCell = (running
-      ? `<span class="badge running">● running${prog}</span>`
-      : `<span class="badge complete">done</span>`) + ooc;
-    return `<tr data-id="${escapeHtml(s.id)}">
+function sessionRowHtml(s) {
+  const type = s.type || "simulated";
+  const isLive = type === "live";
+  const display = s.name && s.name !== s.id ? `${escapeHtml(s.name)} <span class="muted small">(${escapeHtml(s.id)})</span>` : escapeHtml(s.id);
+  const pnlCls = s.pnl > 0 ? "pos" : s.pnl < 0 ? "neg" : "";
+  const wr = s.win_rate != null ? `${s.win_rate}%` : "—";
+  const rCls = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
+  // Expectancy cell: clean expectancy (= mean R) with std dispersion appended.
+  const expCell = s.expectancy_r != null
+    ? `${s.expectancy_r.toFixed(2)}${s.std_r != null ? ` <span class="muted small">±${s.std_r.toFixed(2)}</span>` : ""}`
+    : "—";
+  const effCell = s.effective_r != null ? s.effective_r.toFixed(2) : "—";
+  const pfCell = s.profit_factor_r != null ? s.profit_factor_r.toFixed(2) : "—";
+  const voidCell = s.n_void != null
+    ? (s.n_void > 0 ? `<span class="neg">${s.n_void}</span>` : "0")
+    : "—";
+  // ongoing vs completed; while running, show finalized/planned progress
+  const running = s.status === "running";
+  const prog = (s.planned && s.n_complete != null && s.n_complete < s.planned)
+    ? ` ${Math.round((s.n_complete / s.planned) * 100)}%` : "";
+  const ooc = s.n_out_of_credits > 0
+    ? ` <span class="badge out-of-credits" title="${s.n_out_of_credits} run(s) out of API credits (HTTP 402) — excluded from stats, not void">⚠ ${s.n_out_of_credits} no credits</span>`
+    : "";
+  const tout = s.n_timed_out > 0
+    ? ` <span class="badge timeout" title="${s.n_timed_out} run(s) killed after the per-setup timeout (retries exhausted) — a failure, excluded from stats, not complete; re-run with --resume">⚠ ${s.n_timed_out} timed out</span>`
+    : "";
+  const statusCell = (running
+    ? `<span class="badge running">● running${prog}</span>`
+    : `<span class="badge complete">done</span>`) + ooc + tout;
+  return `<tr data-id="${escapeHtml(s.id)}">
       <td>${display}</td>
       <td><span class="badge ${isLive ? "live" : "sim"}">${isLive ? "live" : "sim"}</span></td>
       <td>${statusCell}</td>
@@ -269,16 +267,90 @@ async function renderSessionTable() {
       <td class="num">${voidCell}</td>
       <td class="num ${pnlCls}">${s.pnl != null ? fmtMoney(s.pnl) : "—"}</td>
     </tr>`;
+}
+
+// Render the default full-page session view: a Type / Version / Model dropdown filter
+// bar above a sortable table. Selecting a dropdown re-renders the table client-side
+// (no reload, no button); header click re-sorts via URL + reload (filters persist in
+// the URL). Row click navigates to ?session=<id>; Cmd/Ctrl/middle-click = new tab.
+async function renderSessionTable() {
+  document.getElementById("app").classList.add("table-view");
+
+  const host = document.getElementById("no-session");
+  host.classList.add("session-table-mode");
+  host.classList.remove("hidden");
+  host.style.display = "";
+  host.innerHTML = `<div class="muted" style="padding:8px">Loading sessions…</div>`;
+
+  try {
+    const data = await getJSON("/api/sessions");
+    allSessions = data.sessions || [];
+  } catch (e) {
+    host.innerHTML = `<div class="muted" style="padding:12px;color:#f88">Failed to load sessions: ${escapeHtml(String(e))}</div>`;
+    return;
+  }
+
+  if (!allSessions.length) {
+    host.innerHTML = `<div class="muted" style="padding:12px">No sessions yet.</div>`;
+    return;
+  }
+
+  // Build the filter bar once. Each dropdown = "All" + the distinct values present,
+  // preselected from the URL so a sort-reload keeps the current filter.
+  const bar = TABLE_FILTERS.map((f) => {
+    const cur = qs(f.key) || "All";
+    const opts = ["All", ...distinctFilterVals(f.norm)]
+      .map((o) => `<option value="${escapeHtml(o)}"${o === cur ? " selected" : ""}>${escapeHtml(o)}</option>`)
+      .join("");
+    return `<label class="tf"><span class="muted small">${f.label}</span>
+      <select data-key="${f.key}">${opts}</select></label>`;
   }).join("");
 
-  host.innerHTML = `<table class="session-table">
-    <thead><tr>${head}</tr></thead>
-    <tbody>${rows}</tbody>
+  host.innerHTML = `
+    <div class="table-filters">${bar}<span id="tf-count" class="muted small"></span></div>
+    <div id="session-table-host"></div>`;
+
+  // Dropdown change → persist to URL (no reload) and re-render the table immediately.
+  host.querySelectorAll(".table-filters select").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      const p = new URLSearchParams(location.search);
+      if (sel.value === "All") p.delete(sel.dataset.key);
+      else p.set(sel.dataset.key, sel.value);
+      history.replaceState(null, "", location.pathname + (p.toString() ? `?${p}` : ""));
+      applySessionFilters();
+    });
+  });
+
+  applySessionFilters();
+}
+
+// Filter `allSessions` by the active dropdowns + current sort, then (re)render the
+// table into #session-table-host and rebind header-sort and row-click handlers.
+function applySessionFilters() {
+  const tableHost = document.getElementById("session-table-host");
+  if (!tableHost) return;
+
+  // Sort state lives in the URL so it survives a full-page reload and is deep-linkable.
+  const sortKey = TABLE_COLS.some((c) => c.key === qs("sort")) ? qs("sort") : "last_activity";
+  const sortDir = qs("dir") === "asc" ? "asc" : "desc";
+  const rowsData = allSessions.filter(sessionFilterFn()).sort(sessionCmp(sortKey, sortDir));
+
+  const countEl = document.getElementById("tf-count");
+  if (countEl) countEl.textContent = `${rowsData.length} / ${allSessions.length}`;
+
+  if (!rowsData.length) {
+    tableHost.innerHTML = `<div class="muted" style="padding:12px">No sessions match the current filters.</div>`;
+    return;
+  }
+
+  tableHost.innerHTML = `<table class="session-table">
+    <thead><tr>${sessionHeadHtml(sortKey, sortDir)}</tr></thead>
+    <tbody>${rowsData.map(sessionRowHtml).join("")}</tbody>
   </table>`;
 
   // Header click → re-sort by that column via URL params + full reload.
   // Same column toggles asc/desc; a new column starts descending.
-  host.querySelectorAll("th[data-key]").forEach((th) => {
+  tableHost.querySelectorAll("th[data-key]").forEach((th) => {
     th.addEventListener("click", () => {
       const key = th.dataset.key;
       const dir = key === sortKey && sortDir === "desc" ? "asc" : "desc";
@@ -295,7 +367,7 @@ async function renderSessionTable() {
     if (newTab) window.open(url, "_blank");
     else window.location.href = url;
   };
-  host.querySelectorAll("tr[data-id]").forEach((tr) => {
+  tableHost.querySelectorAll("tr[data-id]").forEach((tr) => {
     const id = tr.dataset.id;
     tr.addEventListener("click", (e) => open(id, e.metaKey || e.ctrlKey));
     tr.addEventListener("auxclick", (e) => { if (e.button === 1) open(id, true); });
@@ -351,6 +423,7 @@ function renderSessionTickers(v) {
       <span class="small-btn bd-back" id="bd-back">← back to sessions</span>
       <h2>${escapeHtml(v.name || v.id)}</h2>
       <span class="badge ${type === "live" ? "live" : "sim"}">${type}</span>
+      <button class="small-btn bd-archive" id="bd-archive" title="Archive this session — hides it from the sessions list and sidebar">Archive</button>
     </div>
     <div class="bd-meta">${meta.model ? `model ${escapeHtml(meta.model)}` : ""} ${meta.version ? `v${escapeHtml(meta.version)}` : ""}</div>`;
   const m = v.metrics || {};
@@ -391,6 +464,7 @@ function renderSessionTickers(v) {
       const st = t.status || "complete";
       const voided = t.n_void > 0;
       const outOfCredits = st === "out_of_credits";
+      const timedOut = st === "timeout";
       const rep = t.n_leaves > 1 ? ` ${t.n_complete}/${t.n_leaves}` : "";
       let statusCell;
       if (st === "running") {
@@ -399,13 +473,15 @@ function renderSessionTickers(v) {
         statusCell = `<span class="badge stale">stale</span>`;
       } else if (st === "out_of_credits") {
         statusCell = `<span class="badge out-of-credits" title="agent hit HTTP 402 (out of API credits) — excluded from stats, not a void">out of credits${t.n_out_of_credits > 1 ? ` ×${t.n_out_of_credits}` : ""}</span>`;
+      } else if (st === "timeout") {
+        statusCell = `<span class="badge timeout" title="run killed after exceeding the per-setup timeout (retries exhausted) — a failure, excluded from stats, not complete; re-run with --resume">timed out${t.n_timed_out > 1 ? ` ×${t.n_timed_out}` : ""}</span>`;
       } else if (voided) {
         statusCell = `<span class="void-badge" title="${escapeHtml(t.void_reason || "voided")}">VOID${t.n_void > 1 ? ` ×${t.n_void}` : ""}</span>`;
       } else {
         statusCell = `<span class="badge complete">complete</span>`;
       }
-      // dim finalized-and-voided rows; out-of-credits rows dim too (no result to show)
-      const dim = (voided || outOfCredits) && st !== "running" ? " voided" : "";
+      // dim finalized-and-voided rows; out-of-credits / timed-out rows dim too (no result)
+      const dim = (voided || outOfCredits || timedOut) && st !== "running" ? " voided" : "";
       return `<tr class="run${dim}" data-leaf="${escapeHtml(t.leaf_id)}" data-ticker="${escapeHtml(t.ticker)}">
         <td><b>${escapeHtml(t.ticker)}</b></td>
         <td>${t.n_trades}</td>
@@ -428,6 +504,10 @@ function renderSessionTickers(v) {
   if (back) back.addEventListener("click", () => {
     window.location.href = "/viewer/index.html";
   });
+
+  // archive button → hide this whole session (all its leaves) from the lists
+  const arc = bd.querySelector("#bd-archive");
+  if (arc) arc.addEventListener("click", () => archiveSession(v.id, arc));
 
   // click ticker row -> load detail
   bd.querySelectorAll("tr.run").forEach(tr => {
@@ -1038,6 +1118,28 @@ function wireDetailButtons(sessionId) {
   const refBtn = document.getElementById("refresh-btn");
   if (refBtn) {
     refBtn.onclick = () => refreshCurrentSession();
+  }
+
+  // Archive this run → hide it from the lists, then return to the sessions list.
+  const arcBtn = document.getElementById("archive-btn");
+  if (arcBtn) {
+    arcBtn.onclick = () => archiveSession(sessionId, arcBtn);
+  }
+}
+
+// POST an archive for a session (leaf or top-level id); on success go back to the
+// sessions list (which now excludes it). Shared by the detail + tickers views.
+async function archiveSession(id, btn) {
+  if (!id) return;
+  const label = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; btn.textContent = "Archiving…"; }
+  try {
+    const r = await fetch(`/api/session/${encodeURIComponent(id)}/archive`, { method: "POST" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    window.location.href = "/viewer/index.html";
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+    fail(`Could not archive ${id}: ${e}`);
   }
 }
 

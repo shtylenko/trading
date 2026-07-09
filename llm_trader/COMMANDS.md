@@ -32,6 +32,23 @@ python3 -m trading.llm_trader.recorder report --by-version
 
 
 cd /Users/shtylenko/Projects && set -a && . trading/.env && set +a
+
+
+python3 -m trading.llm_trader.batchsim run --version 2.4.1 --model deepseek-v4-flash \
+    --set trading/llm_trader/batch/testset_100u.json --no-reentry
+
+
+python3 -m trading.llm_trader.batchsim run --version 2.4.1 --model muse-spark-1.1 \
+    --set trading/llm_trader/batch/testset_100u.json --no-reentry
+
+
+python3 -m trading.llm_trader.batchsim run \
+    --model muse-spark-1.1 \
+    --set trading/llm_trader/batch/testset_100.json \
+    --parallel 10 --repeats 1 --version 2.8.0
+
+
+cd /Users/shtylenko/Projects && set -a && . trading/.env && set +a
 python3 -m trading.llm_trader.batchsim run \
     --model deepseek-v4-flash \
     --set trading/llm_trader/batch/testset.json \
@@ -43,3 +60,4 @@ python3 -m trading.llm_trader.batchsim run \
     --model deepseek-v4-flash \
     --set trading/llm_trader/batch/testset_mini.json \
     --parallel 3 --repeats 1 --tag mini
+

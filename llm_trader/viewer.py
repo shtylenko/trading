@@ -326,6 +326,14 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
             sid = self._get_session_id(path)
             if sid:
                 return self._do_finalize(sid)
+        if path.startswith("/api/session/") and (
+                path.endswith("/archive") or path.endswith("/unarchive")):
+            if not self._is_local_request():
+                self.send_error(403, "Forbidden")
+                return
+            sid = self._get_session_id(path)
+            if sid:
+                return self._do_archive(sid, archived=path.endswith("/archive"))
         self.send_response(404)
         self.end_headers()
 
@@ -345,6 +353,23 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
             self._send_json({"error": str(e)}, 500)
         except Exception as e:
             logger.exception("Unexpected error handling /api/session/.../finalize")
+            self._send_json({"error": str(e)}, 500)
+
+    def _do_archive(self, sid: str, *, archived: bool):
+        # Works for a concrete leaf OR a top-level/batch group id (recorder resolves
+        # members), so we deliberately do NOT require (SIM_ROOT / sid).exists().
+        try:
+            from . import recorder
+            n = recorder.archive_session(sid, archived=archived)
+            if n == 0:
+                self._send_json({"error": "session not found"}, 404)
+                return
+            self._send_json({"ok": True, "n": n, "archived": archived})
+        except (json.JSONDecodeError, OSError, KeyError, TypeError, ValueError) as e:
+            logger.warning("Error handling /api/session/.../archive: %s", e)
+            self._send_json({"error": str(e)}, 500)
+        except Exception as e:
+            logger.exception("Unexpected error handling /api/session/.../archive")
             self._send_json({"error": str(e)}, 500)
 
 

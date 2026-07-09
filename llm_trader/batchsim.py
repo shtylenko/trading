@@ -128,6 +128,8 @@ _READ_VERB_RE = re.compile(
 _OUT_OF_CREDITS_RE = re.compile(
     r"HTTP\s*402|Insufficient\s+Balance|insufficient\s+(?:funds|credits?|balance)", re.I)
 _OUT_OF_CREDITS_LABEL = "out of credits (HTTP 402)"
+_TIMEOUT_LABEL = "killed after per-setup timeout"
+_DEFAULT_RETRIES = 1  # extra attempts on a timeout before giving up (0 = no retry)
 
 
 def _text_out_of_credits(text: Optional[str]) -> bool:
@@ -162,7 +164,7 @@ def _load_keys(path: Path) -> set:
 
 def build_set(
     n: int = 30, *, seed: int = 13, db: Path = ENTRIES_DB, after: str = "09:30",
-    exclude: Optional[set] = None,
+    exclude: Optional[set] = None, unique_ticker: bool = False,
 ) -> list[dict]:
     """Stratified, deterministic sample of ~``n`` setups from ``entries.db``.
 
@@ -175,6 +177,10 @@ def build_set(
 
     ``exclude`` is a set of ``(ticker, date)`` keys to leave out — pass the dev set's
     keys to carve a **disjoint holdout** (see IMPROVING.md §6 / BACKLOG DX).
+
+    ``unique_ticker`` collapses the pool to **one setup per ticker** (keeping each
+    ticker's most-recent date) before sampling, so every setup is a distinct name — max
+    cross-ticker diversity, no correlated repeats of the same ticker on different days.
     """
     exclude = exclude or set()
     with sqlite3.connect(str(db)) as conn:
@@ -190,6 +196,17 @@ def build_set(
             continue
         seen.setdefault(key, r)
     rows = list(seen.values())
+
+    if unique_ticker:
+        # Collapse to one row per ticker, preferring the most RECENT date — keeps the
+        # set in the latest era where possible; a ticker seen only in an earlier period
+        # contributes that earlier date. Result: every setup is a distinct ticker.
+        by_ticker: dict[str, dict] = {}
+        for r in rows:
+            cur = by_ticker.get(r["ticker"])
+            if cur is None or (r.get("date") or "") > (cur.get("date") or ""):
+                by_ticker[r["ticker"]] = r
+        rows = list(by_ticker.values())
 
     def bucket(r: dict) -> tuple:
         tb = "early" if (r.get("time_et") or "") < "10:30" else "late"
@@ -250,7 +267,8 @@ def _archived_skill(version: str) -> Path:
 
 
 def _prompt(version: str, skill_text: str, tag: str, session_id: str,
-            ticker: str, date: str, time_et: Optional[str], sdir: str) -> str:
+            ticker: str, date: str, time_et: Optional[str], sdir: str,
+            reentry: bool = True) -> str:
     """The per-setup task handed to a headless hermes agent.
 
     The harness has ALREADY created and sealed the session (recorder init + step start)
@@ -263,6 +281,15 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
 
     Command lines are NOT indented (leading whitespace on `\\`-continued lines would be
     passed to the agent verbatim)."""
+    # The early-stop rule (condition b) depends on whether §C re-entry is allowed this run.
+    done_rule = (
+        "and you have decided, per the skill's §C rules, NOT to take a re-entry (or have "
+        "already used your one re-entry). Do not sit through the rest of the day 'just in "
+        "case' — decide within a few bars of going flat, then stop."
+        if reentry else
+        "RE-ENTRY IS DISABLED for this run, so being flat means you are done — stop "
+        "immediately. Do NOT take any §C re-entry and do NOT keep revealing bars."
+    )
     return f"""You are executing ONE trade simulation as an automated backtest.
 
 Your trading rules are provided IN FULL below, between the BEGIN/END markers — they
@@ -294,10 +321,19 @@ python3 -m trading.llm_trader.step next --session "{sdir}"
 2. Log your decision for the bar you just saw (after EVERY bar):
 python3 -m trading.llm_trader.recorder log --session "{sdir}" --record '{{"i":<i>,"time":"<HH:MM>","thought":"...","action":"OBSERVE|ENTER|...","fill_px":null,"shares_delta":null,"stop":null,"note":"..."}}'
 
-Repeat 1→2 until `step next` prints `STATUS end`. Then you are DONE — stop. The harness
-finalizes the run for you; do NOT run finalize yourself. As the very last thing you
-output, print exactly this line so the audit can find your run:
+Repeat 1→2. STOP as soon as EITHER of these is true — do NOT keep revealing bars past
+the stop point:
+  (a) `step next` prints `STATUS end` (the stream is over), OR
+  (b) you are FLAT (no open position) and you are DONE trading this setup — {done_rule}
+Once you stop, the harness finalizes the run for you; do NOT run finalize yourself. As
+the very last thing you output, print exactly this line so the audit can find your run:
 BATCHSIM_SID={sdir}
+
+WHY THIS MATTERS: every `step next` is a real model turn. Walking the whole day bar-by-bar
+after you are already flat and done wastes the run (and can time it out) for zero value —
+the setup's later bars change nothing once you have no position and no pending entry. While
+you HOLD a position (managing a runner, waiting on an armed trigger), you of course keep
+going; the early stop only applies once you are flat with nothing left to do.
 
 === ABSOLUTE HARD RULES — ANY VIOLATION VOIDS THE ENTIRE RUN (audit detects this) ===
 
@@ -379,14 +415,16 @@ def _summarize_session(sid: Optional[str]) -> str:
 def _completed_counts(tag: str) -> dict[tuple, int]:
     """(ticker, date) → number of **clean** finalized sessions for this batch.
 
-    Voided and out-of-credits sessions do NOT count as done, so ``--resume`` re-runs a
-    setup whose only prior attempt was audit-voided or died on HTTP 402 (out of
-    credits) instead of leaving you a tainted or incomplete cohort."""
+    Voided, out-of-credits and timed-out sessions do NOT count as done, so ``--resume``
+    re-runs a setup whose only prior attempt was audit-voided, died on HTTP 402 (out of
+    credits), or was killed at the timeout — instead of leaving a tainted or incomplete
+    cohort."""
     counts: dict[tuple, int] = defaultdict(int)
     for d in _sessions_for_batch(tag):
         s = recorder._load_json(d / "session.json", {}) or {}
         if (s.get("status") == "complete"
-                and not s.get("void") and not s.get("out_of_credits")):
+                and not s.get("void") and not s.get("out_of_credits")
+                and not s.get("timed_out")):
             counts[(s.get("ticker"), s.get("historical_date"))] += 1
     return counts
 
@@ -464,6 +502,10 @@ def _run_one(work: dict) -> dict:
             # (excluded from stats) rather than a look-ahead void. Done after finalize,
             # which rewrites session.json.
             _stamp_out_of_credits(sdir)
+        elif status == "timeout":
+            # Same idea for a killed-on-timeout run: stamp it so it is never a clean
+            # "complete no-trade" — excluded from stats and re-run by --resume.
+            _stamp_timeout(sdir)
         base = {"item": work["item"], "session_name": name, "sid": sid,
                 "ticker": work["ticker"], "date": work["date"], "rep": work["rep"],
                 "status": status}
@@ -474,7 +516,10 @@ def _run_one(work: dict) -> dict:
     # finds this run's session afterward by the unique recorder SDIR it contains
     # (see _resolve_batch_commands) rather than by a name here.
     cmd = ["hermes", "-z", work["prompt"], "--yolo", "-m", work["model"]]
-    try:
+
+    def _attempt() -> tuple[Optional[str], Optional[str], Optional[int]]:
+        """One agent run. Returns (stdout, stderr, returncode); (None, None, None) on
+        timeout (process killed)."""
         # Fresh empty marketdata cache per agent so a stray cached bar can never leak
         # the future into another run; auto-removed when the agent exits.
         with tempfile.TemporaryDirectory(prefix="batchsim-nomd-") as nomd:
@@ -484,24 +529,46 @@ def _run_one(work: dict) -> dict:
             ) as proc:
                 try:
                     stdout, stderr = proc.communicate(timeout=work["timeout"])
+                    return stdout, stderr, proc.returncode
                 except subprocess.TimeoutExpired:
                     try:
                         os.killpg(proc.pid, signal.SIGKILL)
                     except (OSError, ProcessLookupError):
                         proc.kill()
                     proc.wait()
-                    log_path.write_text(f"[TIMEOUT after {work['timeout']}s]\n")
-                    return _result("timeout")
+                    return None, None, None
+
+    try:
+        # A timeout is an infra hiccup (slow API / a hung turn), not a trading result, so
+        # retry it a few times before giving up. Each attempt re-seals nothing — the same
+        # pre-sealed SDIR is reused, so no look-ahead risk. Only a persistent timeout is
+        # recorded as a (stamped, re-runnable) failure — never a clean "complete".
+        retries = work.get("retries", _DEFAULT_RETRIES)
+        for attempt in range(retries + 1):
+            stdout, stderr, rc = _attempt()
+            if rc is not None:
+                break  # the agent finished (0, error, or ooc) — stop retrying
+            if attempt < retries:
+                log_path.write_text(
+                    f"[TIMEOUT after {work['timeout']}s] attempt {attempt + 1}/"
+                    f"{retries + 1} — retrying\n"
+                )
+        else:
+            # Exhausted all attempts still timing out → a real (stamped) failure.
+            log_path.write_text(
+                f"[TIMEOUT after {work['timeout']}s] gave up after {retries + 1} attempt(s)\n"
+            )
+            return _result("timeout", attempts=retries + 1)
+
         log_path.write_text(
-            f"[exit {proc.returncode}]\n===== STDOUT =====\n{stdout}\n"
-            f"===== STDERR =====\n{stderr}\n"
+            f"[exit {rc}]{' (after retry)' if attempt else ''}\n"
+            f"===== STDOUT =====\n{stdout}\n===== STDERR =====\n{stderr}\n"
         )
         # hermes exits 0 even when the API is out of credits (it just prints an
         # HTTP 402), so check the output, not the return code, for this case.
         if _text_out_of_credits(f"{stdout}\n{stderr}"):
-            return _result("out-of-credits", returncode=proc.returncode, log=str(log_path))
-        return _result("ok" if proc.returncode == 0 else "err",
-                       returncode=proc.returncode, log=str(log_path))
+            return _result("out-of-credits", returncode=rc, log=str(log_path))
+        return _result("ok" if rc == 0 else "err", returncode=rc, log=str(log_path))
     except FileNotFoundError:
         return {"item": work["item"], "session_name": name, "sid": sid,
                 "status": "no-hermes", "error": "`hermes` CLI not found on PATH"}
@@ -532,6 +599,7 @@ def run(
     version: Optional[str] = None, *, model: Optional[str] = None,
     testset: Optional[Path] = None, parallel: int = 4,
     repeats: int = 1, tag: Optional[str] = None, timeout: int = 900,
+    retries: int = _DEFAULT_RETRIES, reentry: bool = True,
     resume: bool = False, dry_run: bool = False, session: Optional[str] = None,
 ) -> str:
     """Run the batch: spawn agents for every (setup × repeat), then audit + report."""
@@ -566,8 +634,13 @@ def run(
             testset = Path(bmeta["testset"])
         if repeats == 1 and isinstance(bmeta.get("repeats"), int):
             repeats = bmeta["repeats"]
+        # Re-entry mode is fixed for the batch — a resume must match it, so recover it
+        # from batch.json rather than re-deriving from the CLI (you can't mix modes).
+        if "reentry" in bmeta:
+            reentry = bool(bmeta["reentry"])
         print(f"--resume: using version={version} model={model} "
-              f"set={testset} repeats={repeats} (from batch.json)", file=sys.stderr)
+              f"set={testset} repeats={repeats} reentry={reentry} (from batch.json)",
+              file=sys.stderr)
 
     if not model:
         raise SystemExit("--model is required (resume did not recover one from batch.json).")
@@ -625,11 +698,13 @@ def run(
                 "session_name": _session_name(tag, su["ticker"], su["date"], rep),
                 "tag": tag,
                 "session": session_id,
-                "model": model, "timeout": timeout, "dry_run": dry_run,
+                "model": model, "timeout": timeout, "retries": retries,
+                "reentry": reentry, "dry_run": dry_run,
             })
 
     print(f"batch {tag} (session {session_id}): version {version}, {len(setups)} setups × {repeats} "
-          f"= {len(work)} runs (parallel {parallel}, model {model})"
+          f"= {len(work)} runs (parallel {parallel}, model {model}, "
+          f"reentry {'on' if reentry else 'OFF'})"
           f"{' [DRY RUN]' if dry_run else ''}", file=sys.stderr)
 
     if dry_run:
@@ -637,7 +712,8 @@ def run(
         # placeholder SDIR so the plan is inspectable without touching the provider.
         for w in work:
             w["prompt"] = _prompt(version, skill_text, tag, session_id, w["ticker"],
-                                  w["date"], w.get("time_et"), sdir="<PRE-SEALED-SDIR>")
+                                  w["date"], w.get("time_et"), sdir="<PRE-SEALED-SDIR>",
+                                  reentry=w["reentry"])
         print(json.dumps([_run_one(w) for w in work], indent=2))
         return tag
 
@@ -651,7 +727,8 @@ def run(
         try:
             w["sdir"] = str(_preseal(w, skill_path, version, session_id))
             w["prompt"] = _prompt(version, skill_text, tag, session_id, w["ticker"],
-                                  w["date"], w.get("time_et"), w["sdir"])
+                                  w["date"], w.get("time_et"), w["sdir"],
+                                  reentry=w["reentry"])
             ready.append(w)
         except Exception as e:  # noqa: BLE001 — one bad setup shouldn't sink the batch
             print(f"  [preseal-err] {w['item']}: {e}", file=sys.stderr)
@@ -665,7 +742,7 @@ def run(
     # items) from the moment it starts — before any session finalizes.
     _write_batch_meta(
         tag, version=version, model=model, testset=str(testset),
-        planned=len(setups) * repeats, repeats=repeats,
+        planned=len(setups) * repeats, repeats=repeats, reentry=reentry,
         started_ts=datetime.now().isoformat(timespec="seconds"),
         finished_ts=None, status="running",
     )
@@ -697,13 +774,18 @@ def run(
 
     n_void = audit(tag)
     n_ooc = sum(r.get("status") == "out-of-credits" for r in results)
+    n_timeout = sum(r.get("status") == "timeout" for r in results)
     print(f"\nbatch {tag} done: {sum(r['status']=='ok' for r in results)}/{len(results)} "
           f"agents ok, {n_void} sessions voided by audit"
-          + (f", {n_ooc} out of credits (excluded, not void)" if n_ooc else ""),
+          + (f", {n_ooc} out of credits (excluded, not void)" if n_ooc else "")
+          + (f", {n_timeout} timed out (excluded, not complete)" if n_timeout else ""),
           file=sys.stderr)
     if n_ooc:
         print(f"⚠️  {n_ooc} run(s) hit HTTP 402 (out of API credits) and never traded — "
               "top up credits and re-run with --resume to fill them in.", file=sys.stderr)
+    if n_timeout:
+        print(f"⚠️  {n_timeout} run(s) exhausted their retries and timed out — recorded as "
+              "failed (not complete). Re-run with --resume to retry them.", file=sys.stderr)
 
     # Loud guard: if (nearly) every finalized session voided as *unverifiable*, the
     # hermes export / --continue contract almost certainly isn't satisfied — the report
@@ -1039,6 +1121,17 @@ def _stamp_out_of_credits(sdir: Path) -> None:
     atomic_write_json(sj, s, indent=2)
 
 
+def _stamp_timeout(sdir: Path) -> None:
+    """Mark a finalized session as a timed-out infra failure (not a void, and NOT a
+    clean 'complete no-trade'). Mirrors _stamp_out_of_credits: the stats/viewer/resume
+    layers treat `timed_out` exactly like out-of-credits — excluded, re-runnable."""
+    sj = Path(sdir) / "session.json"
+    s = recorder._load_json(sj, {}) or {}
+    s["timed_out"] = _TIMEOUT_LABEL
+    s.pop("void", None)  # a run is never both timed-out and voided
+    atomic_write_json(sj, s, indent=2)
+
+
 def _agent_log_for(tag: str, session_name: Optional[str]) -> Optional[Path]:
     """The captured agent log for one run, if present (BATCH_LOGS/<tag>/<name>.log)."""
     if not session_name:
@@ -1079,10 +1172,21 @@ def audit(tag: str) -> int:
     cmd_map = _resolve_batch_commands([d.name for d in sessions])
     # sid → session_name, so a run with no command log can still be matched to its
     # captured agent log to distinguish out-of-credits from genuinely unverifiable.
-    name_map = {r.get("sid"): r.get("session_name") for r in _load_manifest(tag)}
+    manifest = _load_manifest(tag)
+    name_map = {r.get("sid"): r.get("session_name") for r in manifest}
+    # sids the harness recorded as killed-on-timeout, so a run finalized before the
+    # timeout stamp existed (or by an older build) is still reconciled here.
+    timeout_sids = {r.get("sid") for r in manifest if r.get("status") == "timeout"}
     voided = 0
     for d in sessions:
         session = recorder._load_json(d / "session.json", {}) or {}
+        if session.get("timed_out") or d.name in timeout_sids:
+            # A timeout infra failure (excluded from stats, re-run by --resume). Ensure
+            # it's stamped (backfills old runs finalized as a bare "complete") and never
+            # void it as a look-ahead peek.
+            if not session.get("timed_out"):
+                _stamp_timeout(d)
+            continue
         commands = cmd_map.get(d.name)
         if commands is None and _ran_out_of_credits(tag, session, name_map.get(d.name)):
             # Infra failure, not a peek: mark out-of-credits, never void.
@@ -1131,11 +1235,13 @@ def _leaves_by_key(tag: str) -> dict:
         p = recorder._load_json(d / "pnl.json", {}) or {}
         rec = {
             "void": bool(s.get("void")), "ooc": bool(s.get("out_of_credits")),
+            "timeout": bool(s.get("timed_out")),
             "status": s.get("status"), "ts": s.get("real_run_ts") or "",
             "traded": bool(p.get("traded")), "r": p.get("r_multiple"),
             "pnl": p.get("realized_pnl"), "win": bool(p.get("win")),
         }
-        def clean(r): return r["status"] == "complete" and not r["void"] and not r["ooc"]
+        def clean(r):
+            return r["status"] == "complete" and not r["void"] and not r["ooc"] and not r["timeout"]
         prev = best.get(key)
         if (prev is None or (clean(rec) and not clean(prev))
                 or (clean(rec) == clean(prev) and rec["ts"] > prev["ts"])):
@@ -1144,9 +1250,9 @@ def _leaves_by_key(tag: str) -> dict:
 
 
 def _effective_r(rec: dict) -> Optional[float]:
-    """Deployment R for one leaf: traded → realized R; stood-down → 0R; void/ooc → None
-    (excluded from the pair). None if a completed traded leaf is missing its R."""
-    if rec["void"] or rec["ooc"] or rec["status"] != "complete":
+    """Deployment R for one leaf: traded → realized R; stood-down → 0R; void/ooc/timeout
+    → None (excluded from the pair). None if a completed traded leaf is missing its R."""
+    if rec["void"] or rec["ooc"] or rec["timeout"] or rec["status"] != "complete":
         return None
     if not rec["traded"]:
         return 0.0
@@ -1194,8 +1300,9 @@ def compare(tag_a: str, tag_b: str) -> dict:
         losers = [r["pnl"] for r in traded if not r["win"] and (r["pnl"] or 0) != 0]
         return {
             "n_keys": len(vals),
-            "void": sum(1 for r in vals if r["void"] and not r["ooc"]),
+            "void": sum(1 for r in vals if r["void"] and not r["ooc"] and not r["timeout"]),
             "ooc": sum(1 for r in vals if r["ooc"]),
+            "timeout": sum(1 for r in vals if r["timeout"]),
             "stood": sum(1 for r in vals if _effective_r(r) == 0.0 and not r["traded"]),
             "avg_loser": (sum(losers) / len(losers)) if losers else None,
         }
@@ -1214,7 +1321,7 @@ def compare(tag_a: str, tag_b: str) -> dict:
 def _print_compare(r: dict) -> None:
     a, b = r["stats_a"], r["stats_b"]
     print(f"=== compare  A(baseline)={r['tag_a']}  vs  B(candidate)={r['tag_b']} ===")
-    print(f"paired on {r['n_pairs']} shared setups (effective R; stood-down=0R; void/ooc excluded)\n")
+    print(f"paired on {r['n_pairs']} shared setups (effective R; stood-down=0R; void/ooc/timeout excluded)\n")
     print(f"  mean ΔR (B−A) : {r['mean_dR']:+.3f}")
     print(f"  median ΔR     : {r['median_dR']:+.3f}")
     print(f"  better/worse/≈: {r['better']} / {r['worse']} / {r['equal']}")
@@ -1225,14 +1332,16 @@ def _print_compare(r: dict) -> None:
     print(f"\n  guardrails            A={r['tag_a']:<28} B={r['tag_b']}")
     al_a = f"${a['avg_loser']:.0f}" if a['avg_loser'] is not None else "—"
     al_b = f"${b['avg_loser']:.0f}" if b['avg_loser'] is not None else "—"
-    print(f"    keys / void / ooc   {a['n_keys']}/{a['void']}/{a['ooc']:<24} {b['n_keys']}/{b['void']}/{b['ooc']}")
+    kv_a = f"{a['n_keys']}/{a['void']}/{a['ooc']}/{a['timeout']}"
+    kv_b = f"{b['n_keys']}/{b['void']}/{b['ooc']}/{b['timeout']}"
+    print(f"    keys/void/ooc/t.out {kv_a:<28} {kv_b}")
     print(f"    stood-down          {a['stood']:<28} {b['stood']}")
     print(f"    avg loser           {al_a:<28} {al_b}")
 
     # verdict (the gate: broad, significant, not tail-driven, guardrails not worse)
     sig = r["sign_p"] is not None and r["sign_p"] < 0.05
     broad = r["median_dR"] >= 0 and r["top3_share"] <= 0.5
-    guard_ok = (b["void"] <= a["void"] + 2 and b["ooc"] == 0)
+    guard_ok = (b["void"] <= a["void"] + 2 and b["ooc"] == 0 and b["timeout"] == 0)
     if r["mean_dR"] > 0 and sig and broad and guard_ok:
         verdict = "✅ ACCEPT — B is broadly better and clears the gate."
     elif r["mean_dR"] > 0 and (sig or r["median_dR"] > 0):
@@ -1263,6 +1372,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pb.add_argument("--exclude", action="append", default=[],
                     help="testset JSON whose (ticker,date) keys to leave out; repeatable. "
                     "Pass the dev set to carve a disjoint holdout (see IMPROVING.md §6).")
+    pb.add_argument("--unique-ticker", action="store_true",
+                    help="one setup per ticker (most-recent date) — a single-entry, "
+                    "max-diversity set with no repeated tickers.")
 
     pr = sub.add_parser("run", help="spawn agents for one version/batch")
     pr.add_argument("--version", help="skill version to pin (archived); defaults to latest "
@@ -1280,6 +1392,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     "With --resume you can pass this ALONE (no --tag) to resume that "
                     "batch; the tag, version, model and testset are recovered from it.")
     pr.add_argument("--timeout", type=int, default=900, help="per-setup seconds")
+    pr.add_argument("--retries", type=int, default=_DEFAULT_RETRIES,
+                    help="extra attempts on a timeout before recording it as failed "
+                         f"(default {_DEFAULT_RETRIES}; 0 = no retry)")
+    pr.add_argument("--no-reentry", action="store_true",
+                    help="disable §C re-entry: the agent stops as soon as it is flat "
+                         "(no second-leg trade, no walking the day to STATUS end). "
+                         "Recorded in batch.json; a resume inherits it. Hold it constant "
+                         "across an A/B pair — it changes what is tested.")
     pr.add_argument("--resume", action="store_true", help="skip already-finalized items")
     pr.add_argument("--dry-run", action="store_true",
                     help="print the hermes commands without spawning agents")
@@ -1304,15 +1424,19 @@ def main(argv: Optional[list[str]] = None) -> int:
         exclude: set = set()
         for p in args.exclude:
             exclude |= _load_keys(Path(p))
-        setups = build_set(n=args.n, seed=args.seed, db=Path(args.db), exclude=exclude)
+        setups = build_set(n=args.n, seed=args.seed, db=Path(args.db), exclude=exclude,
+                           unique_ticker=args.unique_ticker)
         write_testset(setups, Path(args.out), args.seed)
         extra = f" (excluded {len(exclude)} keys)" if exclude else ""
+        if args.unique_ticker:
+            extra += f" ({len({s['ticker'] for s in setups})} unique tickers)"
         print(f"wrote {len(setups)} setups → {args.out}{extra}")
     elif args.cmd == "run":
         run(args.version, model=args.model,
             testset=Path(args.testset) if args.testset else None,
             parallel=args.parallel, repeats=args.repeats, tag=args.tag,
-            timeout=args.timeout, resume=args.resume, dry_run=args.dry_run,
+            timeout=args.timeout, retries=args.retries, reentry=not args.no_reentry,
+            resume=args.resume, dry_run=args.dry_run,
             session=args.session)
     elif args.cmd == "audit":
         n = audit(args.tag)

@@ -1032,6 +1032,7 @@ def _session_entry(d: Path, s: dict) -> dict:
         "skill_version": (s.get("skill") or {}).get("version"),
         "void": s.get("void"),
         "out_of_credits": s.get("out_of_credits"),
+        "timed_out": s.get("timed_out"),
     }
 
     # For running sessions, include a current PnL snapshot (mtime-cached).
@@ -1047,6 +1048,8 @@ def list_sessions() -> list[dict]:
     """Return top-level sessions (live or simulated batches). New primary grouping."""
     groups: dict[str, list] = defaultdict(list)
     for d, s in iter_sessions():
+        if _is_archived(s):
+            continue  # hidden from the lists (both the table and the sidebar use this)
         sid = _top_level_id(s, d)
         groups[sid].append((d, s))
     out = []
@@ -1065,9 +1068,9 @@ def list_sessions() -> list[dict]:
         for d, ss in items:
             res = ss.get("result") or {}
             tickers.add(ss.get("ticker"))
-            # "complete" = finalized AND ran; an out-of-credits run finalized as an
-            # empty stub but never ran, so it does not count toward progress.
-            if ss.get("status") == "complete" and not _is_out_of_credits(ss):
+            # "complete" = finalized AND ran; an out-of-credits or timed-out run
+            # finalized as an empty stub but never ran, so it does not count as progress.
+            if ss.get("status") == "complete" and not _is_infra_fail(ss):
                 n_complete += 1
             if res.get("traded"):
                 total_pnl += res.get("realized_pnl", 0) or 0.0
@@ -1126,6 +1129,7 @@ def list_sessions() -> list[dict]:
             "n_planned": metrics.get("n_planned"),
             "n_void": metrics.get("n_void"),
             "n_out_of_credits": metrics.get("n_out_of_credits"),
+            "n_timed_out": metrics.get("n_timed_out"),
             "last_activity": last_activity,
             "status": status,
             "n_complete": n_complete,
@@ -1168,6 +1172,53 @@ def _is_out_of_credits(s: dict) -> bool:
     return bool(s.get("out_of_credits"))
 
 
+def _is_timed_out(s: dict) -> bool:
+    """A run the harness KILLED for exceeding its per-setup timeout. Like out-of-credits
+    it is an infrastructure failure — never a clean 'complete no-trade': excluded from
+    stats (no penalty), shown distinctly from a void, and re-run by ``--resume``."""
+    return bool(s.get("timed_out"))
+
+
+def _is_infra_fail(s: dict) -> bool:
+    """Any non-result infra failure (out-of-credits OR timeout): the agent didn't run
+    to a real decision, so the run is excluded from stats rather than scored."""
+    return _is_out_of_credits(s) or _is_timed_out(s)
+
+
+def _is_archived(s: dict) -> bool:
+    """User hid this session from the viewer lists via the Archive button. Purely a
+    UI filter — kept as a separate flag (not `status`) so it does NOT affect batch
+    resume/metrics/audit, which key off `status == "complete"`."""
+    return bool(s.get("archived"))
+
+
+def _stamp_archived(sdir: Path, value: bool = True) -> None:
+    """Set/clear the `archived` flag on a leaf's session.json (atomic)."""
+    sj = Path(sdir) / "session.json"
+    s = _load_json(sj, {}) or {}
+    if value:
+        s["archived"] = True
+    else:
+        s.pop("archived", None)
+    atomic_write_json(sj, s, indent=2)
+
+
+def archive_session(sid: str, *, archived: bool = True) -> int:
+    """Archive (or un-archive) a session the viewer shows. Accepts EITHER a concrete
+    leaf dir name (archives just that run) OR a top-level/batch group id (archives every
+    member leaf). Returns the number of leaves stamped. Archived sessions are dropped
+    from list_sessions / the tickers view but remain on disk and re-openable by URL."""
+    n = 0
+    leaf = SIM_ROOT / sid
+    if (leaf / "session.json").exists():
+        _stamp_archived(leaf, archived)
+        return 1
+    for d, _s in _iter_session_members(sid):
+        _stamp_archived(d, archived)
+        n += 1
+    return n
+
+
 def _resolved_slots(members: list[dict]) -> set:
     """(ticker, historical_date) slots that have a genuinely completed, non-void,
     non-out-of-credits leaf. `--resume` reruns a failed slot into a NEW leaf directory
@@ -1175,7 +1226,7 @@ def _resolved_slots(members: list[dict]) -> set:
     clean run that superseded it — this tells the metrics/badges which stubs to ignore."""
     return {
         (m.get("ticker"), m.get("historical_date")) for m in members
-        if m.get("status") == "complete" and not _is_void(m) and not _is_out_of_credits(m)
+        if m.get("status") == "complete" and not _is_void(m) and not _is_infra_fail(m)
     }
 
 
@@ -1189,22 +1240,26 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
     n_planned = 0
     n_void = 0
     n_out_of_credits = 0
+    n_timed_out = 0
     n_stood = 0
     n_traded = 0
     total_pnl = 0.0
     for m in members:
         slot = (m.get("ticker"), m.get("historical_date"))
-        # A void/out-of-credits leaf whose slot was later resolved by a clean --resume
+        # A void/infra-failed leaf whose slot was later resolved by a clean --resume
         # run is a stale historical stub, not a result — exclude it entirely (the
         # resolved leaf already contributes its own counts), so old failed attempts
         # stop lingering in aggregate stats/badges after a successful resume.
-        if (_is_void(m) or _is_out_of_credits(m)) and slot in resolved:
+        if (_is_void(m) or _is_infra_fail(m)) and slot in resolved:
             continue
-        # Out-of-credits runs are infra failures, not results: exclude entirely
-        # (no penalty, not a stand-down) so expectancy/PF/win-rate stay clean over
-        # the runs that actually executed.
+        # Infra failures (out-of-credits / timed-out) are not results: exclude entirely
+        # (no penalty, not a stand-down) so expectancy/PF/win-rate stay clean over the
+        # runs that actually executed.
         if _is_out_of_credits(m):
             n_out_of_credits += 1
+            continue
+        if _is_timed_out(m):
+            n_timed_out += 1
             continue
         n_planned += 1
         if _is_void(m):
@@ -1253,10 +1308,10 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
     ordered_eff = []
     for m in sorted(members, key=lambda x: x.get("id", "")):
         slot = (m.get("ticker"), m.get("historical_date"))
-        if (_is_void(m) or _is_out_of_credits(m)) and slot in resolved:
+        if (_is_void(m) or _is_infra_fail(m)) and slot in resolved:
             continue  # stale stub superseded by a later resume — not a real result
-        if _is_out_of_credits(m):
-            continue  # infra failure — not part of the traded sequence
+        if _is_infra_fail(m):
+            continue  # infra failure (ooc / timeout) — not part of the traded sequence
         if _is_void(m):
             ordered_eff.append(-1.0)
         else:
@@ -1288,6 +1343,7 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
         "n_traded": n_traded,
         "n_void": n_void,
         "n_out_of_credits": n_out_of_credits,
+        "n_timed_out": n_timed_out,
         "n_stood_down": n_stood,
         "sequence_drawdown_r": seq_dd,
         "recovery_factor_r": recovery,
@@ -1318,6 +1374,7 @@ def get_top_session_view(sess_id: str) -> dict:
         "n_void": 0,       # leaf runs on this ticker the audit voided
         "void_reason": None,  # a representative void reason for the UI
         "n_out_of_credits": 0,  # leaf runs that died on HTTP 402 (out of credits)
+        "n_timed_out": 0,  # leaf runs the harness killed for exceeding the timeout
         "n_leaves": 0,     # total leaf runs on this ticker
         "n_complete": 0,   # of those, how many are finalized
         "running_any": False,
@@ -1327,6 +1384,8 @@ def get_top_session_view(sess_id: str) -> dict:
     batch_tag = None
     modes = set()
     for d, s in _iter_session_members(sess_id):
+        if _is_archived(s):
+            continue  # archived leaves are hidden from the tickers view too
         entry = _session_entry(d, s)
         members.append(entry)
         if not batch_tag:
@@ -1341,6 +1400,8 @@ def get_top_session_view(sess_id: str) -> dict:
         td["n_leaves"] += 1
         if _is_out_of_credits(s):
             td["n_out_of_credits"] += 1   # terminal; neither complete nor running
+        elif _is_timed_out(s):
+            td["n_timed_out"] += 1        # terminal infra failure; never "complete"
         elif entry.get("status") == "complete":
             td["n_complete"] += 1
         elif entry.get("stale"):
@@ -1378,6 +1439,8 @@ def get_top_session_view(sess_id: str) -> dict:
             tstatus = "complete"
         elif data["n_out_of_credits"] > 0:
             tstatus = "out_of_credits"
+        elif data["n_timed_out"] > 0:
+            tstatus = "timeout"
         elif data["stale_any"]:
             tstatus = "stale"
         else:
@@ -1397,6 +1460,7 @@ def get_top_session_view(sess_id: str) -> dict:
             "n_void": data["n_void"],
             "void_reason": data["void_reason"],
             "n_out_of_credits": data["n_out_of_credits"],
+            "n_timed_out": data["n_timed_out"],
             "status": tstatus,
             "n_leaves": data["n_leaves"],
             "n_complete": data["n_complete"],
@@ -1458,7 +1522,7 @@ def report_by_version(
             or "unversioned"
         b = buckets.setdefault(ver, {
             "version": ver, "n": 0, "wins": 0, "stood_down": 0, "n_void": 0,
-            "n_out_of_credits": 0,
+            "n_out_of_credits": 0, "n_timed_out": 0,
             "pnl": 0.0, "r_sum": 0.0, "eff_r_sum": 0.0, "eff_n": 0,
             "cap_sum": 0.0, "cap_n": 0, "hashes": set(),
             "batches": set(), "models": set(),
@@ -1479,6 +1543,11 @@ def report_by_version(
             # Infra failure (HTTP 402), agent never traded — not a disciplined
             # stand-down and not a void; exclude from the cohort entirely.
             b["n_out_of_credits"] += 1
+            continue
+        if _is_timed_out(session):
+            # Infra failure (harness killed the run at the timeout) — like out-of-credits,
+            # the agent never reached a real decision; exclude from the cohort entirely.
+            b["n_timed_out"] += 1
             continue
         if session.get("void") or pnl.get("void"):
             b["n_void"] += 1          # audit-tainted → excluded from stats
@@ -1511,6 +1580,7 @@ def report_by_version(
             "stood_down": b["stood_down"],
             "n_void": b["n_void"],
             "n_out_of_credits": b["n_out_of_credits"],
+            "n_timed_out": b["n_timed_out"],
             "win_pct": round(100 * b["wins"] / n) if n else None,
             "pnl": round(b["pnl"], 2),
             "avg_r": round(b["r_sum"] / n, 2) if n else None,          # clean (traded only)
@@ -1544,6 +1614,8 @@ def _print_report(rows: list[dict]) -> None:
             notes.append(f"⚠ {r['n_void']} void")
         if r.get("n_out_of_credits"):
             notes.append(f"⚠ {r['n_out_of_credits']} out-of-credits")
+        if r.get("n_timed_out"):
+            notes.append(f"⚠ {r['n_timed_out']} timed-out")
         # A version aggregated across >1 batch or >1 model is NOT a valid ranking row.
         if r.get("n_batches", 0) > 1:
             notes.append(f"⚠ {r['n_batches']} batches MIXED"); mixed = True

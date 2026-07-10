@@ -604,6 +604,11 @@ def _run_one(work: dict) -> dict:
             extra["finalize_error"] = str(e)
             status = "finalize-error"
             _stamp_finalize_error(sdir, str(e))
+        finally:
+            # ``publish`` normally closes the gateway itself. On an integrity or
+            # finalization error, close it here too so an abandoned staged session
+            # never leaves a live endpoint holding the sealed day in memory.
+            gateway.close()
         try:
             final_sdir = _promote_staged_session(sdir)
         except Exception as e:  # noqa: BLE001 — a result outside SIM_ROOT is unusable

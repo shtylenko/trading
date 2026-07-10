@@ -29,6 +29,7 @@ has exited.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -79,34 +80,17 @@ def _get_sealed_line(path: Path, idx: int) -> Optional[str]:
     return None
 
 
-def _last_logged_i(path: Path) -> int:
-    """Return the latest complete decision index without importing ``recorder``.
-
-    The gateway needs this small check before it can reveal another bar. Keeping it
-    here avoids a recorder ↔ step import cycle on the hot path.
-    """
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        return -1
-    for line in reversed(lines):
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        i = value.get("i")
-        return i if isinstance(i, int) else -1
-    return -1
-
-
 class IsolatedStreamGateway:
     """Harness-owned, one-tick gateway for a pre-sealed in-memory stream.
 
     The agent receives only the Unix-socket endpoint. The full stream is never
     written under its session directory and this gateway exposes no random-access
     operation: it can reveal exactly the next tick, only after the previous tick has
-    an append-only decision record. ``publish`` is an in-process owner operation,
-    not a socket command, so an agent cannot expose the rest of the day.
+    an append-only decision record. The gateway snapshots every decision before it
+    permits the next tick and verifies that the session manifest and revealed stream
+    have not been rewritten. ``publish`` is an in-process owner operation, not a
+    socket command, so an agent cannot expose the rest of the day or revise a past
+    decision after seeing a future bar.
     """
 
     def __init__(self, session_dir: str | Path, records: list[dict]) -> None:
@@ -122,12 +106,117 @@ class IsolatedStreamGateway:
         self._done = False
         self._published = False
         self._closed = False
+        manifest = self.sdir / "session.json"
+        # ``start_isolated`` is also a low-level test/helper API and may be used
+        # before recorder.init creates a manifest. Batch sessions always have one;
+        # when present, it is frozen for the full agent lifetime.
+        self._manifest_digest = self._file_digest(manifest) if manifest.exists() else None
+        self._visible_records: list[dict] = [self._meta]
+        self._committed_decisions: list[str] = []
         self._state_lock = threading.Lock()
         self._stop = threading.Event()
         self._socket_dir = Path(tempfile.mkdtemp(prefix="llm-trader-gateway-"))
         self.socket_path = self._socket_dir / "one_tick.sock"
         self._server: Optional[socket.socket] = None
         self._thread: Optional[threading.Thread] = None
+
+    @staticmethod
+    def _file_digest(path: Path) -> str:
+        try:
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as e:
+            raise ValueError("isolated session artifact is unavailable") from e
+
+    @staticmethod
+    def _decision_fingerprint(record: dict) -> str:
+        return json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+    def _visible_stream_text(self) -> str:
+        return "".join(json.dumps(record) + "\n" for record in self._visible_records)
+
+    def _assert_session_manifest_unchanged(self) -> None:
+        if self._manifest_digest is None:
+            return
+        if self._file_digest(self.sdir / "session.json") != self._manifest_digest:
+            raise ValueError("isolated session manifest was modified")
+
+    def _assert_visible_stream_unchanged(self) -> None:
+        try:
+            actual = (self.sdir / "stream.jsonl").read_text(encoding="utf-8")
+        except OSError as e:
+            raise ValueError("revealed stream is unavailable") from e
+        if actual != self._visible_stream_text():
+            raise ValueError("revealed stream was modified outside the gateway")
+
+    def _decision_history(self) -> tuple[list[int], list[str]]:
+        """Return validated raw-decision indexes and canonical content fingerprints.
+
+        ``recorder log`` is the only supported writer, but the agent has a writable
+        staging directory. The gateway therefore treats this file as untrusted until
+        it has committed an exact snapshot before revealing the following tick.
+        """
+        path = self.sdir / "decisions.jsonl"
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            return [], []
+        except OSError as e:
+            raise ValueError("decision log is unavailable") from e
+
+        indexes: list[int] = []
+        fingerprints: list[str] = []
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as e:
+                raise ValueError("decision log contains an incomplete record") from e
+            if not isinstance(record, dict) or not isinstance(record.get("i"), int):
+                raise ValueError("decision log contains an invalid record")
+            indexes.append(record["i"])
+            fingerprints.append(self._decision_fingerprint(record))
+        return indexes, fingerprints
+
+    def _commit_decisions_before_next_tick(self) -> bool:
+        """Freeze all decisions that causally precede the next reveal.
+
+        Before revealing tick ``n``, decisions ``0..n-1`` must exist exactly once and
+        match the history committed before earlier reveals. A direct rewrite, truncate,
+        duplicate, or fabricated future decision fails closed without serving a bar.
+        Returns ``False`` only for the ordinary case where the latest decision has not
+        been logged yet, so the caller can retain its useful ``decision-required``
+        status rather than treating a missing record as tampering.
+        """
+        indexes, fingerprints = self._decision_history()
+        if indexes != list(range(len(indexes))) or len(indexes) > self._cursor:
+            raise ValueError("decision log has duplicate, missing, or future indexes")
+        if fingerprints[:len(self._committed_decisions)] != self._committed_decisions:
+            raise ValueError("a committed decision was modified")
+        if len(indexes) < self._cursor:
+            return False
+        self._committed_decisions = fingerprints
+        return True
+
+    def _assert_final_decision_history(self) -> None:
+        """Ensure the agent did not rewrite prior decisions just before exit.
+
+        The decision for the last revealed tick need not have been committed by a
+        later ``next`` call, so it may be present or absent. It cannot alter any
+        decision committed before that tick.
+        """
+        indexes, fingerprints = self._decision_history()
+        committed_n = len(self._committed_decisions)
+        if fingerprints[:committed_n] != self._committed_decisions:
+            raise ValueError("a committed decision was modified")
+        if indexes != list(range(len(indexes))):
+            raise ValueError("decision log has duplicate, missing, or future indexes")
+        if len(indexes) not in {committed_n, self._cursor}:
+            raise ValueError("decision log changed after the last committed tick")
+
+    def _assert_gateway_integrity(self) -> None:
+        self._assert_session_manifest_unchanged()
+        self._assert_visible_stream_unchanged()
 
     def start(self) -> "IsolatedStreamGateway":
         """Publish only meta, then serve one-tick requests in a daemon thread."""
@@ -179,8 +268,14 @@ class IsolatedStreamGateway:
         with self._state_lock, file_lock(_lock_path(self.sdir)):
             if self._closed or self._published:
                 return {"rc": 3, "lines": ["STATUS gateway-closed"]}
+            try:
+                self._assert_gateway_integrity()
+                decision_ready = self._commit_decisions_before_next_tick()
+            except ValueError:
+                return {"rc": 3, "lines": ["STATUS decision-integrity-error"]}
+
             # Bar i must have an immutable decision before the gateway permits i+1.
-            if self._cursor > 0 and _last_logged_i(self.sdir / "decisions.jsonl") < self._cursor - 1:
+            if self._cursor > 0 and not decision_ready:
                 return {
                     "rc": 3,
                     "lines": [f"STATUS decision-required i={self._cursor - 1}"],
@@ -192,6 +287,7 @@ class IsolatedStreamGateway:
                 with open(self.sdir / "stream.jsonl", "a", encoding="utf-8") as f:
                     f.write(line + "\n")
                     f.flush()
+                self._visible_records.append(tick)
                 self._cursor += 1
                 ended = self._cursor >= len(self._ticks)
                 return {
@@ -205,6 +301,7 @@ class IsolatedStreamGateway:
                     with open(self.sdir / "stream.jsonl", "a", encoding="utf-8") as f:
                         f.write(line + "\n")
                         f.flush()
+                    self._visible_records.append(self._end)
                 self._done = True
             end_line = json.dumps(self._end) if self._end is not None else None
             lines = [end_line] if end_line is not None else []
@@ -226,6 +323,8 @@ class IsolatedStreamGateway:
         with self._state_lock, file_lock(_lock_path(self.sdir)):
             if self._published:
                 return
+            self._assert_gateway_integrity()
+            self._assert_final_decision_history()
             atomic_write_text(
                 self.sdir / "stream.jsonl",
                 "".join(json.dumps(record) + "\n" for record in self._records),

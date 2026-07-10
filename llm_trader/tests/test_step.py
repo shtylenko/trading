@@ -13,6 +13,8 @@ from datetime import date
 from io import StringIO
 from pathlib import Path
 
+import pytest
+
 from trading.llm_trader import replay, step
 from trading.llm_trader.replay import Setup
 from trading.llm_trader.streamio import parse_stream
@@ -161,5 +163,58 @@ def test_isolated_gateway_keeps_future_in_memory_and_requires_decision(tmp_path,
         assert [tick["i"] for tick in ticks] == [0, 1]
         assert end is not None
         assert not (sdir / ".step_gateway.json").exists()
+    finally:
+        gateway.close()
+
+
+def test_isolated_gateway_rejects_rewritten_decision_history(tmp_path, monkeypatch):
+    _install_fake_provider(monkeypatch)
+    sdir = tmp_path / "staged-session"
+    gateway = step.start_isolated(sdir, seed=1)
+    try:
+        # Reveal and commit bar 0's decision by requesting bar 1.
+        assert step.next_(sdir, out=StringIO()) == 0
+        (sdir / "decisions.jsonl").write_text(
+            json.dumps({"i": 0, "action": "OBSERVE", "note": "original"}) + "\n"
+        )
+        assert step.next_(sdir, out=StringIO()) == 0
+
+        # Once bar 1 is visible, rewriting the decision for bar 0 is a look-ahead
+        # attempt. The owner refuses publication rather than finalizing revised history.
+        (sdir / "decisions.jsonl").write_text(
+            json.dumps({"i": 0, "action": "STAND_DOWN", "note": "rewritten"}) + "\n"
+        )
+        with pytest.raises(ValueError, match="committed decision was modified"):
+            gateway.publish()
+    finally:
+        gateway.close()
+
+
+def test_isolated_gateway_rejects_manifest_or_visible_stream_tampering(tmp_path, monkeypatch):
+    _install_fake_provider(monkeypatch)
+    sdir = tmp_path / "staged-session"
+    sdir.mkdir()
+    (sdir / "session.json").write_text(json.dumps({"config": {"risk_budget": 40}}))
+    gateway = step.start_isolated(sdir, seed=1)
+    try:
+        # The agent cannot alter frozen execution config before asking for a bar.
+        session = json.loads((sdir / "session.json").read_text())
+        session["config"] = {"risk_budget": 999_999}
+        (sdir / "session.json").write_text(json.dumps(session))
+        out = StringIO()
+        assert step.next_(sdir, out=out) == 3
+        assert "decision-integrity-error" in out.getvalue()
+    finally:
+        gateway.close()
+
+    # A fresh isolated session also refuses a forged revealed-stream entry.
+    sdir = tmp_path / "staged-session-stream"
+    gateway = step.start_isolated(sdir, seed=1)
+    try:
+        with open(sdir / "stream.jsonl", "a") as stream:
+            stream.write(json.dumps(_SEALED[1]) + "\n")
+        out = StringIO()
+        assert step.next_(sdir, out=out) == 3
+        assert "decision-integrity-error" in out.getvalue()
     finally:
         gateway.close()

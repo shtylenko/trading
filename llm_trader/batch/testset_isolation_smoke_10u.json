@@ -1,0 +1,87 @@
+{
+  "created": "2026-07-10T15:26:43",
+  "seed": 100,
+  "n": 10,
+  "setups": [
+    {
+      "ticker": "DTSS",
+      "date": "2024-03-05",
+      "time_et": "10:45",
+      "pattern": "acd_orb",
+      "float_shares": 4211143.0,
+      "gap_pct": 8.35
+    },
+    {
+      "ticker": "ELPW",
+      "date": "2026-04-22",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 1175756.0,
+      "gap_pct": 29.3
+    },
+    {
+      "ticker": "FRMM",
+      "date": "2025-08-12",
+      "time_et": "10:55",
+      "pattern": "acd_orb",
+      "float_shares": 6158661.0,
+      "gap_pct": 79.04
+    },
+    {
+      "ticker": "GRI",
+      "date": "2025-04-02",
+      "time_et": "09:50",
+      "pattern": "acd_orb",
+      "float_shares": 1770838.0,
+      "gap_pct": 7.43
+    },
+    {
+      "ticker": "GRPN",
+      "date": "2025-05-08",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 17719527.0,
+      "gap_pct": 10.1
+    },
+    {
+      "ticker": "MBRX",
+      "date": "2025-02-14",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 5292005.0,
+      "gap_pct": 59.06
+    },
+    {
+      "ticker": "OLOX",
+      "date": "2025-11-19",
+      "time_et": "09:40",
+      "pattern": "acd_orb",
+      "float_shares": 549954.0,
+      "gap_pct": 21.7
+    },
+    {
+      "ticker": "OM",
+      "date": "2024-05-06",
+      "time_et": "09:35",
+      "pattern": "acd_orb",
+      "float_shares": 15496392.0,
+      "gap_pct": 9.55
+    },
+    {
+      "ticker": "PHUN",
+      "date": "2024-10-25",
+      "time_et": "09:45",
+      "pattern": "acd_orb",
+      "float_shares": 19683708.0,
+      "gap_pct": 8.37
+    },
+    {
+      "ticker": "VIVO",
+      "date": "2026-03-25",
+      "time_et": "09:30",
+      "pattern": "acd_orb",
+      "float_shares": 1767214.0,
+      "gap_pct": 11.11
+    }
+  ]
+}

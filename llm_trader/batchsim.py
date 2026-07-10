@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import recorder, skillmeta, step
+from .execution import EXECUTION_MODEL
 from .config import DATA_DIR
 from .fsutils import atomic_write_json
 
@@ -277,7 +278,7 @@ def _archived_skill(version: str) -> Path:
 
 def _prompt(version: str, skill_text: str, tag: str, session_id: str,
             ticker: str, date: str, time_et: Optional[str], sdir: str,
-            reentry: bool = True) -> str:
+            reentry: bool = True, execution_model: str = "reported_fill_v1") -> str:
     """The per-setup task handed to a headless hermes agent.
 
     The harness has ALREADY created and sealed the session (recorder init + step start)
@@ -299,6 +300,26 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
         "RE-ENTRY IS DISABLED for this run, so being flat means you are done — stop "
         "immediately. Do NOT take any §C re-entry and do NOT keep revealing bars."
     )
+    if execution_model == EXECUTION_MODEL:
+        loop_commands = f'''1. Reveal the next bar:
+python3 -m trading.llm_trader.step next --session "{sdir}"
+
+2. Resolve all orders that were active before that exact revealed tick (after EVERY tick):
+python3 -m trading.llm_trader.recorder resolve --session "{sdir}" --i <i>
+
+3. Log ONE intent for the revealed bar. Never send a fill price or share count:
+python3 -m trading.llm_trader.recorder log --session "{sdir}" --record '{{"i":<i>,"time":"<HH:MM>","thought":"...","action":"OBSERVE|ENTER_CLOSE|ARM_BUY_STOP|CANCEL_ENTRY|SET_STOP|SCALE_LIMIT|ADD_CLOSE|EXIT_CLOSE|STAND_DOWN","note":"..."}}'
+
+Repeat 1→2→3.'''
+    else:
+        loop_commands = f'''1. Reveal the next bar:
+python3 -m trading.llm_trader.step next --session "{sdir}"
+
+2. Log your decision for the bar you just saw (after EVERY bar):
+python3 -m trading.llm_trader.recorder log --session "{sdir}" --record '{{"i":<i>,"time":"<HH:MM>","thought":"...","action":"OBSERVE|ENTER|...","fill_px":null,"shares_delta":null,"stop":null,"note":"..."}}'
+
+Repeat 1→2.'''
+
     return f"""You are executing ONE trade simulation as an automated backtest.
 
 Your trading rules are provided IN FULL below, between the BEGIN/END markers — they
@@ -324,13 +345,9 @@ and no way to restart or re-seal. Your ONLY window into price is `step next`.
 
 === THE TRADING LOOP — THESE ARE THE ONLY COMMANDS YOU RUN ===
 
-1. Reveal the next bar:
-python3 -m trading.llm_trader.step next --session "{sdir}"
+{loop_commands}
 
-2. Log your decision for the bar you just saw (after EVERY bar):
-python3 -m trading.llm_trader.recorder log --session "{sdir}" --record '{{"i":<i>,"time":"<HH:MM>","thought":"...","action":"OBSERVE|ENTER|...","fill_px":null,"shares_delta":null,"stop":null,"note":"..."}}'
-
-Repeat 1→2. STOP as soon as EITHER of these is true — do NOT keep revealing bars past
+STOP as soon as EITHER of these is true — do NOT keep revealing bars past
 the stop point:
   (a) `step next` prints `STATUS end` (the stream is over), OR
   (b) you are FLAT (no open position) and you are DONE trading this setup — {done_rule}
@@ -675,6 +692,22 @@ def run(
         version = skillmeta.read_skill_meta(skill_path).get("version")
         print(f"no --version provided; using base skill {skill_path.name} (v{version})",
               file=sys.stderr)
+    # A real pinned batch is the first use of many candidate files.  Register and
+    # seal it *before* any preseal/agent work so every leaf is bound to immutable
+    # bytes.  `recorder.init(..., pin_version=...)` intentionally stays read-only,
+    # so this is the one batch-level place that performs first-use registration.
+    # A dry-run remains inspect-only and leaves a candidate writable.
+    if not dry_run:
+        registered_meta, _ = skillmeta.resolve_version(
+            skill_path, skillmeta.DEFAULT_REGISTRY_PATH
+        )
+        if registered_meta.get("version") != version:
+            raise ValueError(
+                f"skill file {skill_path} declares version {registered_meta.get('version')!r}, "
+                f"not requested --version {version!r}"
+            )
+    skill_meta = skillmeta.read_skill_meta(skill_path)
+    execution_model = skill_meta.get("execution_model") or "reported_fill_v1"
     skill_text = skill_path.read_text(encoding="utf-8")
     setups = load_testset(testset)
 
@@ -729,7 +762,7 @@ def run(
         for w in work:
             w["prompt"] = _prompt(version, skill_text, tag, session_id, w["ticker"],
                                   w["date"], w.get("time_et"), sdir="<PRE-SEALED-SDIR>",
-                                  reentry=w["reentry"])
+                                  reentry=w["reentry"], execution_model=execution_model)
         print(json.dumps([_run_one(w) for w in work], indent=2))
         return tag
 
@@ -744,7 +777,7 @@ def run(
             w["sdir"] = str(_preseal(w, skill_path, version, session_id))
             w["prompt"] = _prompt(version, skill_text, tag, session_id, w["ticker"],
                                   w["date"], w.get("time_et"), w["sdir"],
-                                  reentry=w["reentry"])
+                                  reentry=w["reentry"], execution_model=execution_model)
             ready.append(w)
         except Exception as e:  # noqa: BLE001 — one bad setup shouldn't sink the batch
             print(f"  [preseal-err] {w['item']}: {e}", file=sys.stderr)
@@ -1284,6 +1317,11 @@ def _leaves_by_key(tag: str) -> dict:
             "status": s.get("status"), "ts": s.get("real_run_ts") or "",
             "traded": bool(p.get("traded")), "r": p.get("r_multiple"),
             "pnl": p.get("realized_pnl"), "win": bool(p.get("win")),
+            "execution_model": (
+                p.get("execution_model")
+                or (s.get("config", {}) or {}).get("execution_model")
+                or "reported_fill_v1"
+            ),
         }
         def clean(r):
             return (r["status"] == "complete" and not r["void"] and not r["ooc"]
@@ -1321,6 +1359,14 @@ def compare(tag_a: str, tag_b: str) -> dict:
     A/B are batch tags. Pairs on (ticker,date), effective R (stood-down=0R, void/ooc
     excluded), sign test, tail-guard, and per-batch guardrails."""
     A, B = _leaves_by_key(tag_a), _leaves_by_key(tag_b)
+    models_a = {r["execution_model"] for r in A.values()}
+    models_b = {r["execution_model"] for r in B.values()}
+    if len(models_a) != 1 or len(models_b) != 1 or models_a != models_b:
+        raise ValueError(
+            "cannot compare batches with different execution models: "
+            f"A={sorted(models_a)}, B={sorted(models_b)}. "
+            "A fill-model change is a major rebaseline; establish a new baseline first."
+        )
     keys = sorted(set(A) & set(B))
     pairs = []  # (key, rA, rB, dR)
     for k in keys:

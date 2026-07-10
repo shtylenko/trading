@@ -107,6 +107,10 @@ def read_skill_meta(path: str | Path) -> dict:
     return {
         "name": fm.get("name"),
         "version": fm.get("version"),
+        # Optional execution contract.  Older skills omit it and therefore use
+        # the legacy reported-fill recorder; a major skill can opt into a new
+        # deterministic execution model without changing historical sessions.
+        "execution_model": fm.get("execution_model"),
         "content_hash": f"sha256:{digest}",
         # store a repo-relative-ish path for readability, falling back to name
         "path": _rel_path(p),

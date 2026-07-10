@@ -9,6 +9,24 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
 
 ---
 
+### 3.0.0 — deterministic OHLC execution rebaseline  ⏳ CANDIDATE — NOT YET VALIDATED
+- **Why:** prior sessions let the executing model supply its own fills, shares, and
+  stops. That makes P&L dependent on unverified agent arithmetic and permits
+  impossible OHLC fills, unbounded participation, and hidden stop-gap risk.
+- **Change:** the candidate skill at `trade_skills/3.0.0.md` records intent only
+  (`ENTER_CLOSE`, `ARM_BUY_STOP`, `SET_STOP`, `SCALE_LIMIT`, `ADD_CLOSE`,
+  `EXIT_CLOSE`). `execution.py` derives size from planned risk/buying power/bar
+  volume, applies commissions/slippage, uses gap-aware stops, and resolves an
+  OHLC bar that can hit both a target and a stop as **stop first**. `recorder
+  resolve` exposes the authoritative state after every revealed tick.
+- **Type:** simulator/execution-model change, not an alpha-rule tweak. It is a
+  **major rebaseline**: all pre-3.0 reported-fill R comparisons are incommensurate.
+- **Test:** deterministic unit coverage covers stop gaps, same-bar armed
+  entry/stop ambiguity, stop-vs-target ambiguity, buying-power/participation
+  sizing, and recorder rejection of agent-supplied fills. No paid batch yet.
+- **Decision:** ⏳ HOLD — base remains 2.4.1. First run a smoke batch, a clarity
+  review, then establish a fresh v3 baseline before comparing strategy rules.
+
 ### 2.7.0 / 2.8.0 — decompose the 2.6.0 REJECT into its two halves  ⏳ CANDIDATES — NOT YET VALIDATED
 - **Why:** 2.6.0 (bundle) was REJECT (mean ΔR −0.046, more stand-downs). It conflated
   two independent changes; the gate can't attribute the regression. Both are rebuilt

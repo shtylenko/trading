@@ -1,6 +1,6 @@
 # RULE_TRACE — TRADE_SIMULATOR rule → Ross Cameron canon
 
-Every **behavioral** rule in `TRADE_SIMULATOR.md` must trace to the canon
+Every **behavioral** rule in `trade_skills/<version>.md` must trace to the canon
 (`library/ross_cameron/all_content_structured.md`). **Update this table on every
 behavioral version bump** (it's a gate — see `IMPROVING.md` §1, §4).
 
@@ -9,6 +9,8 @@ behavioral version bump** (it's a gate — see `IMPROVING.md` §1, §4).
 > from the 2.6.0-REJECT decomposition (see CHANGELOG) — archived, awaiting a paired `compare`.
 > They describe rules *as they would be if promoted*, not the accepted ruleset. The superseded
 > 2.5.0/2.6.0 bundles are not separately tracked here.
+> **3.0.0 is an unpromoted major execution-model candidate**; it deliberately does
+> not share an expectancy baseline with the reported-fill v2.x sessions.
 
 **Type** legend:
 - **direct** — the rule is Cameron's, stated ~as taught.
@@ -34,7 +36,8 @@ behavioral version bump** (it's a gate — see `IMPROVING.md` §1, §4).
 | `reentry.sub_vwap_trap` | §C | §3.7 washout long; §8.2 sub-VWAP trap (his favorites) | direct | Reclaim-VWAP or fresh-base second leg; ≤1 re-entry. | 2.1.0 |
 | `reentry.cooldown` | §C cooldown | §4 "I can always get back in if there's another setup" (not revenge) | operationalization + guardrail | ≥3 bars flat + fresh base before re-entry; kills same-chop revenge re-entry. **2.7.0 cand:** "fresh base" made checkable — above-VWAP closes (or, sub-VWAP trap: cooldown-bar lows hold ≥ tracked `washout_low`, replacing the undefined "completed washout structure") + the exact §A 5-bar green>red volume test. | 2.2.0 |
 | `risk.time_of_day` | §A time box | §1/§17 first 2 hrs prime; stop by ~10:30–11:00; never fresh after 12:00 | direct + operationalization | **2.8.0 cand:** numeric ladder — `<10:30` pass; `10:30–<12:00` only on an **A+ bar** (all boxes + `rvol_bar ≥ 2.0`; previously "A+" was undefined and the window was a 30-min range); `≥12:00` hard fail. The 10:30 cut and 2.0× floor **narrow** Cameron's "~10:30–11:00" range to one number for reproducibility. | ≤2.0 |
-| `fill.model` | §A/§B fill cheat-sheet | — | sim-constraint | Hard levels (stop/target) fill intra-bar on low/high; soft signals on close. No slippage / L2. Changing this is a **major** bump. | ≤2.0 |
+| `execution.intent_contract` | 3.0 "Execution model" + logging | — | sim-constraint | **3.0.0 cand:** agent records order intent only; recorder validates the revealed tick and derives all fills/shares. Prevents agent-selected prices or size from entering P&L. | 3.0.0 cand |
+| `fill.model` | §A/§B execution model | — | sim-constraint | v2.x: hard levels touch-fill with no costs. **3.0.0 cand:** configured slippage/commission, buying-power and volume-participation caps, gap-aware stops; an OHLC bar that reaches stop and target resolves stop-first, and an armed entry/stop same-bar path resolves entry then stop. This is a **major** rebaseline. | 3.0.0 cand |
 
 ## When a rule has no clean canon cite
 

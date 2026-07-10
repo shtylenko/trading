@@ -589,6 +589,16 @@ def test_prompt_is_preseal_step_next_only():
     assert f"BATCHSIM_SID={sdir}" in p                        # audit anchor marker
 
 
+def test_prompt_uses_resolve_and_intents_for_deterministic_skill():
+    sdir = "/x/simulations/20260101120000-BQ-abc123"
+    p = batchsim._prompt("3.0.0", "SKILL-TEXT", "tag", "SESSION-ID",
+                         "BQ", "2026-01-01", "09:35", sdir,
+                         execution_model="deterministic_ohlc_v1")
+    assert "trading.llm_trader.recorder resolve" in p
+    assert "ENTER_CLOSE|ARM_BUY_STOP" in p
+    assert '"fill_px":null' not in p
+
+
 # --- compare: the paired promotion gate ---
 
 def test_sign_test_p_two_sided():
@@ -644,3 +654,21 @@ def test_compare_pairs_and_verdicts(tmp_path, monkeypatch):
     assert r["n_pairs"] == 3
     assert r["mean_dR"] == pytest.approx(1.0)
     assert r["better"] == 3 and r["worse"] == 0
+
+
+def test_compare_refuses_execution_model_rebaseline(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    for tag, model in (("legacy", "reported_fill_v1"), ("v3", "deterministic_ohlc_v1")):
+        d = tmp_path / f"{tag}-run"
+        d.mkdir()
+        (d / "session.json").write_text(json.dumps({
+            "status": "complete", "ticker": "AA", "historical_date": "2025-01-01",
+            "batch": tag, "config": {"execution_model": model},
+        }))
+        (d / "pnl.json").write_text(json.dumps({
+            "traded": True, "win": True, "realized_pnl": 40.0,
+            "r_multiple": 1.0, "execution_model": model,
+        }))
+    with pytest.raises(ValueError, match="major rebaseline"):
+        batchsim.compare("legacy", "v3")

@@ -13,16 +13,17 @@ Lifecycle (used by the skill):
         --ticker EVTV --date 2026-01-13 --seed 7 --profile small
     #   -> prints the session dir; point `replay --out-file <dir>/stream.jsonl` at it
 
-    # 2. each turn (append one decision record)
+    # 2. each turn (append one decision *intent*)
     python3 -m trading.llm_trader.recorder log --session <dir> \
-        --record '{"i":3,"time":"10:23","thought":"…","action":"SCALE",
-                   "fill_px":3.90,"shares_delta":-150,"stop":3.75}'
+        --record '{"i":3,"time":"10:23","thought":"…","action":"SCALE_LIMIT",
+                   "target":3.90,"fraction":0.333}'
 
     # 3. end of run (build all artifacts)
     python3 -m trading.llm_trader.recorder finalize --session <dir>
 
-The P&L / position engine is deterministic (average-cost) so the agent never has to
-compute money — it just reports thoughts, actions, and fills.
+The P&L / position engine is deterministic.  New major skills record intents and
+the engine, not the agent, derives fills, position size, costs, and P&L.  Legacy
+sessions retain their reported-fill format for historical readability.
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ from typing import Optional
 
 from . import skillmeta
 from .config import DATA_DIR
+from .execution import EXECUTION_MODEL, ExecutionConfig, ExecutionEngine, INTENT_ACTIONS
 from .fsutils import atomic_write_json, atomic_write_text, file_lock
 from .streamio import epoch_et as _epoch_et
 from .streamio import parse_stream as _parse_stream
@@ -57,11 +59,14 @@ SIM_ROOT = DATA_DIR.parent / "simulations"
 
 # default account profile knobs (mirrors the skill's small-account sizing)
 PROFILE_RISK = {"small": 40.0, "main": 1350.0}
+LEGACY_EXECUTION_MODEL = "reported_fill_v1"
 
 # a running session idle longer than this (no file writes) is treated as stale
 _STALE_AFTER_S = 15 * 60
 
-# Action sets (also used by PositionEngine)
+# Legacy reported-fill action sets (also used by PositionEngine).  Intent actions
+# for the deterministic model deliberately live in execution.py so they never get
+# accidentally accepted by the historical reported-fill path.
 ACTION_FILLS = {"ENTER", "ADD", "SCALE", "EXIT"}
 ALL_ACTIONS = {"OBSERVE", "ENTER", "ADD", "SCALE", "TRAIL", "EXIT", "STAND_DOWN"}
 _HHMM_RE = re.compile(r"^\d{2}:\d{2}$")
@@ -337,9 +342,11 @@ def init(
             m = skillmeta.read_skill_meta(skill_path)
             content_hash = m["content_hash"]
         except FileNotFoundError:
+            m = {}
             content_hash = None
         skill_meta = {"name": "trade-simulator", "version": pin_version,
-                      "content_hash": content_hash, "path": str(skill_path)}
+                      "content_hash": content_hash, "path": str(skill_path),
+                      "execution_model": m.get("execution_model")}
     else:
         try:
             # A caller-supplied `skill` override (tests, ad-hoc runs) gets its own
@@ -355,6 +362,26 @@ def init(
     if note:
         print(f"• {note}", file=sys.stderr)
 
+    resolved_risk_budget = risk_budget if risk_budget is not None else PROFILE_RISK.get(
+        profile, PROFILE_RISK["small"]
+    )
+    execution_model = skill_meta.get("execution_model") or LEGACY_EXECUTION_MODEL
+    config = {
+        "seed": seed,
+        "profile": profile,
+        "delay": delay,
+        "risk_budget": resolved_risk_budget,
+        "buying_power": buying_power,
+        # Existing skills have no frontmatter execution contract and continue
+        # to replay their historical reported fills.  v3+ explicitly opts into
+        # deterministic OHLC execution.
+        "execution_model": execution_model,
+    }
+    if execution_model == EXECUTION_MODEL:
+        # Freeze every cost/liquidity assumption at session creation.  Replaying
+        # a session after a later code-default change must produce identical P&L.
+        config["execution"] = ExecutionConfig.from_session_config(config).to_dict()
+
     session = {
         "schema_version": SCHEMA_VERSION,
         "id": sid,
@@ -366,14 +393,7 @@ def init(
         "skill": skill_meta,
         "batch": batch,   # legacy
         "session": session or batch,  # top-level session (live day or batch tag)
-        "config": {
-            "seed": seed,
-            "profile": profile,
-            "delay": delay,
-            "risk_budget": risk_budget if risk_budget is not None
-            else PROFILE_RISK.get(profile, PROFILE_RISK["small"]),
-            "buying_power": buying_power,
-        },
+        "config": config,
         "files": {},
     }
     atomic_write_json(sdir / "session.json", session, indent=2)
@@ -403,11 +423,8 @@ def _last_logged_i(path: Path) -> int:
     return -1
 
 
-def _validate_decision_record(record: dict) -> None:
-    action = record.get("action")
-    if action not in ALL_ACTIONS:
-        raise ValueError(f"action must be one of {sorted(ALL_ACTIONS)}, got {action!r}")
-
+def _validate_common_record(record: dict) -> None:
+    """Validate fields shared by legacy fills and deterministic intents."""
     i = record.get("i")
     if not isinstance(i, int) or i < 0:
         raise ValueError("decision record 'i' must be a non-negative integer")
@@ -418,6 +435,13 @@ def _validate_decision_record(record: dict) -> None:
     h, m = (int(x) for x in hhmm.split(":"))
     if h > 23 or m > 59:
         raise ValueError("decision record 'time' must be a valid HH:MM")
+
+
+def _validate_legacy_record(record: dict) -> None:
+    action = record.get("action")
+    if action not in ALL_ACTIONS:
+        raise ValueError(f"action must be one of {sorted(ALL_ACTIONS)}, got {action!r}")
+    _validate_common_record(record)
 
     fill = record.get("fill_px")
     dq = record.get("shares_delta")
@@ -442,6 +466,50 @@ def _validate_decision_record(record: dict) -> None:
         raise ValueError(f"action {action} must not carry fill_px or shares_delta")
 
 
+def _number(record: dict, key: str, *, positive: bool = True) -> float:
+    value = record.get(key)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValueError(f"deterministic action requires numeric '{key}'")
+    value = float(value)
+    if positive and value <= 0:
+        raise ValueError(f"deterministic action '{key}' must be positive")
+    return value
+
+
+def _validate_intent_record(record: dict) -> None:
+    """Validate the no-agent-fill contract used by deterministic skills."""
+    _validate_common_record(record)
+    action = record.get("action")
+    if action not in INTENT_ACTIONS:
+        raise ValueError(f"action must be one of {sorted(INTENT_ACTIONS)}, got {action!r}")
+    if record.get("fill_px") is not None or record.get("shares_delta") is not None:
+        raise ValueError(
+            "deterministic execution derives fills and size; do not supply fill_px or shares_delta"
+        )
+    if action in {"ENTER_CLOSE", "ARM_BUY_STOP", "SET_STOP", "ADD_CLOSE"}:
+        _number(record, "stop")
+    if action == "ARM_BUY_STOP":
+        trigger = _number(record, "trigger")
+        if _number(record, "stop") >= trigger:
+            raise ValueError("ARM_BUY_STOP stop must be below trigger")
+    if action == "SCALE_LIMIT":
+        _number(record, "target")
+        fraction = _number(record, "fraction")
+        if fraction > 1:
+            raise ValueError("SCALE_LIMIT fraction must be in (0, 1]")
+    if action == "ADD_CLOSE":
+        fraction = _number(record, "risk_fraction")
+        if fraction > 1:
+            raise ValueError("ADD_CLOSE risk_fraction must be in (0, 1]")
+
+
+def _validate_decision_record(record: dict, execution_model: str = LEGACY_EXECUTION_MODEL) -> None:
+    if execution_model == EXECUTION_MODEL:
+        _validate_intent_record(record)
+    else:
+        _validate_legacy_record(record)
+
+
 def log(session_dir: str | Path, record: dict) -> None:
     """Append one decision record to ``decisions.jsonl``.
 
@@ -453,7 +521,6 @@ def log(session_dir: str | Path, record: dict) -> None:
     double the position.
     """
     sdir = Path(session_dir)
-    _validate_decision_record(record)
 
     with file_lock(_session_lock_path(sdir)):
         session = _load_json(sdir / "session.json", {}) or {}
@@ -462,6 +529,23 @@ def log(session_dir: str | Path, record: dict) -> None:
                 f"session {sdir.name} is finalized — cannot log new decisions "
                 "(re-init a fresh session instead)"
             )
+
+        execution_model = session.get("config", {}).get("execution_model", LEGACY_EXECUTION_MODEL)
+        _validate_decision_record(record, execution_model)
+
+        # Intent sessions must be bound to an already-revealed tick.  This
+        # makes timestamps an executable constraint, not an agent convention.
+        if execution_model == EXECUTION_MODEL:
+            _meta, ticks, _end = _parse_stream(sdir / "stream.jsonl")
+            tick = next((t for t in ticks if t.get("i") == record["i"]), None)
+            if tick is None:
+                raise ValueError(
+                    f"decision i={record['i']} has not been revealed in stream.jsonl"
+                )
+            if tick.get("time") != record["time"]:
+                raise ValueError(
+                    f"decision time {record['time']} does not match revealed tick time {tick.get('time')}"
+                )
 
         i = record["i"]
         # Decisions are append-only in strictly increasing `i`, so the last written
@@ -652,6 +736,69 @@ def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
     return actions, timeline, pnl
 
 
+def _run_session_engine(
+    session: dict,
+    meta: dict,
+    bars: list[dict],
+    decisions: list[dict],
+    end: Optional[dict],
+    *,
+    force_close: bool = True,
+    through_i: Optional[int] = None,
+) -> tuple[list[dict], list[dict], dict]:
+    """Dispatch by the execution contract frozen in ``session.json``.
+
+    Historical sessions retain reported-fill replay.  A deterministic skill is
+    never allowed to silently fall back to it: its intents are interpreted only
+    by :class:`ExecutionEngine`.
+    """
+    config = session.get("config", {}) or {}
+    if config.get("execution_model") != EXECUTION_MODEL:
+        risk_budget = config.get("risk_budget") or PROFILE_RISK["small"]
+        return _run_engine(meta, bars, decisions, risk_budget, end, force_close=force_close)
+
+    engine = ExecutionEngine(ExecutionConfig.from_session_config(config))
+    actions, timeline, pnl = engine.run(
+        bars,
+        decisions,
+        through_i=through_i,
+        end_close=(end or {}).get("close"),
+        force_close=force_close,
+    )
+    for row in actions:
+        row["t"] = _epoch_et(meta["date"], row["time"]) if row.get("time") else None
+    for row in timeline:
+        row["t"] = _epoch_et(meta["date"], row["time"]) if row.get("time") else None
+    return actions, timeline, pnl
+
+
+def resolve(session_dir: str | Path, i: Optional[int] = None) -> dict:
+    """Resolve active deterministic orders through a revealed tick.
+
+    Call this immediately after ``step next`` and before deciding on that tick.
+    Only decisions strictly *before* ``i`` are applied, so the returned state is
+    what was actually known at the start of the current bar.  The function is
+    read-only; ``finalize`` remains the sole artifact writer.
+    """
+    sdir = Path(session_dir)
+    with file_lock(_session_lock_path(sdir)):
+        session = _load_json(sdir / "session.json", {}) or {}
+        if session.get("config", {}).get("execution_model") != EXECUTION_MODEL:
+            raise ValueError("resolve is available only to deterministic execution sessions")
+        meta, ticks, _end = _parse_stream(sdir / "stream.jsonl")
+        if meta is None or not ticks:
+            raise ValueError("no revealed tick to resolve")
+        current_i = max(t.get("i", -1) for t in ticks) if i is None else i
+        tick = next((t for t in ticks if t.get("i") == current_i), None)
+        if tick is None:
+            raise ValueError(f"tick i={current_i} is not revealed")
+        decisions = [d for d in _read_jsonl(sdir / "decisions.jsonl") if d.get("i", -1) < current_i]
+        bars = _build_bars(meta, ticks)
+        engine = ExecutionEngine(ExecutionConfig.from_session_config(session.get("config", {})))
+        engine.run(bars, decisions, through_i=current_i, force_close=False)
+        return engine.snapshot(current_i)
+
+
 def _journal(session, meta, pnl, actions, timeline) -> str:
     L = []
     L.append(f"# Simulation — {meta['ticker']} {meta['date']}")
@@ -713,15 +860,15 @@ def finalize(session_dir: str | Path, full_day: bool = True) -> dict:
         if meta is None:
             raise ValueError(f"{sdir}/stream.jsonl has no meta line — was replay --out-file pointed here?")
         decisions = _read_jsonl(sdir / "decisions.jsonl")
-        risk_budget = session.get("config", {}).get("risk_budget") or PROFILE_RISK["small"]
-
         # chart bars = the whole RTH day for context when the run is legitimately done
         # (`full_day=True`, the skill/CLI path). When force-finalizing a *live* session
         # (the viewer button, `full_day=False`) we clamp to the revealed ticks so the
         # saved artifact never shows price action past where trading stopped.
         stream_bars = _build_bars(meta, ticks)
         bars = (_full_day_bars(meta) or stream_bars) if full_day else stream_bars
-        actions, timeline, pnl = _run_engine(meta, stream_bars, decisions, risk_budget, end)
+        actions, timeline, pnl = _run_session_engine(
+            session, meta, stream_bars, decisions, end, force_close=True
+        )
 
         # mirror the frozen skill stamp into pnl.json so `report --by-version` can
         # group by reading one file per session (not session.json + pnl.json).
@@ -747,6 +894,7 @@ def finalize(session_dir: str | Path, full_day: bool = True) -> dict:
             "mfe_per_share": pnl["mfe_per_share"], "n_bars": len(bars),
             "n_decisions": len(timeline), "n_fills": len(actions),
             "skill_version": skill.get("version"),
+            "execution_model": pnl.get("execution_model", LEGACY_EXECUTION_MODEL),
         }
         session["files"] = {
             "bars": "bars.json", "actions": "actions.json", "decisions": "decisions.json",
@@ -886,10 +1034,6 @@ def get_session_view(session_dir: str | Path) -> dict:
         }
 
     decisions_raw = _read_jsonl(sdir / "decisions.jsonl")
-    risk_budget = session.get("config", {}).get("risk_budget") or PROFILE_RISK.get(
-        session.get("config", {}).get("profile", "small"), PROFILE_RISK["small"]
-    )
-
     # NO-LOOK-AHEAD (live): the stream file may physically contain the WHOLE day
     # — the skill writes every bar at once with `replay --delay 0`, so "on disk"
     # is not "revealed". Show only bars the agent has actually PROCESSED: up to the
@@ -902,8 +1046,8 @@ def get_session_view(session_dir: str | Path) -> dict:
     # IMPORTANT: for live we deliberately use ONLY the revealed stream ticks
     # (no _full_day_bars call)
     stream_bars = _build_bars(meta, ticks)
-    actions, timeline, pnl = _run_engine(
-        meta, stream_bars, decisions_raw, risk_budget, None, force_close=False
+    actions, timeline, pnl = _run_session_engine(
+        session, meta, stream_bars, decisions_raw, None, force_close=False
     )
 
     last_i = max([b.get("i", -1) for b in stream_bars]) if stream_bars else None
@@ -1722,14 +1866,18 @@ def build_parser() -> argparse.ArgumentParser:
     pi.add_argument("--mode", default="simulated", choices=["simulated", "live"],
                     help="simulated paper run (default) or a real-time live session")
     pi.add_argument("--pin-version", help="backtest: stamp this exact version "
-                    "read-only (skip resolve/bump); pair with --skill = the archived "
-                    "TRADE_SIMULATOR@<version>.md")
+                    "read-only (skip registration); pair with --skill = "
+                    "skills/trade_skills/<version>.md")
     pi.add_argument("--batch", help="legacy backtest cohort tag")
     pi.add_argument("--session", help="top-level session id (live day or sim batch)")
 
     pl = sub.add_parser("log", help="append one decision record")
     pl.add_argument("--session", required=True)
     pl.add_argument("--record", required=True, help="JSON decision record")
+
+    px = sub.add_parser("resolve", help="resolve active deterministic orders on a revealed tick")
+    px.add_argument("--session", required=True)
+    px.add_argument("--i", type=int, help="revealed tick index (default: latest)")
 
     pf = sub.add_parser("finalize", help="build all artifacts")
     pf.add_argument("--session", required=True)
@@ -1757,6 +1905,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(str(sdir))
     elif args.cmd == "log":
         log(args.session, json.loads(args.record))
+    elif args.cmd == "resolve":
+        print(json.dumps(resolve(args.session, args.i), sort_keys=True))
     elif args.cmd == "finalize":
         session = finalize(args.session)
         r = session.get("result", {})

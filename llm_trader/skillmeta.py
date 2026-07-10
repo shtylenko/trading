@@ -1,86 +1,77 @@
-"""Skill versioning — read/hash the TRADE_SIMULATOR skill and auto-version it.
+"""Skill versioning — one immutable file per version, no separate "live" copy.
 
 Every recorded run is stamped (at ``recorder init``) with the *version* of the
 skill that drove it, so profitability can be attributed per version
 (``recorder report --by-version``). A version has two parts:
 
-- **semver** — a ``version:`` in the skill's YAML frontmatter. This is what you
-  group by and eyeball.
+- **semver** — a ``version:`` in the skill's YAML frontmatter, matching the
+  file's own name (``trade_skills/2.4.1.md`` declares ``version: 2.4.1``).
 - **content hash** — an automatic sha256 of the file bytes, the source of truth
   for "did the rules actually change".
 
-A tiny committed registry (``skills/skill_versions.json``) maps each version to
-the content hash it was recorded with. On every run ``resolve_version`` compares
-the skill's current hash to the hash recorded for its frontmatter version:
+All versions — the currently-accepted one and every past candidate — live as
+sibling files in ``skills/trade_skills/``. There is no separate editable "live"
+file that duplicates whichever version happens to be current: the small
+committed registry (``skills/skill_versions.json``) just records a ``base``
+pointer (which version an unpinned run uses) plus each version's content hash.
 
-- version not yet in the registry → record it (first sighting), no change;
-- recorded hash matches → unchanged;
-- recorded hash **differs** (a rule changed under an already-recorded version) →
-  **auto-bump**: pick the next free patch version, write it into the skill's
-  frontmatter *and* the registry, and stamp the run with the new version.
+**Files are sealed (chmod read-only) the moment they're registered.** This is
+what keeps the registry a source of truth: editing a version's rules in place,
+after it's been used for even one run, would silently invalidate every past
+result recorded against its hash with no way to recover the original bytes (no
+separate archive copy exists to revert from — the version file *is* the only
+copy). So the workflow for a new candidate is always an explicit copy-forward,
+never an in-place edit:
 
-So editing the rules and running a sim is enough — the version increments itself,
-in the file and the registry, with no manual bump. (A human/agent may still set a
-larger jump by hand — a minor/major bump — which is honoured as a first sighting.)
+    python3 -m trading.llm_trader.batchsim new-version --from 2.4.1 --to 2.9.0
+    # edit skills/trade_skills/2.9.0.md freely (unsealed until first run)
+    python3 -m trading.llm_trader.batchsim run --version 2.9.0 ...
+    python3 -m trading.llm_trader.batchsim promote --version 2.9.0   # once accepted
 
-Termination note: the version is written into the frontmatter *before* the hash
-is recorded, so the recorded hash reflects the post-write bytes — a subsequent run
-sees a match and does not bump again.
-
-Each time a version is recorded, an immutable snapshot of the skill is written to
-``skills/archive/<stem>@<version>.md`` — a browsable history of every rule-set,
-whose bytes hash to exactly what the registry records for that version.
-
-The registry (and archive) live in git alongside the skill (NOT in the gitignored
-``simulations/`` tree) because they are the source of truth for "hash X is v2.0.0".
+``resolve_version`` (used by interactive/unpinned ``recorder init`` runs, never
+by a pinned batch) still auto-registers a version's first use and still
+auto-assigns a version to a versionless skill — it just no longer auto-bumps a
+sealed file's content in place, because that content can no longer be mutated
+at the filesystem level.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .fsutils import atomic_write_bytes, atomic_write_json, atomic_write_text, file_lock
+from .fsutils import atomic_write_bytes, atomic_write_json, file_lock
 
 _SKILLS_DIR = Path(__file__).parent / "skills"
-DEFAULT_SKILL_PATH = _SKILLS_DIR / "TRADE_SIMULATOR.md"
+DEFAULT_TRADE_SKILLS_DIR = _SKILLS_DIR / "trade_skills"
+DEFAULT_REGISTRY_PATH = _SKILLS_DIR / "skill_versions.json"
 
 # how many hex chars of the sha256 we keep as the short content hash
 _HASH_LEN = 8
 
-
-def registry_for(skill_path: str | Path) -> Path:
-    """The version registry lives next to its skill, so a custom ``--skill``
-    (or a test's temp skill) tracks into its own file — never the bundled one."""
-    return Path(skill_path).resolve().parent / "skill_versions.json"
+_SEALED_MODE = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH          # 0o444
+_UNSEALED_MODE = _SEALED_MODE | stat.S_IWUSR                        # 0o644
 
 
-def archive_dir_for(skill_path: str | Path) -> Path:
-    """Where per-version snapshots of the skill are kept (next to the skill)."""
-    return Path(skill_path).resolve().parent / "archive"
+def trade_skills_dir_for(registry_path: str | Path) -> Path:
+    """Where per-version skill files live, next to their registry."""
+    return Path(registry_path).resolve().parent / "trade_skills"
 
 
-def _archive_path(skill_path: Path, version: str) -> Path:
-    return archive_dir_for(skill_path) / f"{skill_path.stem}@{version}.md"
+def registry_for(trade_skills_dir: str | Path) -> Path:
+    """The version registry next to a ``trade_skills`` dir (mirrors the old
+    per-skill layout so a custom/test dir tracks into its own registry)."""
+    return Path(trade_skills_dir).resolve().parent / "skill_versions.json"
 
 
-def _archive_snapshot(skill_path: Path, version: str, raw_bytes: Optional[bytes] = None) -> Path:
-    """Save an immutable copy of the *current* skill bytes as
-    ``archive/<stem>@<version>.md``. Called at the moment a version is recorded,
-    so the snapshot's hash equals the hash the registry stores for that version."""
-    dest = _archive_path(skill_path, version)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    if raw_bytes is None:
-        raw_bytes = skill_path.read_bytes()
-    atomic_write_bytes(dest, raw_bytes)
-    return dest
-
-
-# the bundled skill's registry (the common case)
-REGISTRY_PATH = registry_for(DEFAULT_SKILL_PATH)
+def skill_path_for(version: str, trade_skills_dir: str | Path = DEFAULT_TRADE_SKILLS_DIR) -> Path:
+    """The canonical path for one version's file: ``<dir>/<version>.md``."""
+    return Path(trade_skills_dir) / f"{version}.md"
 
 
 def _parse_frontmatter(text: str) -> dict:
@@ -102,7 +93,7 @@ def _parse_frontmatter(text: str) -> dict:
     return fm
 
 
-def read_skill_meta(path: str | Path = DEFAULT_SKILL_PATH) -> dict:
+def read_skill_meta(path: str | Path) -> dict:
     """Return ``{name, version, content_hash, path}`` for a skill file.
 
     ``content_hash`` is ``sha256:<8 hex>`` over the raw file bytes. ``version``
@@ -133,11 +124,14 @@ def _rel_path(p: Path) -> str:
 
 def _load_registry(registry_path: Path) -> dict:
     if not registry_path.exists():
-        return {}
+        return {"base": None, "versions": {}}
     try:
-        return json.loads(registry_path.read_text(encoding="utf-8"))
+        reg = json.loads(registry_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
-        return {}
+        return {"base": None, "versions": {}}
+    reg.setdefault("base", None)
+    reg.setdefault("versions", {})
+    return reg
 
 
 def _save_registry(registry_path: Path, reg: dict) -> None:
@@ -147,6 +141,45 @@ def _save_registry(registry_path: Path, reg: dict) -> None:
 
 def _registry_lock_path(registry_path: Path) -> Path:
     return registry_path.with_suffix(registry_path.suffix + ".lock")
+
+
+def base_version(registry_path: str | Path = DEFAULT_REGISTRY_PATH) -> Optional[str]:
+    """The version an unpinned (no ``--version``) run currently uses. None if
+    never set (a fresh checkout with no accepted baseline yet)."""
+    return _load_registry(Path(registry_path)).get("base")
+
+
+def base_skill_path(
+    registry_path: str | Path = DEFAULT_REGISTRY_PATH,
+    trade_skills_dir: Optional[str | Path] = None,
+) -> Path:
+    """The file path for the current base version. Raises if no base is set."""
+    registry_path = Path(registry_path)
+    trade_skills_dir = Path(trade_skills_dir) if trade_skills_dir else trade_skills_dir_for(registry_path)
+    v = base_version(registry_path)
+    if not v:
+        raise FileNotFoundError(
+            f"no base version set in {registry_path} — run `batchsim promote --version "
+            "<X>` once a version exists, or `new-version` to create the first one."
+        )
+    return skill_path_for(v, trade_skills_dir)
+
+
+def set_base(version: str, registry_path: str | Path = DEFAULT_REGISTRY_PATH) -> None:
+    """Point unpinned runs at ``version``. It must already be registered
+    (sealed by a first run/``resolve_version`` call) — you can't promote a
+    version nobody has ever actually run."""
+    registry_path = Path(registry_path)
+    with file_lock(_registry_lock_path(registry_path)):
+        reg = _load_registry(registry_path)
+        if version not in reg["versions"]:
+            raise ValueError(
+                f"version {version} is not registered in {registry_path} — run it "
+                "once (e.g. `batchsim run --version "
+                f"{version} --dry-run`) before promoting it."
+            )
+        reg["base"] = version
+        _save_registry(registry_path, reg)
 
 
 def _parse_semver(v: str) -> Optional[list[int]]:
@@ -180,13 +213,10 @@ def _next_version(current: str, taken: set[str]) -> str:
     return ".".join(map(str, nums))
 
 
-def _write_version(skill_path: Path, new_version: str) -> Optional[bytes]:
-    """Replace (or insert) the frontmatter ``version:`` line. Returns new file bytes on success.
-
-    Rewrites only the version line inside the leading ``---`` block, leaving the
-    rest of the file byte-for-byte intact. Returns ``None`` if there is no
-    frontmatter block to edit (caller then falls back to a warning)."""
-    lines = skill_path.read_text(encoding="utf-8").splitlines(keepends=True)
+def _rewrite_version_bytes(raw: bytes, new_version: str) -> Optional[bytes]:
+    """Replace (or insert) the frontmatter ``version:`` line. Returns the new
+    bytes, or None if there is no frontmatter block to edit."""
+    lines = raw.decode("utf-8").splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
         return None
     end_idx = ver_idx = None
@@ -203,84 +233,127 @@ def _write_version(skill_path: Path, new_version: str) -> Optional[bytes]:
         lines[ver_idx] = newline
     else:
         lines.insert(1, newline)  # just under the opening ---
-    data = "".join(lines).encode("utf-8")
-    atomic_write_bytes(skill_path, data)
-    return data
+    return "".join(lines).encode("utf-8")
 
 
-def _register_and_archive(
-    reg_path: Path,
-    reg: dict,
-    skill_path: Path,
-    version: str,
-    meta: dict,
-    now: datetime,
-    bumped_from: Optional[str] = None,
-    raw_bytes: Optional[bytes] = None,
-) -> None:
-    entry = {
-        "content_hash": meta["content_hash"],
-        "first_seen": now.isoformat(timespec="seconds"),
-    }
-    if bumped_from is not None:
-        entry["bumped_from"] = bumped_from
-    reg[version] = entry
-    _save_registry(reg_path, reg)
-    _archive_snapshot(skill_path, version, raw_bytes=raw_bytes)
+def new_version(
+    from_version: str,
+    to_version: Optional[str] = None,
+    *,
+    trade_skills_dir: str | Path = DEFAULT_TRADE_SKILLS_DIR,
+) -> Path:
+    """Fork a new, unsealed candidate file from an existing (sealed) version.
+
+    This is the ONLY sanctioned way to start editing toward a new version —
+    editing a sealed file in place is blocked at the filesystem level (it's
+    chmod read-only). Returns the new file's path, writable, frontmatter
+    already rewritten to ``to_version`` (auto-picked as the next patch if
+    omitted). The new file is NOT registered/sealed until it's actually run.
+    """
+    trade_skills_dir = Path(trade_skills_dir)
+    src = skill_path_for(from_version, trade_skills_dir)
+    if not src.exists():
+        raise FileNotFoundError(f"source version {from_version} not found at {src}")
+    if to_version is None:
+        existing = {p.stem for p in trade_skills_dir.glob("*.md")}
+        to_version = _next_version(from_version, existing)
+    dest = skill_path_for(to_version, trade_skills_dir)
+    if dest.exists():
+        raise FileExistsError(f"{dest} already exists — pick a different --to version")
+    raw = src.read_bytes()
+    new_bytes = _rewrite_version_bytes(raw, to_version)
+    if new_bytes is None:
+        raise ValueError(f"{src} has no frontmatter block to rewrite the version in")
+    atomic_write_bytes(dest, new_bytes)
+    os.chmod(dest, _UNSEALED_MODE)
+    return dest
+
+
+def _seal(path: Path) -> None:
+    """Make a version file read-only — it is now part of the permanent record
+    and must never be edited in place again."""
+    os.chmod(path, _SEALED_MODE)
 
 
 def resolve_version(
-    skill_path: str | Path = DEFAULT_SKILL_PATH,
+    skill_path: Optional[str | Path] = None,
     registry_path: Optional[str | Path] = None,
     *,
     now: Optional[datetime] = None,
 ) -> tuple[dict, Optional[str]]:
-    """Return ``(stamp-ready meta, note)``, auto-creating a version on drift.
+    """Return ``(stamp-ready meta, note)``, registering+sealing a version on
+    first use. ``skill_path`` defaults to the current base version's file.
 
-    See the module docstring for the three cases. ``note`` is a human-readable
-    message describing a first-version creation or an auto-bump (for the caller to
-    surface), or ``None`` when nothing changed.
+    Unlike the old live-file design, this never rewrites a version's content
+    in place — a version file is either brand new (unregistered, writable,
+    gets sealed here) or already sealed (any content drift raises instead of
+    silently bumping, since sealing means the filesystem itself should have
+    prevented the edit; this is the loud fallback for a bypassed chmod).
     """
-    skill_path = Path(skill_path)
-    reg_path = Path(registry_path) if registry_path else registry_for(skill_path)
+    # Registry resolution order: explicit registry_path wins; else, if an explicit
+    # skill_path was given, colocate the registry next to it (this is what makes a
+    # test's/ad-hoc skill file fully self-contained — resolve_version never touches
+    # the real project's registry unless skill_path is also left at its default);
+    # else fall back to the real project's registry for the real base skill.
+    if registry_path is not None:
+        registry_path = Path(registry_path)
+    elif skill_path is not None:
+        registry_path = Path(skill_path).parent / "skill_versions.json"
+    else:
+        registry_path = DEFAULT_REGISTRY_PATH
+    trade_skills_dir = trade_skills_dir_for(registry_path)
+    skill_path = Path(skill_path) if skill_path else base_skill_path(registry_path, trade_skills_dir)
     now = now or datetime.now()
 
-    with file_lock(_registry_lock_path(reg_path)), file_lock(skill_path):
+    # Lock a sibling `.lock` file, never `skill_path` itself — a sealed (chmod
+    # read-only) version file can't be opened in append mode, which is how
+    # file_lock acquires its advisory lock.
+    skill_lock_path = skill_path.with_name(skill_path.name + ".lock")
+    with file_lock(_registry_lock_path(registry_path)), file_lock(skill_lock_path):
         meta = read_skill_meta(skill_path)
-        reg = _load_registry(reg_path)
+        reg = _load_registry(registry_path)
+        versions = reg["versions"]
         version = meta.get("version")
 
-        # versionless skill: create an initial version so the run is trackable
+        # versionless skill: assign an initial version so the run is trackable
         if not version:
-            new_version = _next_version("0.0.0", set(reg.keys()))  # → 0.0.1
-            new_bytes = _write_version(skill_path, new_version)
+            version = _next_version("0.0.0", set(versions.keys()))  # → 0.0.1
+            new_bytes = _rewrite_version_bytes(skill_path.read_bytes(), version)
             if new_bytes is None:
                 return meta, (
                     f"skill {meta.get('name')!r} has no `version:` and no frontmatter "
                     "to write one into — recorded as unversioned."
                 )
+            atomic_write_bytes(skill_path, new_bytes)
             meta = read_skill_meta(skill_path)  # re-hash after writing the version
-            _register_and_archive(reg_path, reg, skill_path, new_version, meta, now, raw_bytes=new_bytes)
-            return meta, f"skill had no version — created {new_version}."
+            note_suffix = f"skill had no version — created {version}."
+        else:
+            note_suffix = None
 
-        entry = reg.get(version)
-        current = meta.get("content_hash")
+        entry = versions.get(version)
+        current = meta["content_hash"]
 
-        if entry is None:  # first sighting (incl. a hand-set minor/major bump)
-            _register_and_archive(reg_path, reg, skill_path, version, meta, now)
-            return meta, None
+        if entry is None:  # first sighting (new candidate, or a hand-set bump)
+            canonical = skill_path_for(version, trade_skills_dir)
+            if skill_path.resolve() != canonical.resolve():
+                atomic_write_bytes(canonical, skill_path.read_bytes())
+                skill_path = canonical
+            versions[version] = {
+                "content_hash": current, "first_seen": now.isoformat(timespec="seconds"),
+            }
+            _save_registry(registry_path, reg)
+            _seal(skill_path)
+            return meta, note_suffix or f"registered new version {version}."
 
         if entry.get("content_hash") == current:  # unchanged
             return meta, None
 
-        # drift: content changed under an already-recorded version → auto-bump patch
-        new_version = _next_version(version, set(reg.keys()))
-        new_bytes = _write_version(skill_path, new_version)
-        if new_bytes is None:
-            return meta, (
-                f"skill content changed under {version} but the frontmatter could not "
-                "be updated — bump `version:` manually."
-            )
-        meta = read_skill_meta(skill_path)  # re-hash AFTER writing the new version line
-        _register_and_archive(reg_path, reg, skill_path, new_version, meta, now, bumped_from=version, raw_bytes=new_bytes)
-        return meta, f"auto-bumped skill version {version} → {new_version} (rules changed)."
+        # entry exists but bytes differ — a sealed file was mutated in place
+        # (chmod bypassed, or a repeat use of an unsealed race). Refuse rather
+        # than guess: there is no separate archive copy left to revert from.
+        raise ValueError(
+            f"{skill_path} no longer matches the sealed hash registered for version "
+            f"{version} — an already-registered version must never be edited in "
+            f"place. Fork a new candidate instead: `batchsim new-version --from "
+            f"{version} --to <next>`."
+        )

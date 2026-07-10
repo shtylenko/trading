@@ -32,7 +32,7 @@ Cameron canon** (`library/ross_cameron/all_content_structured.md`).
 | Source | Role |
 |---|---|
 | `library/ross_cameron/all_content_structured.md` | **The single canon.** Every behavioral rule must trace to it. |
-| `skills/TRADE_SIMULATOR.md` | The rule-set being optimized. |
+| `skills/trade_skills/<base-version>.md` | The rule-set being optimized (see `MAINTAINING.md` for the base pointer). |
 | `skills/RULE_TRACE.md` | rule → canon citation table. **Mandatory update on every behavioral bump.** |
 | `skills/CHANGELOG.md` | experiment log: version, hypothesis, batch, ΔR, decision. |
 | `BACKLOG.md` | the open improvement queue. |
@@ -93,18 +93,20 @@ the skill lines and canon lines it touches; the change **type** (direct-corpus /
 operationalization / sim-constraint / empirical-guardrail); the expected behavioral
 delta and expected metric movement; the dev setups you'll inspect. Then:
 
-- Patch `TRADE_SIMULATOR.md`; **hand-set a minor version** for a behavioral change.
+- Fork a candidate: `batchsim new-version --from <base> --to <next>` (hand-set a
+  minor version for a behavioral change — pass `--to` explicitly).
+- Edit the writable candidate file under `skills/trade_skills/`.
 - Update `RULE_TRACE.md`.
-- `diff` against the previous `archive/TRADE_SIMULATOR@<prev>.md` snapshot.
+- `diff` against the previous `skills/trade_skills/<prev>.md`.
 - Batch-harness prompt changes in `batchsim.py` that affect agent behavior count as
-  skill changes — bump too (see `MAINTAINING.md`).
+  skill changes — fork a new version too (see `MAINTAINING.md`).
 
 ### 4.1 Pre-batch clarity review (mandatory before any PAID batch)
 
 Before a candidate goes to a paid validation batch, run an **executing-model clarity
 review** of the full skill text: give a fresh LLM (ideally the same model that runs the
 batches) the prompt at `peer_reviews/skill_clarity_review_prompt.md` and have it read
-the candidate `TRADE_SIMULATOR.md` cold.
+the candidate `skills/trade_skills/<version>.md` cold.
 
 Why this is a gate, not a nicety: the 2.5.0 candidate shipped with a structural bug —
 `break_level` defined as the breakout bar's high made the failed-break predicate fire

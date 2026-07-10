@@ -148,13 +148,13 @@ def _text_out_of_credits(text: Optional[str]) -> bool:
 
 def _latest_version() -> str:
     """Return the highest semver key from the skill registry (e.g. '2.0.3')."""
-    reg_path = skillmeta.registry_for(skillmeta.DEFAULT_SKILL_PATH)
-    reg = skillmeta._load_registry(reg_path)
-    if not reg:
-        raise RuntimeError(f"no versions in skill registry at {reg_path}")
+    reg = skillmeta._load_registry(skillmeta.DEFAULT_REGISTRY_PATH)
+    versions = reg["versions"]
+    if not versions:
+        raise RuntimeError(f"no versions in skill registry at {skillmeta.DEFAULT_REGISTRY_PATH}")
     # reuse skillmeta's semver parser (single source of truth); non-numeric tags
     # sort lowest rather than crashing the max().
-    return max(reg.keys(), key=lambda v: skillmeta._parse_semver(v) or [0, 0, 0])
+    return max(versions.keys(), key=lambda v: skillmeta._parse_semver(v) or [0, 0, 0])
 
 
 # ───────────────────────────── build-set ────────────────────────────────────
@@ -265,12 +265,12 @@ def load_testset(path: Path) -> list[dict]:
 
 
 def _archived_skill(version: str) -> Path:
-    p = skillmeta.archive_dir_for(skillmeta.DEFAULT_SKILL_PATH) / f"TRADE_SIMULATOR@{version}.md"
+    p = skillmeta.skill_path_for(version)
     if not p.exists():
         raise FileNotFoundError(
-            f"no archived skill for version {version} at {p}. Archived snapshots are "
-            "created when a version is first recorded (run one sim on it, or check "
-            "skills/archive/)."
+            f"no skill file for version {version} at {p}. Create one with "
+            "`batchsim new-version --from <existing> --to "
+            f"{version}` (check skills/trade_skills/ for what exists)."
         )
     return p
 
@@ -663,17 +663,17 @@ def run(
     if testset is None:
         testset = TESTSET_DEFAULT
 
-    # Source the skill from the LIVE working copy by default so a batch tests the
-    # current rules. Its text is inlined into every agent prompt (see _prompt), so
+    # Source the skill from the current BASE version by default so a batch tests the
+    # accepted rules. Its text is inlined into every agent prompt (see _prompt), so
     # the agent never reads a skill file — that agent-side file read is exactly what
-    # the audit was voiding. An explicit --version still runs the pinned, immutable
-    # archived snapshot (also inlined; the harness reads it, never the agent).
+    # the audit was voiding. An explicit --version still runs that pinned, immutable
+    # version file (also inlined; the harness reads it, never the agent).
     if version:
         skill_path = _archived_skill(version)
     else:
-        skill_path = skillmeta.DEFAULT_SKILL_PATH
+        skill_path = skillmeta.base_skill_path()
         version = skillmeta.read_skill_meta(skill_path).get("version")
-        print(f"no --version provided; using live skill {skill_path.name} (v{version})",
+        print(f"no --version provided; using base skill {skill_path.name} (v{version})",
               file=sys.stderr)
     skill_text = skill_path.read_text(encoding="utf-8")
     setups = load_testset(testset)
@@ -1426,8 +1426,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     "max-diversity set with no repeated tickers.")
 
     pr = sub.add_parser("run", help="spawn agents for one version/batch")
-    pr.add_argument("--version", help="skill version to pin (archived); defaults to latest "
-                    "in registry. On --resume, recovered from the batch if omitted.")
+    pr.add_argument("--version", help="skill version to pin (from skills/trade_skills/); "
+                    "defaults to the current base version. On --resume, recovered from "
+                    "the batch if omitted.")
     pr.add_argument("--model", help="hermes model id (the local executor). Required for a "
                     "new batch; on --resume, recovered from the batch if omitted.")
     pr.add_argument("--set", dest="testset", default=None,
@@ -1464,6 +1465,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pc.add_argument("--a", required=True, help="baseline batch tag (accepted version)")
     pc.add_argument("--b", required=True, help="candidate batch tag")
     pc.add_argument("--format", choices=["table", "json"], default="table")
+
+    pn = sub.add_parser("new-version", help="fork a new, unsealed candidate skill file")
+    pn.add_argument("--from", dest="from_version", required=True,
+                    help="existing (sealed) version to copy from")
+    pn.add_argument("--to", dest="to_version", default=None,
+                    help="new version name (default: next free patch after --from)")
+
+    pp = sub.add_parser("promote", help="point unpinned runs at an already-run version")
+    pp.add_argument("--version", required=True)
+
+    sub.add_parser("current", help="print the current base version")
     return p
 
 
@@ -1502,6 +1514,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(json.dumps(result, indent=2, default=list))
         else:
             _print_compare(result)
+    elif args.cmd == "new-version":
+        dest = skillmeta.new_version(args.from_version, args.to_version)
+        print(f"forked {args.from_version} → {dest} (unsealed — edit freely, "
+              f"not registered until first run)")
+    elif args.cmd == "promote":
+        skillmeta.set_base(args.version)
+        print(f"base version → {args.version} (unpinned runs now use this)")
+    elif args.cmd == "current":
+        print(skillmeta.base_version() or "(no base version set)")
     return 0
 
 

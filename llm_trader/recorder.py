@@ -313,11 +313,11 @@ def init(
     edits to the skill never retroactively re-tag this run. Normally the version is
     resolved (and auto-bumped on drift) via ``skillmeta.resolve_version``.
 
-    **Backtest mode (``pin_version``).** When replaying a *specific* archived version
-    for a batch, pass ``pin_version="2.0.2"`` with ``skill`` pointing at the archived
-    file (``skills/archive/TRADE_SIMULATOR@2.0.2.md``). The session is stamped exactly
-    with that version + the archived file's hash, and ``resolve_version`` is **skipped
-    entirely** — a backtest must never bump the version or mutate the registry/archive.
+    **Backtest mode (``pin_version``).** When replaying a *specific* version for a
+    batch, pass ``pin_version="2.0.2"`` with ``skill`` pointing at that version's file
+    (``skills/trade_skills/2.0.2.md``). The session is stamped exactly with that
+    version + the file's hash, and ``resolve_version`` is **skipped entirely** — a
+    backtest must never bump the version or touch the registry.
     ``batch`` or ``session`` tags the run. Use ``session`` for top-level grouping
     (live trading day or simulation batch). ``batch`` kept for backward compat.
     """
@@ -329,7 +329,7 @@ def init(
     sdir = Path(root) / sid
     sdir.mkdir(parents=True, exist_ok=False)
 
-    skill_path = skill or skillmeta.DEFAULT_SKILL_PATH
+    skill_path = skill or skillmeta.base_skill_path()
     note = None
     if pin_version is not None:
         # backtest: stamp the pinned version read-only — no resolve/bump/archive.
@@ -342,7 +342,12 @@ def init(
                       "content_hash": content_hash, "path": str(skill_path)}
     else:
         try:
-            skill_meta, note = skillmeta.resolve_version(skill_path)
+            # A caller-supplied `skill` override (tests, ad-hoc runs) gets its own
+            # colocated registry (resolve_version infers it next to the file) so it
+            # never touches the real project's registry; the standard no-override
+            # path always targets the real one explicitly.
+            registry_path = None if skill is not None else skillmeta.DEFAULT_REGISTRY_PATH
+            skill_meta, note = skillmeta.resolve_version(skill_path, registry_path)
         except FileNotFoundError:
             skill_meta = {"name": None, "version": None, "content_hash": None,
                           "path": str(skill_path)}
@@ -1713,7 +1718,7 @@ def build_parser() -> argparse.ArgumentParser:
     pi.add_argument("--risk-budget", type=float)
     pi.add_argument("--buying-power", type=float)
     pi.add_argument("--skill", help="path to the driving skill .md "
-                    "(default: bundled TRADE_SIMULATOR.md)")
+                    "(default: the current base version in skills/trade_skills/)")
     pi.add_argument("--mode", default="simulated", choices=["simulated", "live"],
                     help="simulated paper run (default) or a real-time live session")
     pi.add_argument("--pin-version", help="backtest: stamp this exact version "

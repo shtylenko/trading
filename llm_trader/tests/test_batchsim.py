@@ -467,8 +467,10 @@ def test_resume_recovers_config_from_batch_json(tmp_path, monkeypatch):
         {"ticker": "TK", "date": "2025-01-02", "time_et": "09:35"}]}))
     batchsim._write_batch_meta(tag, version="9.9.9", model="rec-model",
                                testset=str(ts), repeats=1)
-    # archived skill for the recovered version must exist for run() to load it
-    monkeypatch.setattr(batchsim, "_archived_skill", lambda v: skillmeta.DEFAULT_SKILL_PATH)
+    # skill file for the recovered version must exist for run() to load it
+    dummy_skill = tmp_path / "dummy_skill.md"
+    dummy_skill.write_text("---\nname: x\nversion: 9.9.9\n---\nbody\n")
+    monkeypatch.setattr(batchsim, "_archived_skill", lambda v: dummy_skill)
 
     # resume by session alone → recovers version/model/testset; dry-run so no agents spawn
     out = batchsim.run(resume=True, session="20250102000000-BATCH-deadbe", dry_run=True)
@@ -539,16 +541,16 @@ def test_at_time_pins_exact_setup(tmp_path):
 
 
 def test_pin_version_is_read_only(tmp_path, monkeypatch):
-    """init --pin-version stamps the version without touching the registry/archive."""
-    archived = skillmeta.archive_dir_for(skillmeta.DEFAULT_SKILL_PATH) / "TRADE_SIMULATOR@2.0.1.md"
-    before = skillmeta.REGISTRY_PATH.read_text()
+    """init --pin-version stamps the version without touching the registry."""
+    archived = skillmeta.skill_path_for("2.0.1")
+    before = skillmeta.DEFAULT_REGISTRY_PATH.read_text()
     sdir = recorder.init("BQ", "2026-01-13", root=tmp_path, skill=archived,
                          pin_version="2.0.1", batch="t",
                          now=datetime(2026, 7, 5, 10, 0, 0))
     s = json.loads((sdir / "session.json").read_text())
     assert s["skill"]["version"] == "2.0.1"
     assert s["batch"] == "t"
-    assert skillmeta.REGISTRY_PATH.read_text() == before  # registry untouched
+    assert skillmeta.DEFAULT_REGISTRY_PATH.read_text() == before  # registry untouched
 
 
 def test_agent_env_sandboxes_marketdata(tmp_path, monkeypatch):

@@ -1,69 +1,72 @@
 {
-  "2.0.0": {
-    "content_hash": "sha256:37d6ea91",
-    "first_seen": "2026-07-04T22:30:19"
-  },
-  "2.0.1": {
-    "bumped_from": "2.0.0",
-    "content_hash": "sha256:dc96d3b3",
-    "first_seen": "2026-07-04T22:42:23"
-  },
-  "2.0.2": {
-    "bumped_from": "2.0.1",
-    "content_hash": "sha256:e0be2db9",
-    "first_seen": "2026-07-04T23:00:56"
-  },
-  "2.0.3": {
-    "content_hash": "sha256:da318bc6",
-    "first_seen": "2026-07-05T16:10:03"
-  },
-  "2.0.4": {
-    "content_hash": "sha256:abeb876a",
-    "first_seen": "2026-07-05T17:29:29"
-  },
-  "2.0.5": {
-    "content_hash": "sha256:8194a70b",
-    "first_seen": "2026-07-07T12:09:30"
-  },
-  "2.1.0": {
-    "content_hash": "sha256:e46b50a5",
-    "first_seen": "2026-07-07T21:44:29"
-  },
-  "2.2.0": {
-    "content_hash": "sha256:205d017e",
-    "first_seen": "2026-07-07T22:25:23"
-  },
-  "2.2.1": {
-    "bumped_from": "2.2.0",
-    "content_hash": "sha256:1be9d2d1",
-    "first_seen": "2026-07-07T22:26:45"
-  },
-  "2.3.0": {
-    "content_hash": "sha256:a70a7f01",
-    "first_seen": "2026-07-08T13:42:39"
-  },
-  "2.4.0": {
-    "content_hash": "sha256:3a6a92ff",
-    "first_seen": "2026-07-08T17:42:36"
-  },
-  "2.4.1": {
-    "content_hash": "sha256:aaf54b09",
-    "first_seen": "2026-07-08T21:39:14"
-  },
-  "2.5.0": {
-    "content_hash": "sha256:1d8f2ee3",
-    "first_seen": "2026-07-08T22:03:31"
-  },
-  "2.6.0": {
-    "content_hash": "sha256:ee6f108e",
-    "first_seen": "2026-07-08T22:41:22"
-  },
-  "2.7.0": {
-    "content_hash": "sha256:10cef9a9",
-    "first_seen": "2026-07-09T09:14:15"
-  },
-  "2.8.0": {
-    "content_hash": "sha256:7cefe16d",
-    "first_seen": "2026-07-09T09:16:03"
+  "base": "2.4.1",
+  "versions": {
+    "2.0.0": {
+      "content_hash": "sha256:37d6ea91",
+      "first_seen": "2026-07-04T22:30:19"
+    },
+    "2.0.1": {
+      "bumped_from": "2.0.0",
+      "content_hash": "sha256:dc96d3b3",
+      "first_seen": "2026-07-04T22:42:23"
+    },
+    "2.0.2": {
+      "bumped_from": "2.0.1",
+      "content_hash": "sha256:e0be2db9",
+      "first_seen": "2026-07-04T23:00:56"
+    },
+    "2.0.3": {
+      "content_hash": "sha256:b3b7321e",
+      "first_seen": "2026-07-05T16:10:03"
+    },
+    "2.0.4": {
+      "content_hash": "sha256:abeb876a",
+      "first_seen": "2026-07-05T17:29:29"
+    },
+    "2.0.5": {
+      "content_hash": "sha256:8194a70b",
+      "first_seen": "2026-07-07T12:09:30"
+    },
+    "2.1.0": {
+      "content_hash": "sha256:e46b50a5",
+      "first_seen": "2026-07-07T21:44:29"
+    },
+    "2.2.0": {
+      "content_hash": "sha256:205d017e",
+      "first_seen": "2026-07-07T22:25:23"
+    },
+    "2.2.1": {
+      "bumped_from": "2.2.0",
+      "content_hash": "sha256:1be9d2d1",
+      "first_seen": "2026-07-07T22:26:45"
+    },
+    "2.3.0": {
+      "content_hash": "sha256:a70a7f01",
+      "first_seen": "2026-07-08T13:42:39"
+    },
+    "2.4.0": {
+      "content_hash": "sha256:3a6a92ff",
+      "first_seen": "2026-07-08T17:42:36"
+    },
+    "2.4.1": {
+      "content_hash": "sha256:aaf54b09",
+      "first_seen": "2026-07-08T21:39:14"
+    },
+    "2.5.0": {
+      "content_hash": "sha256:1d8f2ee3",
+      "first_seen": "2026-07-08T22:03:31"
+    },
+    "2.6.0": {
+      "content_hash": "sha256:ee6f108e",
+      "first_seen": "2026-07-08T22:41:22"
+    },
+    "2.7.0": {
+      "content_hash": "sha256:10cef9a9",
+      "first_seen": "2026-07-09T09:14:15"
+    },
+    "2.8.0": {
+      "content_hash": "sha256:7cefe16d",
+      "first_seen": "2026-07-09T09:16:03"
+    }
   }
 }

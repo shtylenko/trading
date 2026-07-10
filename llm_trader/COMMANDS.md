@@ -1,5 +1,6 @@
 
-Read and follow /Users/shtylenko/Hermes/projects/trading/llm_trader/skills/TRADE_SIMULATOR.md
+# `python3 -m trading.llm_trader.batchsim current` prints the base version, e.g. 2.4.1
+Read and follow /Users/shtylenko/Hermes/projects/trading/llm_trader/skills/trade_skills/2.4.1.md
 
 
 python3 -m trading.llm_trader.viewer

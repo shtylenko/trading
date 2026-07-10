@@ -75,9 +75,10 @@ python3 -m trading.llm_trader.step start --session "$SDIR" --seed 7
 python3 -m trading.llm_trader.step next  --session "$SDIR"   # the "ping"
 ```
 
-The **`skills/TRADE_SIMULATOR.md`** skill drives an LLM agent through a paced live
-session: it `init`s a session folder, streams the tape, makes entry/management/exit
-decisions bar by bar (logging each turn's reasoning), and `finalize`s the artifacts.
+The **`skills/trade_skills/<version>.md`** skill (whichever is currently the `base`
+— see `skills/MAINTAINING.md`) drives an LLM agent through a paced live session: it
+`init`s a session folder, streams the tape, makes entry/management/exit decisions
+bar by bar (logging each turn's reasoning), and `finalize`s the artifacts.
 
 ```bash
 # session lifecycle (normally driven by the skill)
@@ -95,15 +96,16 @@ python3 -m trading.llm_trader.viewer
 # Supports live SSE updates for running sessions (revealed data only).
 ```
 
-Each run records which **version** of `TRADE_SIMULATOR.md` drove it, and versioning
-is **automatic**: when the skill's content changes, the next `init` detects the new
-content hash, **auto-bumps the patch** `version:` (writing it into the frontmatter
-and `skills/skill_versions.json`), and stamps the run with it. Set `version:` by
-hand only for a bigger semantic jump (minor/major) — a hand-set version is honoured
-as-is. Every version also gets an immutable snapshot in
-`skills/archive/TRADE_SIMULATOR@<version>.md`, so you can read or diff the exact
-rule-set behind any run. `recorder report --by-version` then attributes win rate /
-P&L / avg-R to each version so you can tell whether a rule change helped.
+Each run records which **version** drove it. There's no separate "live" file to
+duplicate — every version, current or past, is its own immutable file under
+`skills/trade_skills/<version>.md`, sealed (chmod read-only) the moment it's first
+registered. `skills/skill_versions.json` tracks each version's content hash plus a
+`base` pointer (which version an unpinned run uses). To try a rule change: fork one
+(`batchsim new-version --from <X> --to <Y>`), edit the writable copy, test it
+(`batchsim run --version <Y> ...`), and only promote it (`batchsim promote --version
+<Y>`) once it clears the gate — see `skills/MAINTAINING.md`. `recorder report
+--by-version` attributes win rate / P&L / avg-R to each version so you can tell
+whether a rule change helped.
 
 Each session is a self-contained folder under `simulations/{TS}-{TICKER}/`
 (`bars.json`, `actions.json`, `decisions.json`, `pnl.json`, `session.json`,
@@ -113,8 +115,8 @@ Each session is a self-contained folder under `simulations/{TS}-{TICKER}/`
 
 To measure whether a rule change actually helped, run a **fixed set of setups**
 against a **pinned skill version** and compare. Each setup is traded by a headless
-`hermes` agent following the archived rules for that version; every session is
-version + batch stamped, so comparison is apples-to-apples.
+`hermes` agent following that version's frozen rules; every session is version +
+batch stamped, so comparison is apples-to-apples.
 
 ```bash
 # one-time: build a stratified, version-controlled holdout (~30 setups from entries.db)
@@ -127,7 +129,7 @@ python3 -m trading.llm_trader.batchsim run \
 # --dry-run prints the per-setup hermes commands without spawning anything
 ```
 
-`run` pins the archived `skills/archive/TRADE_SIMULATOR@<version>.md` (via
+`run` pins `skills/trade_skills/<version>.md` (via
 `recorder init --pin-version … --batch …`, which stamps read-only — no version bump),
 spawns a headless agent per setup, then runs a **post-hoc `audit`**. hermes assigns
 each `-z` run its own opaque session id (it can't be named or forced), so the audit

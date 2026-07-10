@@ -472,6 +472,13 @@ def test_resume_recovers_config_from_batch_json(tmp_path, monkeypatch):
     dummy_skill = tmp_path / "dummy_skill.md"
     dummy_skill.write_text("---\nname: x\nversion: 9.9.9\n---\nbody\n")
     monkeypatch.setattr(batchsim, "_archived_skill", lambda v: dummy_skill)
+    dummy_hash = skillmeta.read_skill_meta(dummy_skill)["content_hash"]
+    batchsim._write_batch_meta(
+        tag,
+        testset_hash=batchsim._file_hash(ts),
+        skill_hash=dummy_hash,
+        runner_contract=batchsim.runner_contract(),
+    )
 
     # resume by session alone → recovers version/model/testset; dry-run so no agents spawn
     out = batchsim.run(resume=True, session="20250102000000-BATCH-deadbe", dry_run=True)
@@ -681,24 +688,67 @@ def test_compare_pairs_and_verdicts(tmp_path, monkeypatch):
     monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
     monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
 
+    contract = {
+        "harness_version": "test-v1",
+        "prompt_hash": "sha256:prompt",
+        "harness_hash": "sha256:harness",
+    }
+
     def mk(tag, ticker, date, r, sid, traded=True):
         d = tmp_path / sid
         d.mkdir(parents=True, exist_ok=True)
         (d / "session.json").write_text(json.dumps(
             {"id": sid, "status": "complete", "ticker": ticker,
-             "historical_date": date, "batch": tag, "real_run_ts": sid}))
+             "historical_date": date, "batch": tag, "real_run_ts": sid,
+             "config": {"execution_model": "reported_fill_v1"},
+             "skill": {"content_hash": "sha256:skill"},
+             "runner_contract": contract}))
         (d / "pnl.json").write_text(json.dumps(
             {"traded": traded, "win": (r or 0) > 0, "realized_pnl": (r or 0) * 40,
-             "r_multiple": r}))
+             "r_multiple": r, "skill_hash": "sha256:skill"}))
 
     # baseline A all 0R; candidate B all +1R on the same 3 setups → B clearly better
     for i, (tk, dt) in enumerate([("AA", "2025-01-01"), ("BB", "2025-01-02"), ("CC", "2025-01-03")]):
         mk("baseA", tk, dt, 0.0, f"a{i}-{tk}-x", traded=True)
         mk("candB", tk, dt, 1.0, f"b{i}-{tk}-x", traded=True)
+    for tag in ("baseA", "candB"):
+        batchsim._write_batch_meta(
+            tag, model="test-model", testset_hash="sha256:testset",
+            skill_hash="sha256:skill", runner_contract=contract, reentry=False,
+        )
     r = batchsim.compare("baseA", "candB")
     assert r["n_pairs"] == 3
     assert r["mean_dR"] == pytest.approx(1.0)
     assert r["better"] == 3 and r["worse"] == 0
+
+
+def test_compare_refuses_runner_contract_drift(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+
+    def mk(tag, contract):
+        d = tmp_path / f"{tag}-run"
+        d.mkdir()
+        (d / "session.json").write_text(json.dumps({
+            "status": "complete", "ticker": "AA", "historical_date": "2025-01-01",
+            "batch": tag, "config": {"execution_model": "deterministic_ohlc_v1", "execution": {}},
+            "skill": {"content_hash": "sha256:skill"}, "runner_contract": contract,
+        }))
+        (d / "pnl.json").write_text(json.dumps({
+            "traded": True, "win": True, "realized_pnl": 40.0, "r_multiple": 1.0,
+            "execution_model": "deterministic_ohlc_v1", "skill_hash": "sha256:skill",
+        }))
+        batchsim._write_batch_meta(
+            tag, model="test-model", testset_hash="sha256:testset", skill_hash="sha256:skill",
+            runner_contract=contract, reentry=False,
+        )
+
+    base = {"harness_version": "v1", "prompt_hash": "sha256:a", "harness_hash": "sha256:b"}
+    changed = {**base, "prompt_hash": "sha256:changed"}
+    mk("base", base)
+    mk("changed", changed)
+    with pytest.raises(ValueError, match="runner contract"):
+        batchsim.compare("base", "changed")
 
 
 def test_compare_refuses_execution_model_rebaseline(tmp_path, monkeypatch):

@@ -136,14 +136,19 @@ def test_init_freezes_deterministic_execution_assumptions(tmp_path):
         "---\nname: trade-simulator\nversion: 3.0.0\n"
         "execution_model: deterministic_ohlc_v1\n---\n# candidate\n"
     )
+    runner_contract = {"harness_version": "test", "prompt_hash": "sha256:p"}
     sdir = recorder.init("TEST", "2025-03-10", root=tmp_path, skill=skill,
                          risk_budget=75.0, buying_power=5_000.0,
+                         runner_contract=runner_contract,
                          now=datetime(2026, 7, 10, 10, 0, 0))
+    runner_contract["prompt_hash"] = "mutated-after-init"
     config = json.loads((sdir / "session.json").read_text())["config"]
     assert config["execution_model"] == EXECUTION_MODEL
     assert config["execution"]["risk_budget"] == 75.0
     assert config["execution"]["buying_power"] == 5_000.0
     assert config["execution"]["max_participation_rate"] == 0.10
+    session = json.loads((sdir / "session.json").read_text())
+    assert session["runner_contract"]["prompt_hash"] == "sha256:p"
 
 
 def _attribution_stream(path):

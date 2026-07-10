@@ -310,6 +310,7 @@ def init(
     pin_version: Optional[str] = None,
     batch: Optional[str] = None,
     session: Optional[str] = None,
+    runner_contract: Optional[dict] = None,
     root: Path = SIM_ROOT,
     now: Optional[datetime] = None,
 ) -> Path:
@@ -326,6 +327,9 @@ def init(
     backtest must never bump the version or touch the registry.
     ``batch`` or ``session`` tags the run. Use ``session`` for top-level grouping
     (live trading day or simulation batch). ``batch`` kept for backward compat.
+    Batch harnesses may also stamp an immutable ``runner_contract`` describing the
+    prompt and execution harness that drove this leaf; ordinary/manual sessions do
+    not need one.
     """
     now = now or datetime.now()
     # A short random suffix makes the id collision-proof: under batch parallelism two
@@ -383,6 +387,9 @@ def init(
         # a session after a later code-default change must produce identical P&L.
         config["execution"] = ExecutionConfig.from_session_config(config).to_dict()
 
+    if runner_contract is not None and not isinstance(runner_contract, dict):
+        raise ValueError("runner_contract must be a dictionary when provided")
+
     session = {
         "schema_version": SCHEMA_VERSION,
         "id": sid,
@@ -397,6 +404,10 @@ def init(
         "config": config,
         "files": {},
     }
+    if runner_contract is not None:
+        # JSON round-trip makes a detached, serializable snapshot. A caller cannot
+        # mutate the in-memory dict after init and silently change session provenance.
+        session["runner_contract"] = json.loads(json.dumps(runner_contract, sort_keys=True))
     atomic_write_json(sdir / "session.json", session, indent=2)
     # touch the append targets so the run never trips over a missing file
     (sdir / "decisions.jsonl").touch()

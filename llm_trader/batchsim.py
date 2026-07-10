@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures as _cf
+import hashlib
+import inspect
 import json
 import os
 import random
@@ -182,6 +184,11 @@ _OUT_OF_CREDITS_RE = re.compile(
 _OUT_OF_CREDITS_LABEL = "out of credits (HTTP 402)"
 _TIMEOUT_LABEL = "killed after per-setup timeout"
 _DEFAULT_RETRIES = 1  # extra attempts on a timeout before giving up (0 = no retry)
+
+# Bump only when the batch-agent contract deliberately changes in a way that source
+# hashes alone cannot describe clearly to a reviewer. The hashes below still make an
+# unintentional prompt or isolation-harness edit a comparison-breaking change.
+RUNNER_CONTRACT_VERSION = "isolated_one_tick_v1"
 
 # recorder.finalize() replays decisions.jsonl through the fill engine and raises
 # ValueError if the agent logged an inconsistent sequence (e.g. an EXIT with no
@@ -539,6 +546,7 @@ def _preseal(work: dict, skill_path: Path, version: str, session_id: str) -> tup
         sdir = recorder.init(
             work["ticker"], work["date"], profile="small", skill=skill_path,
             pin_version=version, batch=work["tag"], session=session_id,
+            runner_contract=work["runner_contract"],
             root=staging_root,
         )
         gateway = step.start_isolated(
@@ -697,6 +705,48 @@ def _run_one(work: dict) -> dict:
         return _result("isolation-error", error=str(e))
 
 
+def _source_hash(*subjects: object) -> str:
+    """Hash the relevant runner source without depending on a Git checkout at runtime."""
+    digest = hashlib.sha256()
+    for subject in subjects:
+        try:
+            source = inspect.getsource(subject)
+        except (OSError, TypeError) as e:
+            raise RuntimeError(f"cannot source-stamp runner contract component {subject!r}") from e
+        digest.update(source.encode("utf-8"))
+        digest.update(b"\0")
+    return f"sha256:{digest.hexdigest()}"
+
+
+def runner_contract() -> dict:
+    """Immutable provenance for the agent prompt and its execution harness.
+
+    Skill bytes and frozen execution configuration are stamped independently. This
+    contract captures the surrounding behavior that can otherwise shift an LLM's
+    decisions: the prompt template, sandbox/data access, staged-session lifecycle,
+    and one-tick gateway semantics.
+    """
+    return {
+        "harness_version": RUNNER_CONTRACT_VERSION,
+        "prompt_hash": _source_hash(_prompt),
+        "harness_hash": _source_hash(
+            _agent_env,
+            _write_agent_sandbox,
+            _preseal,
+            _run_one,
+            step.IsolatedStreamGateway,
+            step.start_isolated,
+        ),
+    }
+
+
+def _file_hash(path: Path) -> str:
+    try:
+        return f"sha256:{hashlib.sha256(Path(path).read_bytes()).hexdigest()}"
+    except OSError as e:
+        raise ValueError(f"cannot hash test set {path}") from e
+
+
 def _existing_session_id(tag: str) -> Optional[str]:
     """The top-level session id (``…-BATCH-<hex>``) already used by this batch's
     leaves, so ``--resume`` rejoins the original batch in the viewer instead of
@@ -726,6 +776,7 @@ def run(
     resume: bool = False, dry_run: bool = False, session: Optional[str] = None,
 ) -> str:
     """Run the batch: spawn agents for every (setup × repeat), then audit + report."""
+    resume_meta: dict = {}
     # ── Resolve the batch identity FIRST (before touching skill/testset) so a --resume
     # can recover the batch's recorded config. A batch is keyed internally by its `tag`
     # (manifest/logs/batch.json) and displayed under its top-level `session` id
@@ -751,6 +802,7 @@ def run(
         if not bmeta:
             raise SystemExit(f"cannot resume: no recorded batch config (batch.json) for "
                              f"tag {tag}.")
+        resume_meta = bmeta
         version = version or bmeta.get("version")
         model = model or bmeta.get("model")
         if testset is None and bmeta.get("testset"):
@@ -799,6 +851,28 @@ def run(
     skill_meta = skillmeta.read_skill_meta(skill_path)
     execution_model = skill_meta.get("execution_model") or "reported_fill_v1"
     skill_text = skill_path.read_text(encoding="utf-8")
+    current_runner_contract = runner_contract()
+    testset_hash = _file_hash(testset)
+    if resume:
+        recorded_runner_contract = resume_meta.get("runner_contract")
+        if not isinstance(recorded_runner_contract, dict):
+            raise ValueError(
+                "cannot resume an unstamped batch: runner_contract is missing from batch.json. "
+                "Start a new batch so its leaves have consistent provenance."
+            )
+        if recorded_runner_contract != current_runner_contract:
+            raise ValueError(
+                "cannot resume under a different runner contract: prompt or harness behavior "
+                "changed since this batch began. Start a new batch."
+            )
+        if resume_meta.get("testset_hash") != testset_hash:
+            raise ValueError(
+                "cannot resume with different test-set bytes than the batch's recorded testset_hash"
+            )
+        if resume_meta.get("skill_hash") != skill_meta.get("content_hash"):
+            raise ValueError(
+                "cannot resume with different skill bytes than the batch's recorded skill_hash"
+            )
     setups = load_testset(testset)
 
     tag = tag or f"{version}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -837,6 +911,7 @@ def run(
                 "session_name": _session_name(tag, su["ticker"], su["date"], rep),
                 "tag": tag,
                 "session": session_id,
+                "runner_contract": current_runner_contract,
                 "model": model, "timeout": timeout, "retries": retries,
                 "reentry": reentry, "dry_run": dry_run,
             })
@@ -882,6 +957,8 @@ def run(
     # items) from the moment it starts — before any session finalizes.
     _write_batch_meta(
         tag, version=version, model=model, testset=str(testset),
+        testset_hash=testset_hash, skill_hash=skill_meta.get("content_hash"),
+        runner_contract=current_runner_contract,
         planned=len(setups) * repeats, repeats=repeats, reentry=reentry,
         started_ts=datetime.now().isoformat(timespec="seconds"),
         finished_ts=None, status="running",
@@ -1401,6 +1478,12 @@ def _leaves_by_key(tag: str) -> dict:
         if key == (None, None):
             continue
         p = recorder._load_json(d / "pnl.json", {}) or {}
+        config = s.get("config", {}) or {}
+        execution_model = (
+            p.get("execution_model")
+            or config.get("execution_model")
+            or "reported_fill_v1"
+        )
         rec = {
             "void": bool(s.get("void")), "ooc": bool(s.get("out_of_credits")),
             "timeout": bool(s.get("timed_out")),
@@ -1408,11 +1491,20 @@ def _leaves_by_key(tag: str) -> dict:
             "status": s.get("status"), "ts": s.get("real_run_ts") or "",
             "traded": bool(p.get("traded")), "r": p.get("r_multiple"),
             "pnl": p.get("realized_pnl"), "win": bool(p.get("win")),
-            "execution_model": (
-                p.get("execution_model")
-                or (s.get("config", {}) or {}).get("execution_model")
-                or "reported_fill_v1"
+            "execution_model": execution_model,
+            # Legacy reported fills have no frozen execution config; their model
+            # identifier is the complete execution contract. Deterministic leaves
+            # must match every frozen cost/liquidity setting exactly.
+            "execution_contract": (
+                config.get("execution")
+                if execution_model == EXECUTION_MODEL
+                else {"execution_model": execution_model}
             ),
+            "skill_hash": (
+                p.get("skill_hash")
+                or (s.get("skill", {}) or {}).get("content_hash")
+            ),
+            "runner_contract": s.get("runner_contract"),
         }
         def clean(r):
             return (r["status"] == "complete" and not r["void"] and not r["ooc"]
@@ -1445,6 +1537,64 @@ def _sign_test_p(n_up: int, n_down: int) -> Optional[float]:
     return min(1.0, 2 * tail)
 
 
+def _contract_key(value: object) -> str:
+    """Canonical, hashable representation for stamped comparison contracts."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _require_matching_batch_metadata(tag_a: str, tag_b: str) -> None:
+    """Refuse a paired claim when top-level batch provenance differs or is absent."""
+    meta_a, meta_b = _read_batch_meta(tag_a), _read_batch_meta(tag_b)
+    fields = (
+        ("model", "model"),
+        ("testset_hash", "test-set hash"),
+        ("skill_hash", "skill hash"),
+        ("runner_contract", "runner contract"),
+        ("reentry", "re-entry policy"),
+    )
+    for field, label in fields:
+        va, vb = meta_a.get(field), meta_b.get(field)
+        if va is None or vb is None:
+            missing = tag_a if va is None else tag_b
+            raise ValueError(
+                f"cannot compare unstamped batch {missing!r}: missing {field}. "
+                "Run new cohorts under the current harness; historical results remain readable "
+                "but are not promotion-comparable."
+            )
+        if _contract_key(va) != _contract_key(vb):
+            raise ValueError(
+                f"cannot compare batches with different {label}: A={tag_a}, B={tag_b}. "
+                "This would confound a strategy comparison."
+            )
+
+
+def _require_matching_leaf_contract(leaves_a: dict, leaves_b: dict, field: str,
+                                    label: str) -> None:
+    """Ensure every selected leaf carries one matching immutable contract value."""
+    def unique(leaves: dict, tag_label: str) -> set[str]:
+        values = []
+        for key, row in leaves.items():
+            value = row.get(field)
+            if value is None:
+                raise ValueError(
+                    f"cannot compare unstamped {tag_label} leaf {key}: missing {field}"
+                )
+            values.append(_contract_key(value))
+        out = set(values)
+        if len(out) != 1:
+            raise ValueError(
+                f"cannot compare a batch with mixed {label} across its selected leaves"
+            )
+        return out
+
+    values_a, values_b = unique(leaves_a, "baseline"), unique(leaves_b, "candidate")
+    if values_a != values_b:
+        raise ValueError(
+            f"cannot compare batches with different {label}. "
+            "This would confound a strategy comparison."
+        )
+
+
 def compare(tag_a: str, tag_b: str) -> dict:
     """Paired promotion gate: is candidate B better than baseline A on shared setups?
     A/B are batch tags. Pairs on (ticker,date), effective R (stood-down=0R, void/ooc
@@ -1458,6 +1608,10 @@ def compare(tag_a: str, tag_b: str) -> dict:
             f"A={sorted(models_a)}, B={sorted(models_b)}. "
             "A fill-model change is a major rebaseline; establish a new baseline first."
         )
+    _require_matching_batch_metadata(tag_a, tag_b)
+    _require_matching_leaf_contract(A, B, "skill_hash", "skill hash")
+    _require_matching_leaf_contract(A, B, "execution_contract", "frozen execution config")
+    _require_matching_leaf_contract(A, B, "runner_contract", "runner contract")
     keys = sorted(set(A) & set(B))
     pairs = []  # (key, rA, rB, dR)
     for k in keys:

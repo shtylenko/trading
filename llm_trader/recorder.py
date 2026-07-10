@@ -37,6 +37,7 @@ import sys
 import threading
 import time
 from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -1843,6 +1844,213 @@ def _print_report(rows: list[dict]) -> None:
               "--b <tagB>` (paired, one batch each).")
 
 
+# ───────────────────────── execution attribution ──────────────────────────
+
+
+_ATTRIBUTION_PROFILES = (
+    ("recorded", "frozen session execution assumptions"),
+    ("no_commission", "commission = $0; slippage and participation cap retained"),
+    ("no_slippage", "entry/exit slippage = 0 bps; commissions and cap retained"),
+    ("no_participation_cap", "participation cap = 100% of each bar; costs retained"),
+    ("frictionless", "zero commissions/slippage and 100% bar participation"),
+)
+
+
+def _attribution_configs(config: ExecutionConfig) -> dict[str, ExecutionConfig]:
+    """Counterfactual configs for a frozen deterministic session.
+
+    These intentionally vary exactly one execution assumption at a time from the
+    recorded configuration, plus a fully frictionless reference.  The agent's
+    sealed intent log is never changed or regenerated.
+    """
+    return {
+        "recorded": config,
+        "no_commission": replace(config, commission_per_share=0.0),
+        "no_slippage": replace(config, entry_slippage_bps=0.0, exit_slippage_bps=0.0),
+        "no_participation_cap": replace(config, max_participation_rate=1.0),
+        "frictionless": replace(
+            config,
+            entry_slippage_bps=0.0,
+            exit_slippage_bps=0.0,
+            commission_per_share=0.0,
+            max_participation_rate=1.0,
+        ),
+    }
+
+
+def _aggregate_attribution_profile(name: str, description: str, results: list[dict],
+                                   expected_n: int, errors: list[dict]) -> dict:
+    """Summarize a list of deterministic ``ExecutionEngine`` P&L dictionaries."""
+    traded = [p for p in results if p.get("traded")]
+    r_sum = sum((p.get("r_multiple") or 0.0) for p in traded)
+    pnl = round(sum((p.get("realized_pnl") or 0.0) for p in results), 2)
+    return {
+        "profile": name,
+        "description": description,
+        "n": len(results),
+        "n_expected": expected_n,
+        "n_errors": len(errors),
+        "trades": len(traded),
+        "stood_down": len(results) - len(traded),
+        "wins": sum(1 for p in traded if p.get("win")),
+        "win_pct": round(100 * sum(1 for p in traded if p.get("win")) / len(traded), 1)
+        if traded else None,
+        "pnl": pnl,
+        "avg_r": round(r_sum / len(traded), 3) if traded else None,
+        "eff_r": round(r_sum / len(results), 3) if results else None,
+        "fees": round(sum((p.get("fees") or 0.0) for p in results), 2),
+        "errors": errors,
+    }
+
+
+def execution_attribution(batch: str) -> dict:
+    """Replay a deterministic batch under controlled execution assumptions.
+
+    The report is read-only: it uses each completed session's sealed stream and
+    append-only raw intents, then runs fresh in-memory :class:`ExecutionEngine`
+    instances.  It is specifically an *execution* attribution, not a new
+    strategy backtest—the decisions remain constant across every profile.
+
+    Only clean deterministic-execution leaves in ``batch`` qualify.  A stored
+    P&L mismatch for the ``recorded`` profile is retained in the result instead
+    of being silently treated as a counterfactual difference.
+    """
+    if not batch:
+        raise ValueError("batch is required for execution attribution")
+
+    members = [(d, s) for d, s in iter_sessions() if s.get("batch") == batch]
+    if not members:
+        raise ValueError(f"no sessions found for batch {batch!r}")
+
+    resolved = _resolved_slots([s for _, s in members])
+    eligible: list[tuple[Path, dict]] = []
+    skipped: list[dict] = []
+    for sdir, session in members:
+        slot = (session.get("ticker"), session.get("historical_date"))
+        if (_is_void(session) or _is_infra_fail(session)) and slot in resolved:
+            continue  # stale failed attempt superseded by a clean --resume leaf
+        if session.get("status") != "complete":
+            skipped.append({"session": sdir.name, "reason": "not complete"})
+            continue
+        if _is_void(session):
+            skipped.append({"session": sdir.name, "reason": "void"})
+            continue
+        if _is_infra_fail(session):
+            skipped.append({"session": sdir.name, "reason": "infrastructure failure"})
+            continue
+        if session.get("config", {}).get("execution_model") != EXECUTION_MODEL:
+            skipped.append({"session": sdir.name, "reason": "not deterministic OHLC"})
+            continue
+        eligible.append((sdir, session))
+
+    if not eligible:
+        raise ValueError(
+            f"batch {batch!r} has no completed {EXECUTION_MODEL} sessions to attribute"
+        )
+
+    profile_results: dict[str, list[dict]] = {name: [] for name, _ in _ATTRIBUTION_PROFILES}
+    profile_errors: dict[str, list[dict]] = {name: [] for name, _ in _ATTRIBUTION_PROFILES}
+    recorded_mismatches: list[dict] = []
+
+    for sdir, session in eligible:
+        meta, ticks, end = _parse_stream(sdir / "stream.jsonl")
+        decisions = _read_jsonl(sdir / "decisions.jsonl")
+        if meta is None or not ticks:
+            skipped.append({"session": sdir.name, "reason": "missing sealed stream"})
+            continue
+        if not decisions:
+            skipped.append({"session": sdir.name, "reason": "missing intent log"})
+            continue
+
+        bars = _build_bars(meta, ticks)
+        stored_pnl = _load_json(sdir / "pnl.json", {}) or {}
+        configs = _attribution_configs(
+            ExecutionConfig.from_session_config(session.get("config", {}))
+        )
+        for name, _description in _ATTRIBUTION_PROFILES:
+            try:
+                _actions, _timeline, pnl = ExecutionEngine(configs[name]).run(
+                    bars,
+                    decisions,
+                    end_close=(end or {}).get("close"),
+                    force_close=True,
+                )
+            except Exception as e:  # preserve one bad historical artifact in the report
+                profile_errors[name].append({"session": sdir.name, "error": str(e)})
+                continue
+            profile_results[name].append(pnl)
+            if name == "recorded":
+                replayed = pnl.get("realized_pnl")
+                persisted = stored_pnl.get("realized_pnl")
+                if not isinstance(persisted, (int, float)) or abs(replayed - persisted) > 0.005:
+                    recorded_mismatches.append({
+                        "session": sdir.name,
+                        "persisted_pnl": persisted,
+                        "replayed_pnl": replayed,
+                    })
+
+    expected_n = len(eligible)
+    profiles = []
+    for name, description in _ATTRIBUTION_PROFILES:
+        row = _aggregate_attribution_profile(
+            name, description, profile_results[name], expected_n, profile_errors[name]
+        )
+        profiles.append(row)
+
+    recorded = next(row for row in profiles if row["profile"] == "recorded")
+    for row in profiles:
+        row["delta_pnl_vs_recorded"] = (
+            round(row["pnl"] - recorded["pnl"], 2)
+            if row["n"] == recorded["n"] else None
+        )
+
+    return {
+        "batch": batch,
+        "execution_model": EXECUTION_MODEL,
+        "n_eligible": expected_n,
+        "n_skipped": len(skipped),
+        "skipped": skipped,
+        "verification": {
+            "recorded_replays": recorded["n"],
+            "recorded_mismatches": recorded_mismatches,
+        },
+        "profiles": profiles,
+    }
+
+
+def _print_execution_attribution(report: dict) -> None:
+    """Render the read-only execution-attribution report for the terminal."""
+    print(f"execution attribution — batch {report['batch']} ({report['execution_model']})")
+    verification = report["verification"]
+    if verification["recorded_mismatches"]:
+        print(f"⚠ recorded replay mismatch in {len(verification['recorded_mismatches'])} session(s)")
+    else:
+        print(f"recorded replay verified for {verification['recorded_replays']} session(s)")
+    print(
+        f"{'profile':<22}{'n':>4}{'trades':>8}{'win%':>7}{'P&L':>11}"
+        f"{'Δ P&L':>10}{'cleanR':>8}{'effR':>7}{'fees':>10}"
+    )
+    for row in report["profiles"]:
+        win = f"{row['win_pct']:.1f}%" if row["win_pct"] is not None else "—"
+        pnl = f"${row['pnl']:.2f}"
+        fees = f"${row['fees']:.2f}"
+        delta = "—" if row["profile"] == "recorded" else (
+            f"${row['delta_pnl_vs_recorded']:.2f}"
+            if row["delta_pnl_vs_recorded"] is not None else "incomplete"
+        )
+        clean_r = f"{row['avg_r']:.3f}" if row["avg_r"] is not None else "—"
+        eff_r = f"{row['eff_r']:.3f}" if row["eff_r"] is not None else "—"
+        note = f" ⚠ {row['n_errors']} replay error(s)" if row["n_errors"] else ""
+        print(
+            f"{row['profile']:<22}{row['n']:>4}{row['trades']:>8}{win:>7}"
+            f"{pnl:>11}{delta:>10}{clean_r:>8}{eff_r:>7}{fees:>10}{note}"
+        )
+    print("profiles: no_commission and no_slippage retain the other recorded assumptions; "
+          "no_participation_cap permits up to 100% of each bar's volume.")
+    if report["n_skipped"]:
+        print(f"skipped {report['n_skipped']} non-qualifying session(s); use --format json for details.")
+
+
 # ───────────────────────────── CLI ──────────────────────────────────────────
 
 
@@ -1892,6 +2100,15 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--batch", help="restrict to one backtest cohort tag")
     pr.add_argument("--format", choices=["table", "json"], default="table",
                     help="table (default) or json for programmatic diffing")
+
+    pa = sub.add_parser(
+        "attribution",
+        help="replay one deterministic batch under controlled execution assumptions",
+    )
+    pa.add_argument("--batch", required=True,
+                    help="backtest cohort tag; uses only deterministic OHLC leaves")
+    pa.add_argument("--format", choices=["table", "json"], default="table",
+                    help="table (default) or json with per-profile replay errors")
     return p
 
 
@@ -1927,6 +2144,12 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(json.dumps(rows, indent=2))
         else:
             _print_report(rows)
+    elif args.cmd == "attribution":
+        report = execution_attribution(args.batch)
+        if args.format == "json":
+            print(json.dumps(report, indent=2))
+        else:
+            _print_execution_attribution(report)
     return 0
 
 

@@ -33,9 +33,11 @@ def _install_fake_provider(monkeypatch):
     monkeypatch.setattr(replay, "pick_setup", lambda *a, **k: setup)
 
     def fake_replay(_setup, **kw):
-        Path(kw["out_file"]).write_text(
-            "\n".join(json.dumps(x) for x in _SEALED) + "\n"
-        )
+        payload = "\n".join(json.dumps(x) for x in _SEALED) + "\n"
+        if kw.get("out_file"):
+            Path(kw["out_file"]).write_text(payload)
+        else:
+            kw["out"].write(payload)
         return 2
 
     monkeypatch.setattr(replay, "replay", fake_replay)
@@ -126,3 +128,38 @@ def test_start_refuses_to_reseal_started_session(tmp_path, monkeypatch):
         assert "already-started" in out.getvalue()
         _, ticks, _ = parse_stream(sdir / "stream.jsonl")
         assert [t["i"] for t in ticks] == [0]    # never reset to meta-only
+
+
+def test_isolated_gateway_keeps_future_in_memory_and_requires_decision(tmp_path, monkeypatch):
+    _install_fake_provider(monkeypatch)
+    sdir = tmp_path / "staged-session"
+    gateway = step.start_isolated(sdir, seed=1)
+    try:
+        # There is no private source or cursor file for an agent to read on disk.
+        assert not (sdir / "_sealed.jsonl").exists()
+        assert not (sdir / "_step.json").exists()
+        _, ticks, end = parse_stream(sdir / "stream.jsonl")
+        assert ticks == [] and end is None
+
+        out = StringIO()
+        assert step.next_(sdir, out=out) == 0
+        assert '"i": 0' in out.getvalue()
+
+        # An agent cannot fast-forward the gateway without immutably logging bar 0.
+        out = StringIO()
+        assert step.next_(sdir, out=out) == 3
+        assert "decision-required i=0" in out.getvalue()
+        (sdir / "decisions.jsonl").write_text(json.dumps({"i": 0, "action": "OBSERVE"}) + "\n")
+
+        out = StringIO()
+        assert step.next_(sdir, out=out) == 0
+        assert '"i": 1' in out.getvalue()
+
+        # Only the harness-owned object can publish the full replay artifact.
+        gateway.publish()
+        _, ticks, end = parse_stream(sdir / "stream.jsonl")
+        assert [tick["i"] for tick in ticks] == [0, 1]
+        assert end is not None
+        assert not (sdir / ".step_gateway.json").exists()
+    finally:
+        gateway.close()

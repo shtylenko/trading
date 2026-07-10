@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 from datetime import datetime
 
 import pytest
@@ -570,6 +571,50 @@ def test_agent_env_sandboxes_marketdata(tmp_path, monkeypatch):
     # a sentinel that matches no real provider — an empty string would mean "all"
     assert env["MARKETDATA_PROVIDERS"] and env["MARKETDATA_PROVIDERS"] != ""
     assert env["MARKETDATA_PROVIDERS"] not in ("alpaca", "marketdata", "yfinance")
+
+
+def test_macos_sandbox_blocks_shared_simulation_tree_but_allows_staged_session(tmp_path, monkeypatch):
+    sandbox = batchsim._sandbox_executable()
+    if sandbox is None:
+        pytest.skip("sandbox-exec is unavailable on this platform")
+
+    durable = tmp_path / "durable-simulations"
+    durable.mkdir()
+    secret = durable / "future.jsonl"
+    secret.write_text("future\n")
+    staged = tmp_path / "staged" / "session"
+    staged.mkdir(parents=True)
+    visible = staged / "stream.jsonl"
+    visible.write_text("revealed\n")
+    monkeypatch.setattr(recorder, "SIM_ROOT", durable)
+    profile = batchsim._write_agent_sandbox(tmp_path, staged)
+
+    blocked = subprocess.run(
+        [sandbox, "-f", str(profile), "/bin/cat", str(secret)],
+        capture_output=True, text=True,
+    )
+    allowed = subprocess.run(
+        [sandbox, "-f", str(profile), "/bin/cat", str(visible)],
+        capture_output=True, text=True, check=True,
+    )
+    assert blocked.stdout == ""
+    assert blocked.returncode != 0
+    assert allowed.stdout == "revealed\n"
+
+
+def test_promote_staged_session_moves_only_after_harness_finalization(tmp_path, monkeypatch):
+    durable = tmp_path / "simulations"
+    staged_root = tmp_path / "staging"
+    staged = staged_root / "20260710120000-TEST-abcdef"
+    staged.mkdir(parents=True)
+    (staged / "session.json").write_text("{}")
+    monkeypatch.setattr(recorder, "SIM_ROOT", durable)
+
+    promoted = batchsim._promote_staged_session(staged)
+
+    assert promoted == durable / staged.name
+    assert (promoted / "session.json").exists()
+    assert not staged.exists()
 
 
 def test_prompt_is_preseal_step_next_only():

@@ -67,6 +67,10 @@
     "2.8.0": {
       "content_hash": "sha256:7cefe16d",
       "first_seen": "2026-07-09T09:16:03"
+    },
+    "3.0.0": {
+      "content_hash": "sha256:b115c738",
+      "first_seen": "2026-07-10T10:57:27"
     }
   }
 }

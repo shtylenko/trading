@@ -8,14 +8,14 @@ profitability report. Because every session is version + batch stamped
 (``recorder init --pin-version … --batch …``), comparing two skill versions is just
 running the **same setups** against each and diffing the reports.
 
-**AI note**: The harness itself creates and seals each session (recorder init +
-step start) and hands the agent an already-started session via the literal SDIR in
-its prompt; the agent runs the trading loop only (step next + recorder log) and is
-spawned WITHOUT market-data credentials (see _agent_env), so look-ahead — direct
-`replay`/`fetch`, or re-sealing after a reveal — is structurally unreachable rather
-than merely audited. The prompt still defines the agent's trading behavior; edits
-that change what it's told to do should be treated as skill changes and accompanied
-by a version bump (see skills/MAINTAINING.md).
+**AI note**: The harness seals each batch stream in memory and exposes it through a
+one-tick gateway only. The agent runs in a macOS sandbox that cannot read prior
+simulation artifacts, the market-data layer, or the harness's private process state;
+it receives a staging-session path with only the currently revealed stream. The
+harness publishes/finalizes that session only after the agent exits. Transcript audit
+remains defense in depth. The prompt still defines trading behavior; edits that change
+what it is told to do should be treated as skill changes and accompanied by a version
+bump (see skills/MAINTAINING.md).
 
 Subcommands
 -----------
@@ -44,6 +44,7 @@ import random
 import re
 import secrets
 import signal
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -68,9 +69,8 @@ def _agent_env(cache_dir: Path) -> dict:
     """The environment handed to the headless agent: harness env minus provider creds,
     with the marketdata cache redirected to `cache_dir` (a fresh EMPTY dir per run) and
     the provider chain disabled. The agent's ONLY window into price is `step next`
-    against the already-sealed file in its session dir (which does not live under the
-    marketdata cache), so that keeps working while any direct data-layer access
-    (`replay`, `fetch_bars`) fails.
+    against the harness-owned one-tick gateway, so that keeps working while any direct
+    data-layer access (`replay`, `fetch_bars`) fails.
 
     Two non-obvious pitfalls, both handled here:
     - Unsetting the cache-dir env vars is NOT enough: marketdata.config falls back to a
@@ -98,6 +98,57 @@ ENTRIES_DB = DATA_DIR / "entries.db"
 # gitignored data/ tree). entries.db it's sampled from is regenerable and ignored.
 TESTSET_DEFAULT = Path(__file__).parent / "batch" / "testset.json"
 BATCH_LOGS = recorder.SIM_ROOT / "_batch"   # captured agent transcripts, per cohort
+
+
+def _sandbox_executable() -> Optional[str]:
+    """macOS primitive used to deny the agent access to private historical data."""
+    return shutil.which("sandbox-exec")
+
+
+def _sandbox_subpath(path: str | Path) -> str:
+    """Return a canonical sandbox profile matcher for ``path``.
+
+    macOS evaluates filesystem paths after resolving ``/var`` → ``/private/var``;
+    resolving first prevents a symlink spelling from bypassing a deny rule.
+    """
+    return f"(subpath {json.dumps(str(Path(path).resolve()))})"
+
+
+def _write_agent_sandbox(profile_dir: Path, agent_session: Path) -> Path:
+    """Write the fail-closed sandbox policy for one batch agent.
+
+    The agent needs the llm_trader code, its disposable staged session, and normal
+    network access for the model provider. It must not be able to read any previous
+    simulations, the scanner database/cache, or the shared marketdata/lab packages.
+    The future stream itself is held only in the batch harness's memory gateway.
+    """
+    code_root = Path(__file__).resolve().parent
+    protected = (
+        recorder.SIM_ROOT,
+        DATA_DIR,
+        REPO_ROOT / "trading" / "marketdata" / "data",
+        REPO_ROOT / "trading" / "lab",
+    )
+    lines = ["(version 1)", "(allow default)"]
+    # Disallow source changes too: otherwise a model could patch its local runtime
+    # into a data reader. The staging session lives outside code_root and remains
+    # writable for `recorder log`.
+    lines.append(f"(deny file-write* {_sandbox_subpath(code_root)})")
+    for path in protected:
+        matcher = _sandbox_subpath(path)
+        lines.append(f"(deny file-read-data {matcher})")
+        lines.append(f"(deny file-read-metadata {matcher})")
+        lines.append(f"(deny file-write* {matcher})")
+    # The staged session must be explicit in the profile. It is outside every
+    # protected subtree today, but this makes that invariant clear and future-safe.
+    session_matcher = _sandbox_subpath(agent_session)
+    lines.append(f"(allow file-read-data {session_matcher})")
+    lines.append(f"(allow file-read-metadata {session_matcher})")
+    lines.append(f"(allow file-write* {session_matcher})")
+    profile = profile_dir / "agent.sb"
+    profile.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return profile
+
 
 # The audit is a DENYLIST: a run is void only when a command shows a *concrete* look-ahead
 # or determinism break. Benign shell the agents wrap around the sanctioned tools — cd,
@@ -281,13 +332,12 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
             reentry: bool = True, execution_model: str = "reported_fill_v1") -> str:
     """The per-setup task handed to a headless hermes agent.
 
-    The harness has ALREADY created and sealed the session (recorder init + step start)
-    and hands the agent the literal, already-started SDIR. The agent therefore never
-    runs init/start/finalize — its whole job is the trading loop: reveal a bar, decide,
-    log, repeat. This removes the two things that caused look-ahead voids: the setup
-    block the agent used to fumble (losing $SDIR → re-init/re-seal) and any reason to
-    touch the data layer. The agent is also spawned WITHOUT market-data credentials
-    (see _agent_env), so `replay`/`fetch` fail outright even if attempted.
+    The harness has ALREADY created the session and holds the sealed day in a private
+    in-memory one-tick gateway. The agent receives only a disposable staged SDIR; it
+    never runs init/start/finalize — its whole job is reveal a bar, decide, log, repeat.
+    The macOS sandbox blocks prior simulations and the market-data layer, while the
+    gateway cannot serve arbitrary/future bars. The agent is also spawned WITHOUT
+    market-data credentials (see _agent_env), so `replay`/`fetch` fail outright.
 
     Command lines are NOT indented (leading whitespace on `\\`-continued lines would be
     passed to the agent verbatim)."""
@@ -334,14 +384,15 @@ Batch tag: {tag}   Session ID: {session_id}   pinned skill version: {version}
 
 === YOUR SESSION IS ALREADY SET UP — DO NOT CREATE OR START ONE ===
 
-The session has already been initialized and sealed for you. Use this exact path
+The session has already been initialized for you. Use this exact path
 (it is fixed for the whole run; copy it literally into every command):
 
 SDIR="{sdir}"
 
-There is nothing to initialize, seal, or start. The market's future does not exist
-anywhere you can reach: there is no data file to read, no command that fetches bars,
-and no way to restart or re-seal. Your ONLY window into price is `step next`.
+There is nothing to initialize, seal, or start. The market's future is held only by
+the harness gateway: there is no reachable data file, no command that fetches bars,
+and no API that accepts an index or returns more than one tick. Your ONLY window into
+price is `step next`.
 
 === THE TRADING LOOP — THESE ARE THE ONLY COMMANDS YOU RUN ===
 
@@ -371,8 +422,8 @@ going; the early stop only applies once you are flat with nothing left to do.
   already sealed and the harness finalizes it; there is nothing for you to set up or
   close, and re-sealing is look-ahead.
 - NEVER place the literal strings "_sealed.jsonl" or "_step.json" (or paths containing
-  them) into ANY command. Do not read, cat, ls, mv, or open those files. Everything you
-  need comes from `step next` and the stream it reveals.
+  them) into ANY command. Do not read, cat, ls, mv, or open private/session-control
+  files. Everything you need comes from `step next` and the stream it reveals.
 - Do NOT read, cat, or open ANY skill file — the rules are inlined above.
 - FAIL CLOSED: if anything looks wrong — you lose the path, a command errors, the state
   seems inconsistent — STOP and report it. Do NOT try to recover by re-initializing,
@@ -475,25 +526,45 @@ def _load_manifest(tag: str) -> list[dict]:
     return out
 
 
-def _preseal(work: dict, skill_path: Path, version: str, session_id: str) -> Path:
-    """Create AND seal the session for one setup, harness-side, before the agent runs.
+def _preseal(work: dict, skill_path: Path, version: str, session_id: str) -> tuple[Path, step.IsolatedStreamGateway]:
+    """Create a staged session and hold its complete day behind an in-memory gateway.
 
-    Moving `recorder init` + `step start` out of the agent is the core anti-look-ahead
-    fix: the agent receives an already-started session (via the literal SDIR in its
-    prompt) and never touches init/start/replay. This process holds the data creds and
-    does the one sealing fetch here; the agent is then run credential-less (_agent_env).
-    Returns the session dir. Raises on failure (caller records it as a preseal error)."""
-    sdir = recorder.init(
-        work["ticker"], work["date"], profile="small", skill=skill_path,
-        pin_version=version, batch=work["tag"], session=session_id,
-    )
-    import io as _io
-    rc = step.start(sdir, ticker=work["ticker"], date=work["date"],
-                    at_time=work.get("time_et"), out=_io.StringIO())
-    if rc != 0:
-        raise RuntimeError(f"step start failed (rc={rc}) — provider may not serve "
-                           f"{work['ticker']} {work['date']}")
-    return sdir
+    The staged directory is deliberately outside ``SIM_ROOT``: the sandboxed agent can
+    write decisions there, but cannot read any historical simulation tree. The gateway
+    exposes only one sequential tick and the full stream is published after the agent
+    exits, immediately before harness-side finalization and promotion into ``SIM_ROOT``.
+    """
+    staging_root = Path(tempfile.mkdtemp(prefix="llm-trader-agent-session-"))
+    try:
+        sdir = recorder.init(
+            work["ticker"], work["date"], profile="small", skill=skill_path,
+            pin_version=version, batch=work["tag"], session=session_id,
+            root=staging_root,
+        )
+        gateway = step.start_isolated(
+            sdir, ticker=work["ticker"], date=work["date"], at_time=work.get("time_et")
+        )
+        return sdir, gateway
+    except Exception:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise
+
+
+def _promote_staged_session(sdir: Path) -> Path:
+    """Move a finalized staged leaf into the durable simulations tree."""
+    sdir = Path(sdir)
+    if sdir.parent == recorder.SIM_ROOT:
+        return sdir
+    destination = recorder.SIM_ROOT / sdir.name
+    if destination.exists():
+        raise FileExistsError(f"refusing to overwrite existing session {destination}")
+    recorder.SIM_ROOT.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(sdir), str(destination))
+    try:
+        sdir.parent.rmdir()  # the per-agent staging root should now be empty
+    except OSError:
+        pass
+    return destination
 
 
 def _run_one(work: dict) -> dict:
@@ -514,12 +585,15 @@ def _run_one(work: dict) -> dict:
 
     sdir = Path(work["sdir"])
     sid = sdir.name
+    gateway: step.IsolatedStreamGateway = work["gateway"]
 
     def _result(status: str, **extra) -> dict:
-        # Finalize harness-side no matter how the agent exited, so every pre-sealed
-        # session gets a result (a no-decision run finalizes as a stand-down). The
-        # harness holds the data creds; full-day finalize needs them.
+        # The agent can only see incrementally revealed bars. Once it exits, publish
+        # the full stream, finalize in the harness, and only then promote the staged
+        # artifact into the durable simulations tree.
+        final_sdir = sdir
         try:
+            gateway.publish()
             recorder.finalize(sdir)
         except Exception as e:  # noqa: BLE001 — never let finalize sink the batch
             # finalize() raised BEFORE writing session.json, so status is still
@@ -530,15 +604,20 @@ def _run_one(work: dict) -> dict:
             extra["finalize_error"] = str(e)
             status = "finalize-error"
             _stamp_finalize_error(sdir, str(e))
+        try:
+            final_sdir = _promote_staged_session(sdir)
+        except Exception as e:  # noqa: BLE001 — a result outside SIM_ROOT is unusable
+            extra["promotion_error"] = str(e)
+            status = "promotion-error"
         if status == "out-of-credits":
             # Stamp the session so the audit / viewer treat it as an infra failure
             # (excluded from stats) rather than a look-ahead void. Done after finalize,
             # which rewrites session.json.
-            _stamp_out_of_credits(sdir)
+            _stamp_out_of_credits(final_sdir)
         elif status == "timeout":
             # Same idea for a killed-on-timeout run: stamp it so it is never a clean
             # "complete no-trade" — excluded from stats and re-run by --resume.
-            _stamp_timeout(sdir)
+            _stamp_timeout(final_sdir)
         base = {"item": work["item"], "session_name": name, "sid": sid,
                 "ticker": work["ticker"], "date": work["date"], "rep": work["rep"],
                 "status": status}
@@ -556,8 +635,13 @@ def _run_one(work: dict) -> dict:
         # Fresh empty marketdata cache per agent so a stray cached bar can never leak
         # the future into another run; auto-removed when the agent exits.
         with tempfile.TemporaryDirectory(prefix="batchsim-nomd-") as nomd:
+            sandbox = _sandbox_executable()
+            if sandbox is None:
+                raise RuntimeError("sandbox-exec is required for isolated batch runs")
+            profile = _write_agent_sandbox(Path(nomd), sdir)
+            sandboxed_cmd = [sandbox, "-f", str(profile), *cmd]
             with subprocess.Popen(
-                cmd, cwd=str(REPO_ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                sandboxed_cmd, cwd=str(REPO_ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, start_new_session=True, env=_agent_env(Path(nomd)),
             ) as proc:
                 try:
@@ -603,8 +687,9 @@ def _run_one(work: dict) -> dict:
             return _result("out-of-credits", returncode=rc, log=str(log_path))
         return _result("ok" if rc == 0 else "err", returncode=rc, log=str(log_path))
     except FileNotFoundError:
-        return {"item": work["item"], "session_name": name, "sid": sid,
-                "status": "no-hermes", "error": "`hermes` CLI not found on PATH"}
+        return _result("no-hermes", error="`hermes` CLI not found on PATH")
+    except RuntimeError as e:
+        return _result("isolation-error", error=str(e))
 
 
 def _existing_session_id(tag: str) -> Optional[str]:
@@ -766,15 +851,16 @@ def run(
         print(json.dumps([_run_one(w) for w in work], indent=2))
         return tag
 
-    # Pre-seal every session harness-side (this process holds the data creds), then
-    # inline its literal, already-started SDIR into the agent prompt. The agents run
-    # credential-less and never init/start/replay — look-ahead is unreachable, not
-    # merely audited. Sealing is done serially before any agent spawns so the one
-    # provider fetch per setup isn't contending with N parallel agents.
+    # Pre-seal every session in the harness's memory, then hand the agent a literal
+    # *staged* SDIR. The full stream remains behind a one-tick gateway; the sandbox
+    # cannot read the durable simulations/data trees. Sealing is serial so provider
+    # fetches do not contend with N parallel agents.
     ready: list[dict] = []
     for w in work:
         try:
-            w["sdir"] = str(_preseal(w, skill_path, version, session_id))
+            sdir, gateway = _preseal(w, skill_path, version, session_id)
+            w["sdir"] = str(sdir)
+            w["gateway"] = gateway
             w["prompt"] = _prompt(version, skill_text, tag, session_id, w["ticker"],
                                   w["date"], w.get("time_et"), w["sdir"],
                                   reentry=w["reentry"], execution_model=execution_model)

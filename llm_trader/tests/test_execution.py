@@ -144,3 +144,83 @@ def test_init_freezes_deterministic_execution_assumptions(tmp_path):
     assert config["execution"]["risk_budget"] == 75.0
     assert config["execution"]["buying_power"] == 5_000.0
     assert config["execution"]["max_participation_rate"] == 0.10
+
+
+def _attribution_stream(path):
+    lines = [
+        {"type": "meta", "ticker": "TEST", "date": "2025-03-10", "entry_time": "10:20", "entry_px": 10.0},
+        {"type": "tick", "i": 0, "time": "10:20", "o": 10.0, "h": 10.1, "l": 9.9, "c": 10.0, "v": 100},
+        {"type": "tick", "i": 1, "time": "10:21", "o": 10.0, "h": 12.1, "l": 10.0, "c": 12.0, "v": 100},
+        {"type": "end", "bars": 2, "close": 12.0},
+    ]
+    path.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+
+
+def _attribution_session(tmp_path, *, batch, ticker, trade):
+    sdir = recorder.init(
+        ticker, "2025-03-10", root=tmp_path, batch=batch,
+        now=datetime(2026, 7, 10, 10, 0, 0),
+    )
+    session_path = sdir / "session.json"
+    session = json.loads(session_path.read_text())
+    session["config"].update({
+        "execution_model": EXECUTION_MODEL,
+        "risk_budget": 100.0,
+        "buying_power": 10_000.0,
+        "execution": {
+            "risk_budget": 100.0,
+            "buying_power": 10_000.0,
+            "entry_slippage_bps": 100.0,
+            "exit_slippage_bps": 100.0,
+            "commission_per_share": 0.01,
+            "max_participation_rate": 0.10,
+            "tick_size": 0.01,
+        },
+    })
+    session_path.write_text(json.dumps(session))
+    _attribution_stream(sdir / "stream.jsonl")
+    if trade:
+        recorder.log(sdir, {"i": 0, "time": "10:20", "action": "ENTER_CLOSE", "stop": 9.0})
+        recorder.log(sdir, {"i": 1, "time": "10:21", "action": "EXIT_CLOSE"})
+    else:
+        recorder.log(sdir, {"i": 0, "time": "10:20", "action": "STAND_DOWN"})
+    recorder.finalize(sdir, full_day=False)
+    return sdir
+
+
+def test_execution_attribution_replays_intents_without_writing(tmp_path, monkeypatch):
+    batch = "attribution-test"
+    traded = _attribution_session(tmp_path, batch=batch, ticker="TRADE", trade=True)
+    _attribution_session(tmp_path, batch=batch, ticker="PASS", trade=False)
+    original_actions = (traded / "actions.json").read_text()
+
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    report = recorder.execution_attribution(batch)
+
+    assert report["n_eligible"] == 2
+    assert report["n_skipped"] == 0
+    assert report["verification"]["recorded_mismatches"] == []
+    rows = {row["profile"]: row for row in report["profiles"]}
+    assert rows["recorded"]["n"] == 2
+    assert rows["recorded"]["trades"] == 1
+    assert rows["recorded"]["stood_down"] == 1
+    assert rows["no_commission"]["pnl"] > rows["recorded"]["pnl"]
+    assert rows["no_slippage"]["pnl"] > rows["recorded"]["pnl"]
+    assert rows["no_participation_cap"]["pnl"] > rows["recorded"]["pnl"]
+    assert rows["frictionless"]["pnl"] > rows["no_participation_cap"]["pnl"]
+    assert rows["frictionless"]["fees"] == 0.0
+    # Attribution only replays raw inputs in memory; it never rewrites sealed artifacts.
+    assert (traded / "actions.json").read_text() == original_actions
+
+
+def test_execution_attribution_rejects_legacy_only_batch(tmp_path, monkeypatch):
+    sdir = tmp_path / "legacy"
+    sdir.mkdir()
+    (sdir / "session.json").write_text(json.dumps({
+        "status": "complete", "batch": "legacy-batch", "ticker": "OLD",
+        "historical_date": "2025-03-10", "config": {"execution_model": "reported_fill_v1"},
+    }))
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+
+    with pytest.raises(ValueError, match="no completed deterministic_ohlc_v1 sessions"):
+        recorder.execution_attribution("legacy-batch")

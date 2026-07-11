@@ -158,8 +158,15 @@ header {
   background: #1c2330;
 }
 .sess-card.selected {
+  border-color: var(--accent);
   border-left-color: var(--accent);
-  background: #1c2433;
+  border-left-width: 4px;
+  background: #223052;
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.sess-card.selected .sess-ticker {
+  color: var(--accent);
+  font-weight: 700;
 }
 .sess-top {
   display: flex;

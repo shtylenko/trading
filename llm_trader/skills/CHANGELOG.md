@@ -9,7 +9,23 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
 
 ---
 
-### 3.1.0 — engine-managed entry brackets  ⏳ CANDIDATE — NOT YET VALIDATED
+### 3.2.0 — $3 minimum entry price  ⏳ CANDIDATE — NOT YET VALIDATED
+- **Why:** the v3 dev baseline's 23 below-$3 trades produced −$45.49 / effective
+  R −0.048. The $3–$5 and $5–$10 bands were positive. Low-priced shares face a
+  larger percentage burden from the one-cent tick, per-share fees, and adverse
+  slippage.
+- **Change:** one selection rule only: Grade C / stand down when `entry_px < $3`.
+  The existing $20 upper bound, RVOL gate, entry and exit rules, deterministic
+  fill model, participation cap, buying power, and $40 risk budget are unchanged.
+- **Type:** empirical guardrail, not a claimed Cameron threshold. The known 100-set
+  was used to form this hypothesis, so it is dev evidence only.
+- **Test:** run the same pinned 100-set against 3.0.0, then require a disjoint
+  holdout before promotion.
+- **Decision:** ⏳ HOLD — 3.0.0 remains the v3 control.
+
+---
+
+### 3.1.0 — engine-managed entry brackets  ❌ REJECTED
 - **Why:** the 3.0.0 management contract permits one intent per bar. A break-even
   `SET_STOP` can therefore delay a `SCALE_LIMIT` until after its +1R/+2R level has
   already traded. In the stamped v3 dev baseline (`3.0.0-20260710201028`), 30/56
@@ -25,12 +41,12 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
 - **Type:** execution-interface correction / simulator constraint implementing the
   existing scale-in-thirds canon rule; this is not a scanner, selection, or friction
   model change.
-- **Test:** unit coverage proves actual-fill R derivation, fixed one-third tranches,
-  no same-bar retroactive target fill for close or armed entries, stop-first target/
-  stop handling, and recorder bracket-shape validation. **Next:** cold clarity
-  review, then a paired 3.0.0→3.1.0 batch under identical provenance.
-- **Decision:** ⏳ HOLD — 3.0.0 remains the v3 control until the paired gate and a
-  disjoint holdout validate the change.
+- **Test:** paired 3.0.0 `3.0.0-20260710201028` → 3.1.0
+  `3.1.0-20260710211138`, 100 shared setups: mean ΔR **−0.037**, median 0,
+  24 better / 26 worse / 50 unchanged, sign-p **0.8877**, P&L **$838.47 vs
+  $988.08**. Zero voids in both batches; candidate stood down 11 versus 7.
+- **Decision:** ❌ **REJECT.** The fixed +1R/+2R bracket did not improve the
+  baseline. Keep 3.0.0 as the control; do not retry this exact rule.
 
 ---
 

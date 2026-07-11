@@ -108,7 +108,7 @@ its participation cap, stop-gap handling, slippage, commission, buying-power, or
 controls merely to improve a simulated result. Every item below must be a separately versioned,
 paired experiment and then pass the promotion gate above.
 
-- [~] **V3-1. Engine-managed entry brackets (3.1.0 candidate; implement now).** The agent
+- [x] **V3-1. Engine-managed entry brackets (3.1.0; REJECTED).** The agent
   opts into a standard +1R / +2R, one-third / one-third scale ladder on `ENTER_CLOSE` or
   `ARM_BUY_STOP`; after the actual fill, the deterministic engine derives exact target prices
   from the actual fill and structural stop, stages them for the next bar, and keeps the
@@ -119,7 +119,9 @@ paired experiment and then pass the promotion gate above.
   arithmetic is about +$49.53 on the dev batch, but that is diagnostic only—not a certified
   counterfactual. **Type:** execution-interface correction / sim constraint, informed by
   Cameron's scale-in-thirds rule. **Promotion test:** paired 3.0 vs 3.1 batch; no current-bar
-  retroactive fills or other execution-model relaxation.
+  retroactive fills or other execution-model relaxation. **Result:** 100 paired setups versus
+  3.0.0: mean ΔR −0.037, $838.47 versus $988.08 P&L, 24 better / 26 worse / 50 unchanged,
+  sign-p 0.8877. Safety was unchanged (zero voids), but the result is not an improvement.
 
 - [ ] **V3-2. One conservative second-leg re-entry (only after V3-1).** Enable at most one
   re-entry after a three-full-bar cooldown and only on (a) a green VWAP reclaim after a
@@ -131,8 +133,9 @@ paired experiment and then pass the promotion gate above.
   an achievable-profit estimate. **Type:** canon-grounded strategy experiment; high upside and
   high overfit/churn risk.
 
-- [ ] **V3-3. Price-band selection experiment.** Test a hard stand-down below $3 versus
-  half-risk sizing from $2 to $3, with every other rule unchanged. On the v3 dev cohort, the
+- [~] **V3-3. Price-band selection experiment (3.2.0 candidate; implement now).** Test a hard
+  stand-down below $3, with every other rule unchanged. A half-risk $2–$3 variant remains a
+  separate fallback experiment if the hard floor fails. On the v3 dev cohort, the
   23 below-$3 trades produced −$45.49 / effective R −0.048, while $3–$5 produced +$360.07 and
   $5–$10 +$402.55. Treat this as an empirical guardrail, not a canon threshold; it may reflect
   penny ticks, commission, spread, and slippage. Validate on a disjoint holdout before any

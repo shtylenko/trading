@@ -11,6 +11,10 @@ const CSS = getComputedStyle(document.documentElement);
 const col = (n) => CSS.getPropertyValue(n).trim();
 
 let currentSessionId = null;
+// The sidebar only lists top-level (batch/live-day) cards, never individual
+// ticker leaves — so highlighting has to track "which top card is this leaf
+// under," separately from currentSessionId (the exact thing being viewed).
+let currentTopSessionId = null;
 let currentChart = null;
 let currentEventSource = null;
 let pollFallbackTimer = null;
@@ -120,6 +124,7 @@ async function loadAndRenderList() {
           window.open(`/viewer/index.html?session=${encodeURIComponent(id)}`, "_blank");
         } else {
           currentSessionId = id;
+          currentTopSessionId = id;
           highlightCurrentSession();
           if (isTop) {
             loadSessionTickers(id, true);
@@ -376,6 +381,9 @@ function applySessionFilters() {
 
 async function loadSessionTickers(sessionId, updateUrl = false) {
   const tickersEl = document.getElementById("session-tickers");
+
+  currentTopSessionId = sessionId;
+  highlightCurrentSession();
 
   // Any prior live re-poll is stale now (re-armed below only if still running).
   clearInterval(tickersRefreshTimer);
@@ -661,6 +669,12 @@ function renderChart(bars, actions, sess, preserveView = false) {
         text: `${a.side === "buy" ? "BUY" : "SELL"} ${a.shares}@${a.price}`,
       })));
     }
+    if (s.buyDots) {
+      s.buyDots.setData((actions || []).filter((a) => a.side === "buy").map((a) => ({ time: a.t, value: a.price })));
+    }
+    if (s.sellDots) {
+      s.sellDots.setData((actions || []).filter((a) => a.side === "sell").map((a) => ({ time: a.t, value: a.price })));
+    }
     currentChart._bars = bars || [];
     // keep cached sorted times in sync for zoom
     const bt = (bars || []).map((b) => b.t).filter((t) => typeof t === "number").sort((a, b) => a - b);
@@ -795,6 +809,15 @@ function renderChart(bars, actions, sess, preserveView = false) {
   const entry = (actions || []).find((a) => a.side === "buy");
   if (entry) lvl(entry.price, col("--entry"), "entry", LightweightCharts.LineStyle.Solid);
 
+  // exit levels — one horizontal price line per distinct sell fill, same style as
+  // entry: scale-outs (partial) and the final flatten (full) both count as exits.
+  const seenExit = new Set();
+  (actions || []).filter((a) => a.side === "sell").forEach((a) => {
+    if (seenExit.has(a.price)) return;
+    seenExit.add(a.price);
+    lvl(a.price, col("--stop"), a.action === "SCALE" ? "scale" : "exit", LightweightCharts.LineStyle.Solid);
+  });
+
   // markers
   candle.setMarkers((actions || []).map((a) => ({
     time: a.t,
@@ -803,6 +826,20 @@ function renderChart(bars, actions, sess, preserveView = false) {
     shape: a.side === "buy" ? "arrowUp" : "arrowDown",
     text: `${a.side === "buy" ? "BUY" : "SELL"} ${a.shares}@${a.price}`,
   })));
+
+  // fill dots — a point plotted at the exact (time, price) of each fill, i.e. the
+  // intersection of the entry/exit price line with the bar the fill happened on.
+  const buyDots = chart.addLineSeries({
+    lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 5,
+    color: col("--entry"), priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+  });
+  buyDots.setData((actions || []).filter((a) => a.side === "buy").map((a) => ({ time: a.t, value: a.price })));
+
+  const sellDots = chart.addLineSeries({
+    lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 5,
+    color: col("--stop"), priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+  });
+  sellDots.setData((actions || []).filter((a) => a.side === "sell").map((a) => ({ time: a.t, value: a.price })));
 
   // Restore the prior zoom on a live refresh; otherwise fit the whole series.
   if (prevRange) {
@@ -824,6 +861,7 @@ function renderChart(bars, actions, sess, preserveView = false) {
   chart._series = {
     candle: candle, vwap: vwapSeries, ema: emaSeries,
     ema20: ema20Series, vol: vol, macd: macdSeries,
+    buyDots: buyDots, sellDots: sellDots,
   };
 
 
@@ -962,7 +1000,7 @@ function highlightCurrentSession() {
   const listEl = document.getElementById("session-list");
   if (!listEl) return;
   listEl.querySelectorAll(".sess-card").forEach(card => {
-    card.classList.toggle("selected", card.dataset.id === currentSessionId);
+    card.classList.toggle("selected", card.dataset.id === currentTopSessionId);
   });
 }
 
@@ -1015,8 +1053,17 @@ async function loadSession(sessionId, updateUrl = false) {
     // Wire buttons (onclick will be attached even if hidden; harmless)
     wireDetailButtons(sessionId);
 
-    // Highlight in sidebar
+    // The sidebar only lists top-level (batch/live-day) cards, not individual
+    // ticker leaves — resolve this leaf's parent (same fallback chain the
+    // server uses to group sessions: session tag → batch tag → id) so the
+    // right card stays highlighted while viewing one of its tickers.
+    const s = view.session || {};
+    currentTopSessionId = s.session || s.batch || s.id || sessionId;
     highlightCurrentSession();
+
+    if (updateUrl) {
+      history.replaceState(null, "", `?session=${encodeURIComponent(sessionId)}`);
+    }
 
   } catch (e) {
     showPane("no-session");
@@ -1160,8 +1207,11 @@ async function main() {
   document.getElementById("app").classList.remove("table-view");
 
   // Mark the selected session up front so the sidebar highlights it on first
-  // render (loadAndRenderList applies the highlight from currentSessionId).
+  // render (loadAndRenderList applies the highlight from currentTopSessionId).
+  // If sessionFromUrl turns out to be a leaf (not a top-level id), loadSession
+  // below re-resolves this to the leaf's parent batch.
   currentSessionId = sessionFromUrl;
+  currentTopSessionId = sessionFromUrl;
 
   // Render the sidebar list. We capture the returned sessions so we can reliably
   // decide whether ?session=... refers to a top-level group (show tickers table)
@@ -1169,6 +1219,15 @@ async function main() {
   // and the BATCH- group ids which have no on-disk folder.
   const topSessions = await loadAndRenderList() || [];
   const topIds = new Set(topSessions.map(s => s.id));
+
+  // If the selected session is a top-level card, scroll it into view on first
+  // load — the sidebar sorts newest-first and can run long, so a session from
+  // a few pages back would otherwise render off-screen with no visual cue.
+  if (topIds.has(sessionFromUrl)) {
+    const cards = document.querySelectorAll("#session-list .sess-card");
+    const selectedCard = Array.from(cards).find((c) => c.dataset.id === sessionFromUrl);
+    if (selectedCard) selectedCard.scrollIntoView({ block: "nearest" });
+  }
 
   // "Sessions" header chip is now a plain link to the main viewer instance
   // (http://127.0.0.1:8770/viewer/index.html) — no click handler needed.

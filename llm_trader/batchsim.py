@@ -48,6 +48,7 @@ import secrets
 import signal
 import shutil
 import sqlite3
+import statistics as _statistics
 import subprocess
 import sys
 import tempfile
@@ -1710,6 +1711,320 @@ def _print_compare(r: dict) -> None:
         print(f"  ⚠  only {r['n_pairs']} paired setups — use the 100-set for a promotable result.")
 
 
+# ───────────────────────── repeat panels (LLM-variation aware) ──────────────
+
+def _batch_stats(leaves: dict) -> dict:
+    """One batch's deployment metrics, using the same effective-R definition as compare."""
+    vals = list(leaves.values())
+    effective = [(r, _effective_r(r)) for r in vals]
+    eligible = [(r, value) for r, value in effective if value is not None]
+    traded = [r for r, _ in eligible if r["traded"]]
+    losers = [r["pnl"] for r in traded if not r["win"] and (r["pnl"] or 0) != 0]
+    return {
+        "keys": len(vals),
+        "eligible": len(eligible),
+        "pnl": round(sum(float(r["pnl"] or 0.0) for r, _ in eligible), 2),
+        "effective_r": round(sum(value for _, value in eligible) / len(eligible), 3) if eligible else None,
+        "trades": len(traded),
+        "stood": sum(1 for r, value in eligible if value == 0.0 and not r["traded"]),
+        "void": sum(1 for r in vals if r["void"] and not r["ooc"] and not r["timeout"]),
+        "ooc": sum(1 for r in vals if r["ooc"]),
+        "timeout": sum(1 for r in vals if r["timeout"]),
+        "finalize_error": sum(1 for r in vals if r["finalize_error"]),
+        "avg_loser": round(sum(losers) / len(losers), 2) if losers else None,
+    }
+
+
+def _require_repeat_panel(tags: list[str], label: str) -> dict[str, dict]:
+    if not tags:
+        raise ValueError(f"{label} needs at least one batch tag")
+    if len(set(tags)) != len(tags):
+        raise ValueError(f"{label} contains a duplicate batch tag")
+    leaves = {tag: _leaves_by_key(tag) for tag in tags}
+    if any(not rows for rows in leaves.values()):
+        missing = [tag for tag, rows in leaves.items() if not rows]
+        raise ValueError(f"{label} has no session leaves: {', '.join(missing)}")
+
+    first = tags[0]
+    first_meta = _read_batch_meta(first)
+    for tag in tags[1:]:
+        _require_matching_batch_metadata(first, tag)
+    skill_hashes = {_contract_key(_read_batch_meta(tag).get("skill_hash")) for tag in tags}
+    if len(skill_hashes) != 1:
+        raise ValueError(f"{label} batches use different skill hashes; repeat one exact version")
+    for tag, rows in leaves.items():
+        # Passing a batch to itself verifies that each repeat is internally stamped
+        # with one execution and runner contract before panel aggregation.
+        _require_matching_leaf_contract(rows, rows, "skill_hash", "skill hash")
+        _require_matching_leaf_contract(rows, rows, "execution_contract", "frozen execution config")
+        _require_matching_leaf_contract(rows, rows, "runner_contract", "runner contract")
+    for tag in tags[1:]:
+        _require_matching_leaf_contract(
+            leaves[first], leaves[tag], "execution_contract", "frozen execution config",
+        )
+        _require_matching_leaf_contract(
+            leaves[first], leaves[tag], "runner_contract", "runner contract",
+        )
+    return leaves
+
+
+def _panel_summary(tags: list[str], label: str) -> dict:
+    leaves = _require_repeat_panel(tags, label)
+    runs = [{"tag": tag, **_batch_stats(leaves[tag])} for tag in tags]
+    def distribution(field: str) -> dict:
+        values = [r[field] for r in runs if r[field] is not None]
+        return {
+            "mean": round(_statistics.mean(values), 3) if values else None,
+            "min": round(min(values), 3) if values else None,
+            "max": round(max(values), 3) if values else None,
+        }
+    return {
+        "label": label,
+        "tags": tags,
+        "runs": runs,
+        "pnl": distribution("pnl"),
+        "effective_r": distribution("effective_r"),
+        "trades": distribution("trades"),
+        "stood": distribution("stood"),
+    }
+
+
+def repeat_panel(tags: list[str]) -> dict:
+    """Summarize repeated identical batches without treating one run as the truth."""
+    return _panel_summary(tags, "panel")
+
+
+def compare_repeats(tags_a: list[str], tags_b: list[str]) -> dict:
+    """Compare repeated baseline and candidate panels on averaged per-setup R.
+
+    Every batch inside a panel must be the same skill and contract. The two panels
+    may differ only in skill hash, exactly like the existing single-run compare.
+    """
+    leaves_a = _require_repeat_panel(tags_a, "baseline panel")
+    leaves_b = _require_repeat_panel(tags_b, "candidate panel")
+    _require_matching_batch_metadata(tags_a[0], tags_b[0])
+    _require_matching_leaf_contract(
+        leaves_a[tags_a[0]], leaves_b[tags_b[0]], "execution_contract", "frozen execution config",
+    )
+    _require_matching_leaf_contract(
+        leaves_a[tags_a[0]], leaves_b[tags_b[0]], "runner_contract", "runner contract",
+    )
+
+    shared = set.intersection(*(set(rows) for rows in [*leaves_a.values(), *leaves_b.values()]))
+    pairs = []
+    for key in sorted(shared):
+        a_values = [_effective_r(leaves_a[tag][key]) for tag in tags_a]
+        b_values = [_effective_r(leaves_b[tag][key]) for tag in tags_b]
+        if any(value is None for value in [*a_values, *b_values]):
+            continue
+        r_a, r_b = _statistics.mean(a_values), _statistics.mean(b_values)
+        pairs.append((key, r_a, r_b, r_b - r_a))
+    deltas = [p[3] for p in pairs]
+    up = sum(delta > 0.05 for delta in deltas)
+    down = sum(delta < -0.05 for delta in deltas)
+    positive = sorted((p for p in pairs if p[3] > 0), key=lambda p: -p[3])
+    positive_sum = sum(p[3] for p in positive)
+    return {
+        "baseline": _panel_summary(tags_a, "baseline panel"),
+        "candidate": _panel_summary(tags_b, "candidate panel"),
+        "n_pairs": len(pairs),
+        "mean_dR": round(_statistics.mean(deltas), 3) if deltas else 0.0,
+        "median_dR": round(_statistics.median(deltas), 3) if deltas else 0.0,
+        "better": up,
+        "worse": down,
+        "equal": len(deltas) - up - down,
+        "sign_p": _sign_test_p(up, down),
+        "top3_share": round(sum(p[3] for p in positive[:3]) / positive_sum, 2) if positive_sum else 0.0,
+        "top_contributors": [(key, round(delta, 2)) for key, _, _, delta in
+                             sorted(pairs, key=lambda p: -abs(p[3]))[:8]],
+    }
+
+
+def _print_repeat_panel(panel: dict) -> None:
+    print(f"=== repeat panel ({len(panel['runs'])} runs) ===")
+    for run in panel["runs"]:
+        print(f"  {run['tag']}: P&L ${run['pnl']:.2f}, effR {run['effective_r']:.3f}, "
+              f"trades {run['trades']}, stood down {run['stood']}, "
+              f"void/ooc/timeout/error {run['void']}/{run['ooc']}/{run['timeout']}/{run['finalize_error']}")
+    print(f"  P&L range/mean: ${panel['pnl']['min']:.2f} to ${panel['pnl']['max']:.2f} "
+          f"(mean ${panel['pnl']['mean']:.2f})")
+    print(f"  effective-R range/mean: {panel['effective_r']['min']:.3f} to "
+          f"{panel['effective_r']['max']:.3f} (mean {panel['effective_r']['mean']:.3f})")
+
+
+def _print_compare_repeats(result: dict) -> None:
+    print("=== repeat-aware compare ===")
+    _print_repeat_panel(result["baseline"])
+    _print_repeat_panel(result["candidate"])
+    print(f"\npaired on {result['n_pairs']} setups using each setup's average R across runs")
+    print(f"  mean ΔR (candidate − baseline): {result['mean_dR']:+.3f}")
+    print(f"  median ΔR: {result['median_dR']:+.3f}")
+    print(f"  better/worse/≈: {result['better']} / {result['worse']} / {result['equal']}")
+    sign_p = f"{result['sign_p']:.4f}" if result["sign_p"] is not None else "—"
+    print(f"  sign-test p: {sign_p}")
+    print(f"  top-3 share of positive ΔR: {int(result['top3_share'] * 100)}%")
+    print("  top movers: " + ", ".join(f"{key[0]} {delta:+.2f}" for key, delta in result["top_contributors"]))
+
+
+# ───────────────────────── batch diagnostics ────────────────────────────────
+
+def _diagnostic_grade(session: dict) -> str:
+    """Reconstruct the 3.0 setup grade from frozen setup metadata.
+
+    The agent's prose grade is not a reliable data field. This deliberately uses
+    the explicit 3.0 rules so all control-panel runs are classified identically.
+    """
+    setup = session.get("setup") or {}
+    try:
+        price = float(setup["entry_px"])
+        rvol = float(setup["rvol"])
+        floating = float(setup["float_shares"])
+        gap = float(setup["gap_pct"])
+        entry_time = str(setup["entry_time"])
+    except (KeyError, TypeError, ValueError):
+        return "unknown"
+    if price < 2 or price > 20 or rvol < 2:
+        return "C"
+    if rvol >= 5 and floating < 10_000_000 and gap > 10 and entry_time < "11:30":
+        return "A"
+    return "B"
+
+
+def _diagnostic_group() -> dict:
+    return {"setups": 0, "trades": 0, "wins": 0, "pnl": 0.0, "effective_r": 0.0}
+
+
+def _add_diagnostic_row(group: dict, pnl: dict) -> None:
+    group["setups"] += 1
+    traded = bool(pnl.get("traded"))
+    group["trades"] += int(traded)
+    group["wins"] += int(traded and bool(pnl.get("win")))
+    group["pnl"] += float(pnl.get("realized_pnl") or 0.0)
+    if traded and isinstance(pnl.get("r_multiple"), (int, float)):
+        group["effective_r"] += float(pnl["r_multiple"])
+
+
+def _finalize_diagnostic_groups(groups: dict[str, dict]) -> dict[str, dict]:
+    out = {}
+    for name, group in sorted(groups.items()):
+        setups, trades = group["setups"], group["trades"]
+        out[name] = {
+            **group,
+            "pnl": round(group["pnl"], 2),
+            "effective_r": round(group["effective_r"] / setups, 3) if setups else None,
+            "win_rate": round(100 * group["wins"] / trades, 1) if trades else None,
+        }
+    return out
+
+
+def _in_position_mfe(sdir: Path, actions: list[dict]) -> Optional[float]:
+    """MFE from ticks while a first position was actually open, never post-exit bars."""
+    entry = next((a for a in actions if a.get("side") == "buy"), None)
+    if entry is None:
+        return None
+    final_exit = next((a for a in reversed(actions)
+                       if a.get("side") == "sell" and a.get("position_after") == 0), None)
+    entry_i = int(entry["i"])
+    final_i = int(final_exit["i"]) if final_exit is not None else None
+    ticks = []
+    try:
+        for line in (sdir / "stream.jsonl").read_text().splitlines():
+            row = json.loads(line)
+            if row.get("type") != "tick" or int(row.get("i", -1)) <= entry_i:
+                continue
+            if final_i is not None and int(row["i"]) > final_i:
+                continue
+            # The engine resolves protective stops before targets on an ambiguous
+            # bar, so its high is not usable MFE when the final exit is that stop.
+            if (final_exit is not None and int(row["i"]) == final_i
+                    and "protective stop" in str(final_exit.get("reason", ""))):
+                continue
+            ticks.append(float(row["h"]))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    return round(max(ticks) - float(entry["price"]), 4) if ticks else None
+
+
+def diagnostics(tag: str) -> dict:
+    """Describe frozen batch behavior by grade, entry, exit, adds, and in-trade MFE."""
+    chosen: dict[tuple, tuple[Path, dict, dict]] = {}
+    for sdir in _sessions_for_batch(tag):
+        session = recorder._load_json(sdir / "session.json", {}) or {}
+        key = (session.get("ticker"), session.get("historical_date"))
+        if key == (None, None):
+            continue
+        pnl = recorder._load_json(sdir / "pnl.json", {}) or {}
+        previous = chosen.get(key)
+        if previous is None or (session.get("real_run_ts") or "") > (previous[1].get("real_run_ts") or ""):
+            chosen[key] = (sdir, session, pnl)
+
+    by_grade: dict[str, dict] = defaultdict(_diagnostic_group)
+    by_entry: dict[str, dict] = defaultdict(_diagnostic_group)
+    by_exit: dict[str, dict] = defaultdict(_diagnostic_group)
+    adds_attempted = adds_filled = 0
+    in_position_mfes: list[float] = []
+
+    for sdir, session, pnl in chosen.values():
+        _add_diagnostic_row(by_grade[_diagnostic_grade(session)], pnl)
+        if not pnl.get("traded"):
+            continue
+        actions = recorder._load_json(sdir / "actions.json", []) or []
+        decisions = []
+        try:
+            decisions = [json.loads(line) for line in (sdir / "decisions.jsonl").read_text().splitlines() if line]
+        except (OSError, json.JSONDecodeError):
+            pass
+        adds_attempted += sum(d.get("action") == "ADD_CLOSE" for d in decisions)
+        adds_filled += sum(a.get("action") == "ADD" for a in actions)
+
+        entry = next((a for a in actions if a.get("side") == "buy"), {})
+        entry_kind = "armed buy-stop" if "armed buy-stop" in str(entry.get("reason", "")) else "confirmed close"
+        _add_diagnostic_row(by_entry[entry_kind], pnl)
+        exit_action = next((a for a in reversed(actions) if a.get("side") == "sell" and a.get("position_after") == 0), {})
+        reason = str(exit_action.get("reason", ""))
+        if "protective stop" in reason or "armed-entry/stop" in reason:
+            exit_kind = "protective stop"
+        elif "auto-flat" in reason:
+            exit_kind = "session-end exit"
+        elif "close-confirmed" in reason:
+            exit_kind = "close-confirmed exit"
+        else:
+            exit_kind = "other exit"
+        _add_diagnostic_row(by_exit[exit_kind], pnl)
+        mfe = _in_position_mfe(sdir, actions)
+        if mfe is not None:
+            in_position_mfes.append(mfe)
+
+    return {
+        "tag": tag,
+        "setups": len(chosen),
+        "by_grade": _finalize_diagnostic_groups(by_grade),
+        "by_entry": _finalize_diagnostic_groups(by_entry),
+        "by_exit": _finalize_diagnostic_groups(by_exit),
+        "adds": {"attempted": adds_attempted, "filled": adds_filled},
+        "in_position_mfe_per_share": {
+            "n": len(in_position_mfes),
+            "mean": round(_statistics.mean(in_position_mfes), 4) if in_position_mfes else None,
+            "median": round(_statistics.median(in_position_mfes), 4) if in_position_mfes else None,
+        },
+    }
+
+
+def _print_diagnostics(result: dict) -> None:
+    print(f"=== diagnostics — {result['tag']} ({result['setups']} setups) ===")
+    for label, rows in (("grade", result["by_grade"]), ("entry", result["by_entry"]), ("final exit", result["by_exit"])):
+        print(f"\n  by {label}")
+        print("  group                     setups trades  win%       P&L   effR")
+        for name, row in rows.items():
+            win = f"{row['win_rate']:.1f}%" if row["win_rate"] is not None else "—"
+            eff = f"{row['effective_r']:.3f}" if row["effective_r"] is not None else "—"
+            print(f"  {name:<25} {row['setups']:>6} {row['trades']:>6} {win:>6} ${row['pnl']:>9.2f} {eff:>6}")
+    adds = result["adds"]
+    mfe = result["in_position_mfe_per_share"]
+    print(f"\n  adds attempted/filled: {adds['attempted']}/{adds['filled']}")
+    print(f"  in-position MFE/share: n={mfe['n']}, mean={mfe['mean']}, median={mfe['median']}")
+
+
 # ───────────────────────────── CLI ──────────────────────────────────────────
 
 
@@ -1773,6 +2088,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pc.add_argument("--b", required=True, help="candidate batch tag")
     pc.add_argument("--format", choices=["table", "json"], default="table")
 
+    prp = sub.add_parser("repeat-report", help="summarize repeated identical batch runs")
+    prp.add_argument("--tag", action="append", required=True,
+                     help="batch tag; repeat for each run in the panel")
+    prp.add_argument("--format", choices=["table", "json"], default="table")
+
+    pcr = sub.add_parser("compare-repeats", help="compare repeated candidate and baseline panels")
+    pcr.add_argument("--a", action="append", required=True,
+                     help="baseline batch tag; repeat for every baseline run")
+    pcr.add_argument("--b", action="append", required=True,
+                     help="candidate batch tag; repeat for every candidate run")
+    pcr.add_argument("--format", choices=["table", "json"], default="table")
+
+    pd = sub.add_parser("diagnostics", help="behavior breakdown for one completed batch")
+    pd.add_argument("--tag", required=True)
+    pd.add_argument("--format", choices=["table", "json"], default="table")
+
     pn = sub.add_parser("new-version", help="fork a new, unsealed candidate skill file")
     pn.add_argument("--from", dest="from_version", required=True,
                     help="existing (sealed) version to copy from")
@@ -1821,6 +2152,24 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(json.dumps(result, indent=2, default=list))
         else:
             _print_compare(result)
+    elif args.cmd == "repeat-report":
+        result = repeat_panel(args.tag)
+        if args.format == "json":
+            print(json.dumps(result, indent=2, default=list))
+        else:
+            _print_repeat_panel(result)
+    elif args.cmd == "compare-repeats":
+        result = compare_repeats(args.a, args.b)
+        if args.format == "json":
+            print(json.dumps(result, indent=2, default=list))
+        else:
+            _print_compare_repeats(result)
+    elif args.cmd == "diagnostics":
+        result = diagnostics(args.tag)
+        if args.format == "json":
+            print(json.dumps(result, indent=2, default=list))
+        else:
+            _print_diagnostics(result)
     elif args.cmd == "new-version":
         dest = skillmeta.new_version(args.from_version, args.to_version)
         print(f"forked {args.from_version} → {dest} (unsealed — edit freely, "

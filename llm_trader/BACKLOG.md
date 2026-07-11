@@ -86,7 +86,7 @@ Promotion gate: paired mean ΔR > 0 **and** (sign-test p<0.05 or bootstrap 95% C
   **VALIDATED 2026-07-09 → ❌ REJECT** (`compare 2.4.0-20260708181528 2.6.0-20260708224608`,
   94 keys: mean ΔR −0.046, median 0, 17/30/47, sign-p 0.079). Avg loser improved ($−15→$−12)
   but stood-down rose (10→14) and the ladder clips runners → net flat-negative.
-  **2.4.1 remains the accepted baseline.**
+  **2.4.1 remains the historical v2 baseline; 3.0.0 is the active v3 baseline.**
 - [~] **3A-follow. Decompose the 2.6.0 REJECT.** The bundle mixed (i) bug fix + de-ambiguification,
   (ii) bailout-ladder objectification, (iii) entry-gate *tightening* (Grade-B thresholds, A+
   `rvol≥2.0`, binary MACD). REJECT was broad-small-negative + more stand-downs. **BUILT off 2.4.1
@@ -96,7 +96,8 @@ Promotion gate: paired mean ΔR > 0 **and** (sign-test p<0.05 or bootstrap 95% C
   binary MACD, Grade-B thresholds; manage/exit verbatim 2.4.1. `2.7.0 ⊕ 2.8.0 ≈ 2.6.0`. Both
   archived. **NEXT: §4.1 clarity-review pass on each, then a paid `compare` vs the 2.4.0 baseline
   batch.** Whichever half shows a broad mean ΔR > 0 is the keeper; recombine winners after.
-  `break_level` fix is in 2.7.0 (correctness, not a lever). 2.4.1 stays the accepted baseline.
+  `break_level` fix is in 2.7.0 (correctness, not a lever). 2.4.1 remains the historical
+  v2 baseline; 3.0.0 is the active v3 baseline.
 - [ ] **3B.** (candidate, after 3A) objectify free-trade BE timing on the fill bar — agents
   currently freestyle when the stop jumps to break-even.
 

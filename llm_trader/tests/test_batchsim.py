@@ -768,3 +768,80 @@ def test_compare_refuses_execution_model_rebaseline(tmp_path, monkeypatch):
         }))
     with pytest.raises(ValueError, match="major rebaseline"):
         batchsim.compare("legacy", "v3")
+
+
+def test_repeat_panels_average_runs_and_allow_candidate_skill_change(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    contract = {"harness_version": "v1", "prompt_hash": "sha256:p", "harness_hash": "sha256:h"}
+
+    def write_batch(tag, skill_hash, rs):
+        for i, r in enumerate(rs):
+            ticker = f"T{i}"
+            d = tmp_path / f"{tag}-{ticker}"
+            d.mkdir()
+            (d / "session.json").write_text(json.dumps({
+                "status": "complete", "ticker": ticker, "historical_date": f"2025-01-0{i + 1}",
+                "batch": tag, "real_run_ts": f"{tag}-{i}",
+                "config": {"execution_model": "reported_fill_v1"},
+                "skill": {"content_hash": skill_hash}, "runner_contract": contract,
+            }))
+            (d / "pnl.json").write_text(json.dumps({
+                "traded": True, "win": r > 0, "realized_pnl": r * 40,
+                "r_multiple": r, "skill_hash": skill_hash,
+            }))
+        batchsim._write_batch_meta(
+            tag, model="test-model", testset_hash="sha256:set", skill_hash=skill_hash,
+            runner_contract=contract, reentry=False,
+        )
+
+    write_batch("base1", "sha256:base", [0.0, 1.0])
+    write_batch("base2", "sha256:base", [0.2, 1.2])
+    write_batch("cand1", "sha256:candidate", [1.0, 2.0])
+    write_batch("cand2", "sha256:candidate", [1.2, 2.2])
+
+    panel = batchsim.repeat_panel(["base1", "base2"])
+    assert panel["pnl"]["mean"] == pytest.approx(48.0)
+    assert panel["effective_r"]["mean"] == pytest.approx(0.6)
+
+    result = batchsim.compare_repeats(["base1", "base2"], ["cand1", "cand2"])
+    assert result["n_pairs"] == 2
+    assert result["mean_dR"] == pytest.approx(1.0)
+    assert result["better"] == 2
+
+
+def test_diagnostics_reports_grade_order_behavior_and_in_position_mfe(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    tag, sdir = "diagnostic", tmp_path / "run"
+    sdir.mkdir()
+    (sdir / "session.json").write_text(json.dumps({
+        "status": "complete", "ticker": "TEST", "historical_date": "2025-01-02",
+        "batch": tag, "real_run_ts": "2026-07-11T10:00:00",
+        "setup": {"entry_px": 5.0, "rvol": 6.0, "float_shares": 1_000_000,
+                  "gap_pct": 20.0, "entry_time": "09:35"},
+    }))
+    (sdir / "pnl.json").write_text(json.dumps({
+        "traded": True, "win": True, "realized_pnl": 20.0, "r_multiple": 0.5,
+    }))
+    (sdir / "actions.json").write_text(json.dumps([
+        {"i": 0, "action": "ENTER", "side": "buy", "price": 10.0, "position_after": 100,
+         "reason": "close-confirmed entry"},
+        {"i": 1, "action": "ADD", "side": "buy", "price": 11.0, "position_after": 150,
+         "reason": "close-confirmed pyramid"},
+        {"i": 2, "action": "EXIT", "side": "sell", "price": 9.0, "position_after": 0,
+         "reason": "protective stop (gap-aware)"},
+    ]))
+    (sdir / "decisions.jsonl").write_text(json.dumps({"action": "ADD_CLOSE"}) + "\n")
+    (sdir / "stream.jsonl").write_text("\n".join(json.dumps(row) for row in [
+        {"type": "tick", "i": 0, "h": 10.5},
+        {"type": "tick", "i": 1, "h": 12.0},
+        # Final protective-stop bar is excluded from MFE under stop-first OHLC.
+        {"type": "tick", "i": 2, "h": 20.0},
+    ]) + "\n")
+
+    result = batchsim.diagnostics(tag)
+    assert result["by_grade"]["A"]["effective_r"] == pytest.approx(0.5)
+    assert result["by_entry"]["confirmed close"]["trades"] == 1
+    assert result["by_exit"]["protective stop"]["trades"] == 1
+    assert result["adds"] == {"attempted": 1, "filled": 1}
+    assert result["in_position_mfe_per_share"]["mean"] == pytest.approx(2.0)

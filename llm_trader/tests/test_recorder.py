@@ -10,6 +10,15 @@ import pytest
 from trading.llm_trader import recorder
 
 
+def _use_legacy_execution(sdir):
+    """Keep legacy-fill tests independent from the project's current baseline."""
+    session_path = sdir / "session.json"
+    session = json.loads(session_path.read_text())
+    session["config"]["execution_model"] = recorder.LEGACY_EXECUTION_MODEL
+    session["config"].pop("execution", None)
+    session_path.write_text(json.dumps(session))
+
+
 def _stream(path, ticks, end_close):
     lines = [{"type": "meta", "ticker": "TEST", "date": "2025-03-10",
               "entry_time": "10:20", "entry_px": 3.97, "anchor_px": 3.97,
@@ -27,6 +36,7 @@ def _stream(path, ticks, end_close):
 def _session(tmp_path, ticks, end_close=3.5, decisions=()):
     sdir = recorder.init("TEST", "2025-03-10", seed=1, profile="small",
                          root=tmp_path, now=datetime(2026, 6, 30, 18, 23, 10))
+    _use_legacy_execution(sdir)
     _stream(sdir / "stream.jsonl", ticks, end_close)
     # Write decisions.jsonl directly (not via recorder.log) so engine-validation
     # cases can hand-build malformed sequences — e.g. two fills at the same bar i
@@ -84,6 +94,7 @@ def test_log_rejects_bad_action(tmp_path):
 
 def test_log_rejects_duplicate_or_out_of_order_i(tmp_path):
     sdir = recorder.init("TEST", "2025-03-10", root=tmp_path)
+    _use_legacy_execution(sdir)
     recorder.log(sdir, {"i": 0, "time": "10:20", "action": "OBSERVE", "thought": "a"})
     recorder.log(sdir, {"i": 1, "time": "10:21", "action": "OBSERVE", "thought": "b"})
     # re-logging the same bar (a retried turn) must be rejected
@@ -292,6 +303,7 @@ def test_live_view_reveals_only_processed_bars(tmp_path):
     # to the furthest bar the agent has logged a decision for — never what's merely
     # on disk. Here 3 ticks are on disk but only bars 0 and 1 have been logged.
     sdir = recorder.init("TEST", "2025-03-10", root=tmp_path)
+    _use_legacy_execution(sdir)
     _partial_stream(sdir, [                      # 3 ticks on disk (i=0,1,2)
         ("10:20", 3.6, 3.8, 3.5, 3.75, 100),
         ("10:21", 3.75, 3.9, 3.7, 3.85, 90),

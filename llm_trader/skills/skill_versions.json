@@ -1,5 +1,5 @@
 {
-  "base": "2.4.1",
+  "base": "3.0.0",
   "versions": {
     "2.0.0": {
       "content_hash": "sha256:37d6ea91",

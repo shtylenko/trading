@@ -1,6 +1,6 @@
 
-# `python3 -m trading.llm_trader.batchsim current` prints the base version, e.g. 2.4.1
-Read and follow /Users/shtylenko/Hermes/projects/trading/llm_trader/skills/trade_skills/2.4.1.md
+# `python3 -m trading.llm_trader.batchsim current` prints the base version, currently 3.0.0
+Read and follow /Users/shtylenko/Projects/trading/llm_trader/skills/trade_skills/3.0.0.md
 
 
 python3 -m trading.llm_trader.viewer
@@ -29,6 +29,20 @@ python3 -m trading.llm_trader.batchsim run --version 2.0.2 --model <your-local-m
 
 # 3. compare cohorts
 python3 -m trading.llm_trader.recorder report --by-version
+
+# 4. measure normal LLM variation across repeated, otherwise identical runs
+python3 -m trading.llm_trader.batchsim repeat-report \
+    --tag 3.0.0-20260710201028 \
+    --tag 3.0.0-20260711083918 \
+    --tag 3.0.0-20260711092732
+
+# 5. compare repeated candidate and baseline panels (three runs of each recommended)
+python3 -m trading.llm_trader.batchsim compare-repeats \
+    --a <baseline-tag-1> --a <baseline-tag-2> --a <baseline-tag-3> \
+    --b <candidate-tag-1> --b <candidate-tag-2> --b <candidate-tag-3>
+
+# 6. inspect grades, entries, exits, adds, and in-position MFE for a cohort
+python3 -m trading.llm_trader.batchsim diagnostics --tag 3.0.0-20260710201028
 
 
 
@@ -61,4 +75,3 @@ python3 -m trading.llm_trader.batchsim run \
     --model deepseek-v4-flash \
     --set trading/llm_trader/batch/testset_mini.json \
     --parallel 3 --repeats 1 --tag mini
-

@@ -4,7 +4,8 @@ Every **behavioral** rule in `trade_skills/<version>.md` must trace to the canon
 (`library/ross_cameron/all_content_structured.md`). **Update this table on every
 behavioral version bump** (it's a gate — see `IMPROVING.md` §1, §4).
 
-> **Accepted baseline = 2.4.1** (the live skill). Notes tagged **"2.7.0 cand"** (exit-side
+> **Current default baseline = 3.0.0** (the deterministic-OHLC skill). **2.4.1 is the
+> historical reported-fill v2 baseline only** and is not comparable to v3 results. Notes tagged **"2.7.0 cand"** (exit-side
 > objectification) or **"2.8.0 cand"** (entry-side tightening) are **un-promoted candidates**
 > from the 2.6.0-REJECT decomposition (see CHANGELOG) — archived, awaiting a paired `compare`.
 > They describe rules *as they would be if promoted*, not the accepted ruleset. The superseded

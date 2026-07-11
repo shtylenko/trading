@@ -50,7 +50,7 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
 
 ---
 
-### 3.0.0 — deterministic OHLC execution rebaseline  ⏳ CANDIDATE — NOT YET VALIDATED
+### 3.0.0 — deterministic OHLC execution baseline  ✅ PROMOTED
 - **Why:** prior sessions let the executing model supply its own fills, shares, and
   stops. That makes P&L dependent on unverified agent arithmetic and permits
   impossible OHLC fills, unbounded participation, and hidden stop-gap risk.
@@ -64,9 +64,13 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
   **major rebaseline**: all pre-3.0 reported-fill R comparisons are incommensurate.
 - **Test:** deterministic unit coverage covers stop gaps, same-bar armed
   entry/stop ambiguity, stop-vs-target ambiguity, buying-power/participation
-  sizing, and recorder rejection of agent-supplied fills. No paid batch yet.
-- **Decision:** ⏳ HOLD — base remains 2.4.1. First run a smoke batch, a clarity
-  review, then establish a fresh v3 baseline before comparing strategy rules.
+  sizing, and recorder rejection of agent-supplied fills. Three clean DeepSeek
+  baseline batches on the same 100-set completed at $988.08, $836.01, and
+  $751.42 with zero voids. This establishes substantial normal agent variation.
+- **Decision:** ✅ **PROMOTE as the active default baseline on 2026-07-11.**
+  2.4.1 remains the historical reported-fill v2 baseline; it must not be used to
+  rank future deterministic-OHLC candidates. Future v3 candidates must be
+  evaluated against repeated 3.0.0 DeepSeek runs, not a single lucky run.
 
 ### 2.7.0 / 2.8.0 — decompose the 2.6.0 REJECT into its two halves  ⏳ CANDIDATES — NOT YET VALIDATED
 - **Why:** 2.6.0 (bundle) was REJECT (mean ΔR −0.046, more stand-downs). It conflated

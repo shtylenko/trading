@@ -1332,6 +1332,8 @@ def list_sessions() -> list[dict]:
             "effective_r": metrics.get("effective_expectancy_r"),
             "std_r": dist.get("std"),
             "profit_factor_r": pf,
+            "avg_win_r": metrics.get("avg_win_r"),
+            "avg_loss_r": metrics.get("avg_loss_r"),
             "n_planned": metrics.get("n_planned"),
             "n_void": metrics.get("n_void"),
             "n_out_of_credits": metrics.get("n_out_of_credits"),
@@ -1506,9 +1508,13 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
     clean_exp = round(sum(clean_rs) / n_clean, 4) if n_clean > 0 else None
     eff_exp = round(sum(effective_rs) / len(effective_rs), 4) if effective_rs else None
 
-    pos = sum(r for r in clean_rs if r > 0)
-    neg = abs(sum(r for r in clean_rs if r < 0))
+    wins = [r for r in clean_rs if r > 0]
+    losses = [r for r in clean_rs if r < 0]
+    pos = sum(wins)
+    neg = abs(sum(losses))
     pf = round(pos / neg, 4) if neg > 0 else (float("inf") if pos > 0 else None)
+    avg_win_r = round(pos / len(wins), 4) if wins else None
+    avg_loss_r = round(-neg / len(losses), 4) if losses else None
 
     # distribution
     if clean_rs:
@@ -1559,6 +1565,8 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
         "clean_expectancy_r": clean_exp,
         "effective_expectancy_r": eff_exp,
         "profit_factor_r": pf,
+        "avg_win_r": avg_win_r,
+        "avg_loss_r": avg_loss_r,
         "r_distribution": dist,
         "n_planned": n_planned,
         "n_traded": n_traded,

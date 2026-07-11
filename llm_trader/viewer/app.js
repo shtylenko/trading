@@ -173,6 +173,8 @@ const TABLE_COLS = [
   { key: "win_rate",      label: "Win %",         num: true  },
   { key: "expectancy_r",  label: "Exp R",         num: true  },
   { key: "effective_r",   label: "Eff R",         num: true  },
+  { key: "avg_win_r",     label: "Avg Win R",     num: true  },
+  { key: "avg_loss_r",    label: "Avg Loss R",    num: true  },
   { key: "profit_factor_r", label: "PF",          num: true  },
   { key: "n_void",        label: "Void",          num: true  },
   { key: "pnl",           label: "P&L",           num: true  },
@@ -238,6 +240,8 @@ function sessionRowHtml(s) {
     ? `${s.expectancy_r.toFixed(2)}${s.std_r != null ? ` <span class="muted small">±${s.std_r.toFixed(2)}</span>` : ""}`
     : "—";
   const effCell = s.effective_r != null ? s.effective_r.toFixed(2) : "—";
+  const avgWinCell = s.avg_win_r != null ? s.avg_win_r.toFixed(2) : "—";
+  const avgLossCell = s.avg_loss_r != null ? s.avg_loss_r.toFixed(2) : "—";
   const pfCell = s.profit_factor_r != null ? s.profit_factor_r.toFixed(2) : "—";
   const voidCell = s.n_void != null
     ? (s.n_void > 0 ? `<span class="neg">${s.n_void}</span>` : "0")
@@ -268,6 +272,8 @@ function sessionRowHtml(s) {
       <td class="num">${wr}</td>
       <td class="num ${rCls(s.expectancy_r)}">${expCell}</td>
       <td class="num ${rCls(s.effective_r)}">${effCell}</td>
+      <td class="num pos">${avgWinCell}</td>
+      <td class="num neg">${avgLossCell}</td>
       <td class="num">${pfCell}</td>
       <td class="num">${voidCell}</td>
       <td class="num ${pnlCls}">${s.pnl != null ? fmtMoney(s.pnl) : "—"}</td>

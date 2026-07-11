@@ -9,6 +9,31 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
 
 ---
 
+### 3.1.0 — engine-managed entry brackets  ⏳ CANDIDATE — NOT YET VALIDATED
+- **Why:** the 3.0.0 management contract permits one intent per bar. A break-even
+  `SET_STOP` can therefore delay a `SCALE_LIMIT` until after its +1R/+2R level has
+  already traded. In the stamped v3 dev baseline (`3.0.0-20260710201028`), 30/56
+  scale intents were placed after their target traded; four never filled. This is
+  an execution-interface defect, not a thesis to weaken fills or filters.
+- **Change:** `ENTER_CLOSE` and `ARM_BUY_STOP` now carry a standard bracket intent:
+  one-third at +1R and one-third at +2R. After the actual, cost-adjusted fill, the
+  engine derives target prices from that fill plus the structural stop, fixes each
+  tranche from the original filled position, and activates them only on the next
+  bar. A later stop update does not delay/cancel the targets. Target/stop ambiguity
+  remains stop-first; volume caps, fees, slippage, buying power, and gap-aware stop
+  behavior are unchanged.
+- **Type:** execution-interface correction / simulator constraint implementing the
+  existing scale-in-thirds canon rule; this is not a scanner, selection, or friction
+  model change.
+- **Test:** unit coverage proves actual-fill R derivation, fixed one-third tranches,
+  no same-bar retroactive target fill for close or armed entries, stop-first target/
+  stop handling, and recorder bracket-shape validation. **Next:** cold clarity
+  review, then a paired 3.0.0→3.1.0 batch under identical provenance.
+- **Decision:** ⏳ HOLD — 3.0.0 remains the v3 control until the paired gate and a
+  disjoint holdout validate the change.
+
+---
+
 ### 3.0.0 — deterministic OHLC execution rebaseline  ⏳ CANDIDATE — NOT YET VALIDATED
 - **Why:** prior sessions let the executing model supply its own fills, shares, and
   stops. That makes P&L dependent on unverified agent arithmetic and permits

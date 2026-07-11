@@ -94,7 +94,7 @@ def _parse_frontmatter(text: str) -> dict:
 
 
 def read_skill_meta(path: str | Path) -> dict:
-    """Return ``{name, version, content_hash, path}`` for a skill file.
+    """Return version/provenance metadata declared by a skill file.
 
     ``content_hash`` is ``sha256:<8 hex>`` over the raw file bytes. ``version``
     is ``None`` if the frontmatter has no ``version:`` — callers should treat a
@@ -111,6 +111,10 @@ def read_skill_meta(path: str | Path) -> dict:
         # the legacy reported-fill recorder; a major skill can opt into a new
         # deterministic execution model without changing historical sessions.
         "execution_model": fm.get("execution_model"),
+        # Optional behavior contract for a deterministic skill. Kept in the
+        # immutable session stamp so recorder validation does not infer rules
+        # from a mutable "current version" pointer.
+        "entry_bracket_required": fm.get("entry_bracket_required"),
         "content_hash": f"sha256:{digest}",
         # store a repo-relative-ish path for readability, falling back to name
         "path": _rel_path(p),

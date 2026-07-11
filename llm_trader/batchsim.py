@@ -1543,12 +1543,16 @@ def _contract_key(value: object) -> str:
 
 
 def _require_matching_batch_metadata(tag_a: str, tag_b: str) -> None:
-    """Refuse a paired claim when top-level batch provenance differs or is absent."""
+    """Require stamped provenance and match every non-strategy batch contract.
+
+    A comparison exists to measure a strategy/skill change, so the two batches'
+    skill hashes must be present but are intentionally allowed to differ. Every
+    other stamped condition has to match before a paired result is meaningful.
+    """
     meta_a, meta_b = _read_batch_meta(tag_a), _read_batch_meta(tag_b)
     fields = (
         ("model", "model"),
         ("testset_hash", "test-set hash"),
-        ("skill_hash", "skill hash"),
         ("runner_contract", "runner contract"),
         ("reentry", "re-entry policy"),
     )
@@ -1566,11 +1570,23 @@ def _require_matching_batch_metadata(tag_a: str, tag_b: str) -> None:
                 f"cannot compare batches with different {label}: A={tag_a}, B={tag_b}. "
                 "This would confound a strategy comparison."
             )
+    # A missing skill stamp is still a provenance failure, even though the two
+    # values are supposed to be different for a version comparison.
+    for tag, meta in ((tag_a, meta_a), (tag_b, meta_b)):
+        if meta.get("skill_hash") is None:
+            raise ValueError(
+                f"cannot compare unstamped batch {tag!r}: missing skill_hash. "
+                "Run a stamped cohort so the tested skill is auditable."
+            )
 
 
 def _require_matching_leaf_contract(leaves_a: dict, leaves_b: dict, field: str,
-                                    label: str) -> None:
-    """Ensure every selected leaf carries one matching immutable contract value."""
+                                    label: str, *, match_between: bool = True) -> None:
+    """Ensure each batch is internally uniform, and optionally equal to the other.
+
+    Skill hash is intentionally internal-only: each candidate batch must use one
+    immutable skill, but its hash is expected to differ from the baseline.
+    """
     def unique(leaves: dict, tag_label: str) -> set[str]:
         values = []
         for key, row in leaves.items():
@@ -1588,7 +1604,7 @@ def _require_matching_leaf_contract(leaves_a: dict, leaves_b: dict, field: str,
         return out
 
     values_a, values_b = unique(leaves_a, "baseline"), unique(leaves_b, "candidate")
-    if values_a != values_b:
+    if match_between and values_a != values_b:
         raise ValueError(
             f"cannot compare batches with different {label}. "
             "This would confound a strategy comparison."
@@ -1609,7 +1625,7 @@ def compare(tag_a: str, tag_b: str) -> dict:
             "A fill-model change is a major rebaseline; establish a new baseline first."
         )
     _require_matching_batch_metadata(tag_a, tag_b)
-    _require_matching_leaf_contract(A, B, "skill_hash", "skill hash")
+    _require_matching_leaf_contract(A, B, "skill_hash", "skill hash", match_between=False)
     _require_matching_leaf_contract(A, B, "execution_contract", "frozen execution config")
     _require_matching_leaf_contract(A, B, "runner_contract", "runner contract")
     keys = sorted(set(A) & set(B))

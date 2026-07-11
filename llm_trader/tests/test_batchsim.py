@@ -695,17 +695,18 @@ def test_compare_pairs_and_verdicts(tmp_path, monkeypatch):
     }
 
     def mk(tag, ticker, date, r, sid, traded=True):
+        skill_hash = f"sha256:{tag}-skill"
         d = tmp_path / sid
         d.mkdir(parents=True, exist_ok=True)
         (d / "session.json").write_text(json.dumps(
             {"id": sid, "status": "complete", "ticker": ticker,
              "historical_date": date, "batch": tag, "real_run_ts": sid,
              "config": {"execution_model": "reported_fill_v1"},
-             "skill": {"content_hash": "sha256:skill"},
+             "skill": {"content_hash": skill_hash},
              "runner_contract": contract}))
         (d / "pnl.json").write_text(json.dumps(
             {"traded": traded, "win": (r or 0) > 0, "realized_pnl": (r or 0) * 40,
-             "r_multiple": r, "skill_hash": "sha256:skill"}))
+             "r_multiple": r, "skill_hash": skill_hash}))
 
     # baseline A all 0R; candidate B all +1R on the same 3 setups → B clearly better
     for i, (tk, dt) in enumerate([("AA", "2025-01-01"), ("BB", "2025-01-02"), ("CC", "2025-01-03")]):
@@ -714,7 +715,7 @@ def test_compare_pairs_and_verdicts(tmp_path, monkeypatch):
     for tag in ("baseA", "candB"):
         batchsim._write_batch_meta(
             tag, model="test-model", testset_hash="sha256:testset",
-            skill_hash="sha256:skill", runner_contract=contract, reentry=False,
+            skill_hash=f"sha256:{tag}-skill", runner_contract=contract, reentry=False,
         )
     r = batchsim.compare("baseA", "candB")
     assert r["n_pairs"] == 3

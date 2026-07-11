@@ -351,7 +351,8 @@ def init(
             content_hash = None
         skill_meta = {"name": "trade-simulator", "version": pin_version,
                       "content_hash": content_hash, "path": str(skill_path),
-                      "execution_model": m.get("execution_model")}
+                      "execution_model": m.get("execution_model"),
+                      "entry_bracket_required": m.get("entry_bracket_required")}
     else:
         try:
             # A caller-supplied `skill` override (tests, ad-hoc runs) gets its own
@@ -488,7 +489,37 @@ def _number(record: dict, key: str, *, positive: bool = True) -> float:
     return value
 
 
-def _validate_intent_record(record: dict) -> None:
+def _validate_entry_bracket(record: dict) -> None:
+    """Validate an optional engine-derived R-multiple scale ladder."""
+    bracket = record.get("bracket")
+    if bracket is None:
+        return
+    if not isinstance(bracket, dict):
+        raise ValueError("entry bracket must be an object")
+    scales = bracket.get("scales")
+    if not isinstance(scales, list) or not scales:
+        raise ValueError("entry bracket requires a non-empty 'scales' list")
+    total_fraction = 0.0
+    previous_r = 0.0
+    for scale in scales:
+        if not isinstance(scale, dict):
+            raise ValueError("each entry bracket scale must be an object")
+        r_multiple = scale.get("r_multiple")
+        fraction = scale.get("fraction")
+        if not isinstance(r_multiple, (int, float)) or isinstance(r_multiple, bool) or r_multiple <= 0:
+            raise ValueError("entry bracket scale 'r_multiple' must be positive")
+        if (not isinstance(fraction, (int, float)) or isinstance(fraction, bool)
+                or not 0 < fraction <= 1):
+            raise ValueError("entry bracket scale 'fraction' must be in (0, 1]")
+        if r_multiple <= previous_r:
+            raise ValueError("entry bracket scales must have strictly increasing R multiples")
+        previous_r = float(r_multiple)
+        total_fraction += float(fraction)
+    if total_fraction > 1.0 + 1e-12:
+        raise ValueError("entry bracket scale fractions may not total more than 1")
+
+
+def _validate_intent_record(record: dict, *, require_entry_bracket: bool = False) -> None:
     """Validate the no-agent-fill contract used by deterministic skills."""
     _validate_common_record(record)
     action = record.get("action")
@@ -504,6 +535,10 @@ def _validate_intent_record(record: dict) -> None:
         trigger = _number(record, "trigger")
         if _number(record, "stop") >= trigger:
             raise ValueError("ARM_BUY_STOP stop must be below trigger")
+    if action in {"ENTER_CLOSE", "ARM_BUY_STOP"}:
+        if require_entry_bracket and record.get("bracket") is None:
+            raise ValueError("this skill requires an entry bracket on every new entry")
+        _validate_entry_bracket(record)
     if action == "SCALE_LIMIT":
         _number(record, "target")
         fraction = _number(record, "fraction")
@@ -515,9 +550,14 @@ def _validate_intent_record(record: dict) -> None:
             raise ValueError("ADD_CLOSE risk_fraction must be in (0, 1]")
 
 
-def _validate_decision_record(record: dict, execution_model: str = LEGACY_EXECUTION_MODEL) -> None:
+def _validate_decision_record(
+    record: dict,
+    execution_model: str = LEGACY_EXECUTION_MODEL,
+    *,
+    require_entry_bracket: bool = False,
+) -> None:
     if execution_model == EXECUTION_MODEL:
-        _validate_intent_record(record)
+        _validate_intent_record(record, require_entry_bracket=require_entry_bracket)
     else:
         _validate_legacy_record(record)
 
@@ -543,7 +583,11 @@ def log(session_dir: str | Path, record: dict) -> None:
             )
 
         execution_model = session.get("config", {}).get("execution_model", LEGACY_EXECUTION_MODEL)
-        _validate_decision_record(record, execution_model)
+        bracket_contract = session.get("skill", {}).get("entry_bracket_required")
+        require_entry_bracket = bracket_contract is True or str(bracket_contract).lower() == "true"
+        _validate_decision_record(
+            record, execution_model, require_entry_bracket=require_entry_bracket,
+        )
 
         # Intent sessions must be bound to an already-revealed tick.  This
         # makes timestamps an executable constraint, not an agent convention.

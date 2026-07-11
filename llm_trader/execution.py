@@ -72,8 +72,9 @@ class ExecutionEngine:
     """Long-only execution state machine for bar-close decisions.
 
     Decisions on bar ``i`` are close-confirmed and therefore execute after any
-    orders that were already active at the start of that bar.  An armed buy-stop
-    or scale limit placed on bar ``i`` becomes active on bar ``i + 1``.
+    orders that were already active at the start of that bar.  An armed buy-stop,
+    scale limit, or entry-attached bracket placed on bar ``i`` becomes active on
+    bar ``i + 1``.
     """
 
     def __init__(self, config: ExecutionConfig) -> None:
@@ -207,6 +208,82 @@ class ExecutionEngine:
         if adverse < self.worst_price_vs_entry:
             self.worst_price_vs_entry = adverse
 
+    @staticmethod
+    def _bracket_scales(decision: dict[str, Any]) -> list[dict[str, float]]:
+        """Validate and normalize an optional entry-attached scale ladder.
+
+        A bracket deliberately names R multiples rather than dollar prices: the
+        engine cannot know an entry's actual fill until it applies slippage and
+        tick rounding.  Deriving the targets here keeps the agent on the intent
+        side of the contract and makes the ladder reproducible.
+        """
+        bracket = decision.get("bracket")
+        if bracket is None:
+            return []
+        if not isinstance(bracket, dict):
+            raise ValueError("entry bracket must be an object")
+        scales = bracket.get("scales")
+        if not isinstance(scales, list) or not scales:
+            raise ValueError("entry bracket requires a non-empty 'scales' list")
+
+        normalized: list[dict[str, float]] = []
+        previous_r = 0.0
+        total_fraction = 0.0
+        for scale in scales:
+            if not isinstance(scale, dict):
+                raise ValueError("each entry bracket scale must be an object")
+            r_multiple = scale.get("r_multiple")
+            fraction = scale.get("fraction")
+            if (not isinstance(r_multiple, (int, float)) or isinstance(r_multiple, bool)
+                    or float(r_multiple) <= 0):
+                raise ValueError("entry bracket scale 'r_multiple' must be positive")
+            if (not isinstance(fraction, (int, float)) or isinstance(fraction, bool)
+                    or not 0 < float(fraction) <= 1):
+                raise ValueError("entry bracket scale 'fraction' must be in (0, 1]")
+            r_multiple, fraction = float(r_multiple), float(fraction)
+            if r_multiple <= previous_r:
+                raise ValueError("entry bracket scales must have strictly increasing R multiples")
+            previous_r = r_multiple
+            total_fraction += fraction
+            normalized.append({"r_multiple": r_multiple, "fraction": fraction})
+        if total_fraction > 1.0 + 1e-12:
+            raise ValueError("entry bracket scale fractions may not total more than 1")
+        return normalized
+
+    def _attach_bracket(
+        self,
+        decision: dict[str, Any],
+        *,
+        fill: Optional[dict[str, Any]],
+        placed_i: int,
+    ) -> None:
+        """Stage scale targets derived from an actual initial-entry fill.
+
+        The bracket is not eligible on the entry bar: orders are created after
+        that bar's close decision (or armed-entry resolution) and become active
+        on the next bar.  This intentionally preserves the no-retroactive-fill
+        rule of the deterministic OHLC contract.
+        """
+        scales = self._bracket_scales(decision)
+        if fill is None or not scales:
+            return
+        if self.stop is None:
+            raise ValueError("entry bracket requires an active protective stop")
+        risk_per_share = fill["price"] - self.stop
+        if risk_per_share <= 0:
+            raise ValueError("entry bracket requires a stop below the actual fill")
+        for scale in scales:
+            self.targets.append({
+                "target": round(fill["price"] + scale["r_multiple"] * risk_per_share, 4),
+                "fraction": scale["fraction"],
+                "placed_i": placed_i,
+                # Bracket tranches are fixed from the original fill so two
+                # one-third targets really represent two thirds, rather than a
+                # fraction of a position already reduced by the first target.
+                "remaining": max(1, floor(fill["shares"] * scale["fraction"])),
+                "bracket_r_multiple": scale["r_multiple"],
+            })
+
     # ── order resolution ───────────────────────────────────────────────────
 
     def _resolve_open_orders(self, bar: dict[str, Any]) -> None:
@@ -238,7 +315,12 @@ class ExecutionEngine:
                 price = self._sell_price(max(float(bar["o"]), target["target"]))
                 filled = self._append_fill(
                     bar, action="SCALE", buy=False, shares=qty, price=price,
-                    reason=f"scale limit ${target['target']:.4f}",
+                    reason=(
+                        f"entry bracket +{target['bracket_r_multiple']:.2f}R "
+                        f"scale limit ${target['target']:.4f}"
+                        if "bracket_r_multiple" in target
+                        else f"scale limit ${target['target']:.4f}"
+                    ),
                 )
                 if filled is None:
                     continue
@@ -264,6 +346,7 @@ class ExecutionEngine:
                 self.armed = None
                 if filled is not None:
                     capacity -= filled["shares"]
+                    self._attach_bracket(armed, fill=filled, placed_i=int(bar["i"]))
                     # If both the entry and stop are reachable, use the adverse
                     # entry-then-stop path.  The bar does not reveal their order.
                     if float(bar["l"]) <= self.stop:
@@ -296,7 +379,13 @@ class ExecutionEngine:
             trigger, stop = float(decision["trigger"]), float(decision["stop"])
             if stop >= trigger:
                 raise ValueError("ARM_BUY_STOP stop must be below its trigger")
-            self.armed = {"trigger": trigger, "stop": stop, "placed_i": int(bar["i"])}
+            # Validate bracket shape at placement time, before a later trigger
+            # could make an invalid order state actionable.
+            self._bracket_scales(decision)
+            self.armed = {
+                "trigger": trigger, "stop": stop, "placed_i": int(bar["i"]),
+                "bracket": decision.get("bracket"),
+            }
             return
         if action == "ENTER_CLOSE":
             if self.shares > 0:
@@ -304,10 +393,11 @@ class ExecutionEngine:
             self.stop = float(decision["stop"])
             price = self._buy_price(float(bar["c"]))
             qty = self._entry_qty(price, self.stop, capacity, add=False)
-            self._append_fill(
+            filled = self._append_fill(
                 bar, action="ENTER", buy=True, shares=qty, price=price,
                 reason="close-confirmed entry",
             )
+            self._attach_bracket(decision, fill=filled, placed_i=int(bar["i"]))
             return
         if action == "ADD_CLOSE":
             if self.shares <= 0:

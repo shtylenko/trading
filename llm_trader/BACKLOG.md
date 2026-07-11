@@ -100,6 +100,64 @@ Promotion gate: paired mean ΔR > 0 **and** (sign-test p<0.05 or bootstrap 95% C
 - [ ] **3B.** (candidate, after 3A) objectify free-trade BE timing on the fill bar — agents
   currently freestyle when the stop jumps to break-even.
 
+## V3 PROFITABILITY QUEUE — baseline `3.0.0-20260710201028` (2026-07-10)
+
+The deterministic-execution baseline is **93 trades / $988.08 / effective R 0.247 / zero
+voids** on the now-contaminated 100-set dev cohort. It remains the control; do not loosen
+its participation cap, stop-gap handling, slippage, commission, buying-power, or $40 risk
+controls merely to improve a simulated result. Every item below must be a separately versioned,
+paired experiment and then pass the promotion gate above.
+
+- [~] **V3-1. Engine-managed entry brackets (3.1.0 candidate; implement now).** The agent
+  opts into a standard +1R / +2R, one-third / one-third scale ladder on `ENTER_CLOSE` or
+  `ARM_BUY_STOP`; after the actual fill, the deterministic engine derives exact target prices
+  from the actual fill and structural stop, stages them for the next bar, and keeps the
+  protective stop live on the remainder. A later break-even update must not delay/cancel a
+  target. Preserve next-bar activation, stop-first ambiguous-OHLC resolution, volume caps,
+  and all costs. **Evidence:** 30/56 v3 `SCALE_LIMIT` intents were submitted after their
+  target had already traded; four missed entirely (TMDE, SST, EPSM, DCX). Simple replacement
+  arithmetic is about +$49.53 on the dev batch, but that is diagnostic only—not a certified
+  counterfactual. **Type:** execution-interface correction / sim constraint, informed by
+  Cameron's scale-in-thirds rule. **Promotion test:** paired 3.0 vs 3.1 batch; no current-bar
+  retroactive fills or other execution-model relaxation.
+
+- [ ] **V3-2. One conservative second-leg re-entry (only after V3-1).** Enable at most one
+  re-entry after a three-full-bar cooldown and only on (a) a green VWAP reclaim after a
+  washout or (b) a fresh clean new-high from a base above VWAP. Require renewed green-volume
+  dominance and non-negative MACD, prohibit entries at/after 11:00, and cap re-entry risk at
+  $20 plus the session's remaining loss capacity so cumulative planned loss cannot exceed
+  $40. Attribute the first and second trades separately. **Evidence:** 29 of 41 protective-stop
+  sessions later traded at least +1 original R, but this is hindsight opportunity rather than
+  an achievable-profit estimate. **Type:** canon-grounded strategy experiment; high upside and
+  high overfit/churn risk.
+
+- [ ] **V3-3. Price-band selection experiment.** Test a hard stand-down below $3 versus
+  half-risk sizing from $2 to $3, with every other rule unchanged. On the v3 dev cohort, the
+  23 below-$3 trades produced −$45.49 / effective R −0.048, while $3–$5 produced +$360.07 and
+  $5–$10 +$402.55. Treat this as an empirical guardrail, not a canon threshold; it may reflect
+  penny ticks, commission, spread, and slippage. Validate on a disjoint holdout before any
+  promotion.
+
+- [ ] **V3-4. Late-entry time gate experiment.** Test no fresh entry from 11:00 onward. The
+  11 post-11:00 setups produced −$20.72 in the dev batch, but the sample is small. Do **not**
+  tighten the prime window to 09:45: 09:46–10:29 remained profitable (+$154.66) despite a
+  lower win rate. This is an empirical guardrail and must be tested independently.
+
+- [ ] **V3-5. Execution-quality instrumentation before any friction change.** Continue to
+  treat v3's no-commission (+$189.96) and no-slippage (+$312.21) attribution profiles as
+  theoretical sensitivity bounds, not strategy results. Before changing execution assumptions
+  or selecting a broker/routing scheme, record bid/ask, NBBO, quoted/effective spread, order
+  type, fill latency, price improvement, and actual commissions by price/liquidity band.
+  Consider marketable-limit caps for entry only after those data exist; retain gap-aware stops.
+
+- [ ] **V3-6. Honest holdout before any promotion.** `batch/testset_100.json` is dev-only:
+  the leaf inspection that generated V3-1 through V3-4 contaminates it. Expand the historical
+  setup pool, build a disjoint temporal/key holdout, and run all surviving candidates there.
+
+- [ ] **Deferred by user: scanner whole-day-volume leakage / point-in-time scan-replay parity.**
+  Do not include this in V3 profitability candidates until explicitly resumed. It is a data
+  validity task, not a way to inflate current simulated performance.
+
 ## DATA EXPANSION (enabling task — user-offered)
 
 - [ ] **DX. Grow `entries.db` beyond 2025.** Currently **414 unique (ticker,date) setups spanning

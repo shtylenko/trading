@@ -74,6 +74,72 @@ def test_stop_wins_when_ohlc_hits_target_and_stop():
     assert actions[-1]["price"] == 9.0
 
 
+def test_entry_bracket_derives_fixed_r_targets_from_actual_fill():
+    engine = ExecutionEngine(_config())
+    actions, _, _ = engine.run(
+        [
+            _bar(0, 10, 10.2, 9.8, 10),
+            _bar(1, 10, 10.8, 9.7, 10.5),
+            _bar(2, 10.5, 11.1, 10.2, 11.0),
+            _bar(3, 11.0, 12.1, 10.8, 12.0),
+        ],
+        [{
+            "i": 0, "time": "10:20", "action": "ENTER_CLOSE", "stop": 9.0,
+            "bracket": {"scales": [
+                {"r_multiple": 1.0, "fraction": 0.333},
+                {"r_multiple": 2.0, "fraction": 0.333},
+            ]},
+        }],
+        force_close=False,
+    )
+    assert [(a["action"], a["price"], a["shares"]) for a in actions] == [
+        ("ENTER", 10.0, 100), ("SCALE", 11.0, 33), ("SCALE", 12.0, 33),
+    ]
+    assert "+1.00R" in actions[1]["reason"]
+    assert "+2.00R" in actions[2]["reason"]
+
+
+def test_entry_bracket_never_retroactively_fills_or_beats_stop_first():
+    engine = ExecutionEngine(_config())
+    actions, _, _ = engine.run(
+        [
+            _bar(0, 10, 10.2, 9.8, 10),
+            # The +1R target is touched only after the entry, so the next bar
+            # is eligible; its stop touch remains the adverse OHLC outcome.
+            _bar(1, 10, 11.2, 8.5, 9.0),
+        ],
+        [{
+            "i": 0, "time": "10:20", "action": "ENTER_CLOSE", "stop": 9.0,
+            "bracket": {"scales": [{"r_multiple": 1.0, "fraction": 0.333}]},
+        }],
+        force_close=False,
+    )
+    assert [(a["action"], a["price"], a["shares"]) for a in actions] == [
+        ("ENTER", 10.0, 100), ("EXIT", 9.0, 100),
+    ]
+
+
+def test_armed_entry_bracket_waits_until_the_bar_after_its_fill():
+    engine = ExecutionEngine(_config())
+    actions, _, _ = engine.run(
+        [
+            _bar(0, 9.5, 9.8, 9.3, 9.6),
+            # This bar triggers the entry and touches +1R, but an entry-attached
+            # bracket is deliberately ineligible until the following bar.
+            _bar(1, 9.8, 11.2, 9.5, 10.7),
+            _bar(2, 10.7, 11.2, 10.4, 11.0),
+        ],
+        [{
+            "i": 0, "time": "10:20", "action": "ARM_BUY_STOP", "trigger": 10.0, "stop": 9.0,
+            "bracket": {"scales": [{"r_multiple": 1.0, "fraction": 0.5}]},
+        }],
+        force_close=False,
+    )
+    assert [(a["action"], a["i"], a["shares"]) for a in actions] == [
+        ("ENTER", 1, 100), ("SCALE", 2, 50),
+    ]
+
+
 def test_sizing_enforces_buying_power_and_volume_cap():
     engine = ExecutionEngine(_config(buying_power=50.0, max_participation_rate=0.2))
     actions, _, pnl = engine.run(
@@ -130,11 +196,68 @@ def test_recorder_requires_revealed_intents_and_derives_fills(tmp_path):
     assert [(a["side"], a["shares"]) for a in actions] == [("buy", 100), ("sell", 100)]
 
 
+def test_recorder_validates_entry_bracket_shape(tmp_path):
+    sdir = recorder.init("TEST", "2025-03-10", root=tmp_path, now=datetime(2026, 7, 10, 10, 0, 0))
+    session_path = sdir / "session.json"
+    session = json.loads(session_path.read_text())
+    session["config"]["execution_model"] = EXECUTION_MODEL
+    session["skill"]["entry_bracket_required"] = "true"
+    session_path.write_text(json.dumps(session))
+    _stream(sdir / "stream.jsonl")
+
+    with pytest.raises(ValueError, match="requires an entry bracket"):
+        recorder.log(sdir, {
+            "i": 0, "time": "10:20", "action": "ENTER_CLOSE", "stop": 9.0,
+        })
+    with pytest.raises(ValueError, match="strictly increasing"):
+        recorder.log(sdir, {
+            "i": 0, "time": "10:20", "action": "ENTER_CLOSE", "stop": 9.0,
+            "bracket": {"scales": [
+                {"r_multiple": 1.0, "fraction": 0.5},
+                {"r_multiple": 1.0, "fraction": 0.5},
+            ]},
+        })
+
+
+def test_recorder_replays_a_valid_entry_bracket(tmp_path):
+    sdir = recorder.init("TEST", "2025-03-10", root=tmp_path, now=datetime(2026, 7, 10, 10, 0, 0))
+    session_path = sdir / "session.json"
+    session = json.loads(session_path.read_text())
+    session["config"].update({
+        "execution_model": EXECUTION_MODEL,
+        "risk_budget": 100.0,
+        "buying_power": 10_000.0,
+        "execution": {
+            "risk_budget": 100.0, "buying_power": 10_000.0,
+            "entry_slippage_bps": 0.0, "exit_slippage_bps": 0.0,
+            "commission_per_share": 0.0, "max_participation_rate": 1.0,
+            "tick_size": 0.01,
+        },
+    })
+    session["skill"]["entry_bracket_required"] = "true"
+    session_path.write_text(json.dumps(session))
+    lines = [
+        {"type": "meta", "ticker": "TEST", "date": "2025-03-10", "entry_time": "10:20", "entry_px": 10.0},
+        {"type": "tick", "i": 0, "time": "10:20", "o": 10.0, "h": 10.2, "l": 9.8, "c": 10.0, "v": 10_000},
+        {"type": "tick", "i": 1, "time": "10:21", "o": 10.0, "h": 11.1, "l": 10.0, "c": 11.0, "v": 10_000},
+        {"type": "end", "bars": 2, "close": 11.0},
+    ]
+    (sdir / "stream.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    recorder.log(sdir, {
+        "i": 0, "time": "10:20", "action": "ENTER_CLOSE", "stop": 9.0,
+        "bracket": {"scales": [{"r_multiple": 1.0, "fraction": 0.333}]},
+    })
+
+    resolved = recorder.resolve(sdir, 1)
+    assert resolved["position_shares"] == 67
+    assert [(fill["action"], fill["shares"]) for fill in resolved["fills"]] == [("SCALE", 33)]
+
+
 def test_init_freezes_deterministic_execution_assumptions(tmp_path):
     skill = tmp_path / "candidate.md"
     skill.write_text(
         "---\nname: trade-simulator\nversion: 3.0.0\n"
-        "execution_model: deterministic_ohlc_v1\n---\n# candidate\n"
+        "execution_model: deterministic_ohlc_v1\nentry_bracket_required: true\n---\n# candidate\n"
     )
     runner_contract = {"harness_version": "test", "prompt_hash": "sha256:p"}
     sdir = recorder.init("TEST", "2025-03-10", root=tmp_path, skill=skill,
@@ -149,6 +272,7 @@ def test_init_freezes_deterministic_execution_assumptions(tmp_path):
     assert config["execution"]["max_participation_rate"] == 0.10
     session = json.loads((sdir / "session.json").read_text())
     assert session["runner_contract"]["prompt_hash"] == "sha256:p"
+    assert session["skill"]["entry_bracket_required"] == "true"
 
 
 def _attribution_stream(path):

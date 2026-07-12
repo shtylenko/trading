@@ -84,6 +84,10 @@
       "content_hash": "sha256:f51a8b50",
       "first_seen": "2026-07-11T16:06:48"
     },
+    "3.4.0": {
+      "content_hash": "sha256:b82199ae",
+      "first_seen": "2026-07-12T16:40:34"
+    },
     "4.0.0": {
       "content_hash": "sha256:68b09253",
       "first_seen": "2026-07-11T22:03:58"

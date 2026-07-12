@@ -142,6 +142,15 @@ paired experiment and then pass the promotion gate above.
   penny ticks, commission, spread, and slippage. Validate on a disjoint holdout before any
   promotion.
 
+- [~] **V3-7. Engine-managed starter/add pyramid (3.3.0 candidate; implement now).** Diagnostics
+  over the three 3.0.0 DeepSeek control runs found only two filled adds, so the written
+  pyramid rule is not operating in practice. Start with roughly one-third of normally
+  allowed shares; queue add #1 after a green close above actual average entry and add #2
+  after a green new-high continuation; fill only at the next open while still above
+  average entry; raise the stop so total open risk stays at or below $40. A stop, scale,
+  or discretionary exit cancels the plan. Test with three candidate runs against the
+  three-run 3.0.0 panel; do not relax fills, participation, costs, or risk controls.
+
 - [ ] **V3-4. Late-entry time gate experiment.** Test no fresh entry from 11:00 onward. The
   11 post-11:00 setups produced −$20.72 in the dev batch, but the sample is small. Do **not**
   tighten the prime window to 09:45: 09:46–10:29 remained profitable (+$154.66) despite a

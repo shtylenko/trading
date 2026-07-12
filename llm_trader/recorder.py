@@ -57,6 +57,10 @@ SCHEMA_VERSION = 1
 # step) import this rather than re-deriving the path, so they can never disagree
 # about where sessions live.
 SIM_ROOT = DATA_DIR.parent / "simulations"
+# The skill registry + experiment log. Used to classify each session's rule-set
+# version as the accepted base, a pending candidate, or a rejected experiment so
+# the viewer can tint its row.
+SKILLS_DIR = DATA_DIR.parent / "skills"
 
 # default account profile knobs (mirrors the skill's small-account sizing)
 PROFILE_RISK = {"small": 40.0, "main": 1350.0}
@@ -352,7 +356,8 @@ def init(
         skill_meta = {"name": "trade-simulator", "version": pin_version,
                       "content_hash": content_hash, "path": str(skill_path),
                       "execution_model": m.get("execution_model"),
-                      "entry_bracket_required": m.get("entry_bracket_required")}
+                      "entry_bracket_required": m.get("entry_bracket_required"),
+                      "entry_pyramid_required": m.get("entry_pyramid_required")}
     else:
         try:
             # A caller-supplied `skill` override (tests, ad-hoc runs) gets its own
@@ -519,7 +524,28 @@ def _validate_entry_bracket(record: dict) -> None:
         raise ValueError("entry bracket scale fractions may not total more than 1")
 
 
-def _validate_intent_record(record: dict, *, require_entry_bracket: bool = False) -> None:
+def _validate_entry_pyramid(record: dict) -> None:
+    """Validate an optional engine-managed starter/add plan."""
+    pyramid = record.get("pyramid")
+    if pyramid is None:
+        return
+    if not isinstance(pyramid, dict):
+        raise ValueError("entry pyramid must be an object")
+    starter = pyramid.get("starter_fraction")
+    max_adds = pyramid.get("max_adds")
+    if (not isinstance(starter, (int, float)) or isinstance(starter, bool)
+            or not 0 < starter <= 0.5):
+        raise ValueError("entry pyramid 'starter_fraction' must be in (0, 0.5]")
+    if not isinstance(max_adds, int) or isinstance(max_adds, bool) or max_adds not in {1, 2}:
+        raise ValueError("entry pyramid 'max_adds' must be 1 or 2")
+
+
+def _validate_intent_record(
+    record: dict,
+    *,
+    require_entry_bracket: bool = False,
+    require_entry_pyramid: bool = False,
+) -> None:
     """Validate the no-agent-fill contract used by deterministic skills."""
     _validate_common_record(record)
     action = record.get("action")
@@ -538,7 +564,10 @@ def _validate_intent_record(record: dict, *, require_entry_bracket: bool = False
     if action in {"ENTER_CLOSE", "ARM_BUY_STOP"}:
         if require_entry_bracket and record.get("bracket") is None:
             raise ValueError("this skill requires an entry bracket on every new entry")
+        if require_entry_pyramid and record.get("pyramid") is None:
+            raise ValueError("this skill requires an entry pyramid on every new entry")
         _validate_entry_bracket(record)
+        _validate_entry_pyramid(record)
     if action == "SCALE_LIMIT":
         _number(record, "target")
         fraction = _number(record, "fraction")
@@ -555,9 +584,14 @@ def _validate_decision_record(
     execution_model: str = LEGACY_EXECUTION_MODEL,
     *,
     require_entry_bracket: bool = False,
+    require_entry_pyramid: bool = False,
 ) -> None:
     if execution_model == EXECUTION_MODEL:
-        _validate_intent_record(record, require_entry_bracket=require_entry_bracket)
+        _validate_intent_record(
+            record,
+            require_entry_bracket=require_entry_bracket,
+            require_entry_pyramid=require_entry_pyramid,
+        )
     else:
         _validate_legacy_record(record)
 
@@ -585,8 +619,12 @@ def log(session_dir: str | Path, record: dict) -> None:
         execution_model = session.get("config", {}).get("execution_model", LEGACY_EXECUTION_MODEL)
         bracket_contract = session.get("skill", {}).get("entry_bracket_required")
         require_entry_bracket = bracket_contract is True or str(bracket_contract).lower() == "true"
+        pyramid_contract = session.get("skill", {}).get("entry_pyramid_required")
+        require_entry_pyramid = pyramid_contract is True or str(pyramid_contract).lower() == "true"
         _validate_decision_record(
-            record, execution_model, require_entry_bracket=require_entry_bracket,
+            record, execution_model,
+            require_entry_bracket=require_entry_bracket,
+            require_entry_pyramid=require_entry_pyramid,
         )
 
         # Intent sessions must be bound to an already-revealed tick.  This
@@ -1239,6 +1277,7 @@ def _session_entry(d: Path, s: dict) -> dict:
         "out_of_credits": s.get("out_of_credits"),
         "timed_out": s.get("timed_out"),
         "finalize_error": s.get("finalize_error"),
+        "no_decision_log": s.get("no_decision_log"),
     }
 
     # For running sessions, include a current PnL snapshot (mtime-cached).
@@ -1250,8 +1289,63 @@ def _session_entry(d: Path, s: dict) -> dict:
     return entry
 
 
+def _version_status_map() -> dict[str, str]:
+    """Map each skill version → a highlight bucket for the sessions table:
+
+        "base"       accepted baseline lineage (registry `base`, PROMOTE'd, kept) → green
+        "candidate"  under test, not yet accepted (HOLD / "not yet validated")   → blue
+        "rejected"   failed / superseded experiment (REJECT)                      → red
+
+    Versions with no clear signal (e.g. pre-methodology) are omitted (no tint).
+    Sources: `skills/skill_versions.json` (the declared base) and the per-experiment
+    `**Decision:**` lines in `skills/CHANGELOG.md`; the Decision line is authoritative,
+    the section header is the fallback.
+    """
+    out: dict[str, str] = {}
+    try:
+        text = (SKILLS_DIR / "CHANGELOG.md").read_text()
+    except OSError:
+        text = ""
+    # Each experiment is a "### <versions> — <title> …" section. Split on the header
+    # marker; take the versions from the header's lead (before the em-dash) only, so a
+    # version merely *mentioned* in the title (e.g. "decompose the 2.6.0 REJECT") is
+    # not misclassified by a neighbour's section.
+    for sec in re.split(r"(?m)^### ", text):
+        head = sec.splitlines()[0] if sec else ""
+        lead = head.split("—", 1)[0]  # em-dash separates versions from the title
+        versions = re.findall(r"\d+\.\d+\.\d+", lead)
+        if not versions:
+            continue
+        m = re.search(r"\*\*Decision:\*\*(.+)", sec)
+        verdict = (m.group(1) if m else head).upper()
+        # The ✅/❌/⏳ emoji is the authoritative verdict marker; keyword fallbacks
+        # cover the emoji-less "keep." lines and header text. Order matters: test
+        # candidate (HOLD) before base so a line like "HOLD — do not treat as
+        # promoted" classifies as candidate, not base.
+        if "❌" in verdict or "REJECT" in verdict or "SUPERSED" in verdict:
+            bucket = "rejected"
+        elif "⏳" in verdict or "HOLD" in verdict or "CANDIDATE" in verdict or "NOT YET VALIDATED" in verdict:
+            bucket = "candidate"
+        elif "✅" in verdict or "PROMOTE" in verdict or re.search(r"\bKEEP\b", verdict):
+            bucket = "base"
+        else:
+            bucket = None
+        if bucket:
+            for v in versions:
+                out.setdefault(v, bucket)  # newest section (listed first) wins
+    # The registry's declared base is authoritative — it is always green.
+    try:
+        reg = json.loads((SKILLS_DIR / "skill_versions.json").read_text())
+        if reg.get("base"):
+            out[reg["base"]] = "base"
+    except (OSError, ValueError):
+        pass
+    return out
+
+
 def list_sessions() -> list[dict]:
     """Return top-level sessions (live or simulated batches). New primary grouping."""
+    vstatus = _version_status_map()
     groups: dict[str, list] = defaultdict(list)
     for d, s in iter_sessions():
         if _is_archived(s):
@@ -1322,6 +1416,7 @@ def list_sessions() -> list[dict]:
             "name": name or sid,
             "type": sess_type,
             "version": version or bmeta.get("version"),
+            "version_status": vstatus.get(version or bmeta.get("version")),
             "model": bmeta.get("model"),
             "pnl": round(total_pnl, 2),
             "n_tickers": len(tickers),
@@ -1397,11 +1492,22 @@ def _is_finalize_error(s: dict) -> bool:
     return bool(s.get("finalize_error"))
 
 
+def _is_no_decision_log(s: dict) -> bool:
+    """True when an agent finalized without logging even one required intent.
+
+    This is an infrastructure/agent failure, not a valid strategy stand-down. It
+    is stamped by batchsim and treated like timeout/out-of-credits everywhere
+    that computes batch metrics or resume eligibility.
+    """
+    return bool(s.get("no_decision_log"))
+
+
 def _is_infra_fail(s: dict) -> bool:
     """Any non-result infra failure (out-of-credits, timeout, or finalize error):
     the agent didn't run to a real decision, so the run is excluded from stats
     rather than scored."""
-    return _is_out_of_credits(s) or _is_timed_out(s) or _is_finalize_error(s)
+    return (_is_out_of_credits(s) or _is_timed_out(s) or _is_finalize_error(s)
+            or _is_no_decision_log(s))
 
 
 def _is_archived(s: dict) -> bool:
@@ -1461,6 +1567,7 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
     n_out_of_credits = 0
     n_timed_out = 0
     n_finalize_error = 0
+    n_no_decision_log = 0
     n_stood = 0
     n_traded = 0
     total_pnl = 0.0
@@ -1483,6 +1590,9 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
             continue
         if _is_finalize_error(m):
             n_finalize_error += 1
+            continue
+        if _is_no_decision_log(m):
+            n_no_decision_log += 1
             continue
         n_planned += 1
         if _is_void(m):
@@ -1574,6 +1684,7 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
         "n_out_of_credits": n_out_of_credits,
         "n_timed_out": n_timed_out,
         "n_finalize_error": n_finalize_error,
+        "n_no_decision_log": n_no_decision_log,
         "n_stood_down": n_stood,
         "sequence_drawdown_r": seq_dd,
         "recovery_factor_r": recovery,
@@ -1606,6 +1717,7 @@ def get_top_session_view(sess_id: str) -> dict:
         "n_out_of_credits": 0,  # leaf runs that died on HTTP 402 (out of credits)
         "n_timed_out": 0,  # leaf runs the harness killed for exceeding the timeout
         "n_finalize_error": 0,  # leaf runs whose finalize() replay raised
+        "n_no_decision_log": 0,  # complete leaf with no agent intent
         "n_leaves": 0,     # total leaf runs on this ticker
         "n_complete": 0,   # of those, how many are finalized
         "running_any": False,
@@ -1635,6 +1747,8 @@ def get_top_session_view(sess_id: str) -> dict:
             td["n_timed_out"] += 1        # terminal infra failure; never "complete"
         elif _is_finalize_error(s):
             td["n_finalize_error"] += 1   # terminal infra failure; never "complete"
+        elif _is_no_decision_log(s):
+            td["n_no_decision_log"] += 1  # completed artifacts, but no trading decision
         elif entry.get("status") == "complete":
             td["n_complete"] += 1
         elif entry.get("stale"):
@@ -1676,6 +1790,8 @@ def get_top_session_view(sess_id: str) -> dict:
             tstatus = "timeout"
         elif data["n_finalize_error"] > 0:
             tstatus = "finalize_error"
+        elif data["n_no_decision_log"] > 0:
+            tstatus = "no_decision_log"
         elif data["stale_any"]:
             tstatus = "stale"
         else:
@@ -1697,6 +1813,7 @@ def get_top_session_view(sess_id: str) -> dict:
             "n_out_of_credits": data["n_out_of_credits"],
             "n_timed_out": data["n_timed_out"],
             "n_finalize_error": data["n_finalize_error"],
+            "n_no_decision_log": data["n_no_decision_log"],
             "status": tstatus,
             "n_leaves": data["n_leaves"],
             "n_complete": data["n_complete"],
@@ -1757,6 +1874,7 @@ def report_by_version(
 
     buckets: dict[str, dict] = {}
     fin_err_buckets: dict[str, int] = defaultdict(int)
+    no_intent_buckets: dict[str, int] = defaultdict(int)
     for d, session in iter_sessions():
         slot = (session.get("batch"), session.get("ticker"), session.get("historical_date"))
         if _is_finalize_error(session):
@@ -1770,6 +1888,15 @@ def report_by_version(
                 if batch is None or sbatch == batch:
                     ver = session.get("skill", {}).get("version") or "unversioned"
                     fin_err_buckets[ver] += 1
+            continue
+        if _is_no_decision_log(session):
+            if slot in resolved_slots:
+                continue
+            if mode is None or session.get("mode", "simulated") == mode:
+                sbatch = session.get("batch")
+                if batch is None or sbatch == batch:
+                    ver = session.get("skill", {}).get("version") or "unversioned"
+                    no_intent_buckets[ver] += 1
             continue
         pnl = _load_json(d / "pnl.json")
         if pnl is None or session.get("status") != "complete":
@@ -1787,6 +1914,7 @@ def report_by_version(
         b = buckets.setdefault(ver, {
             "version": ver, "n": 0, "wins": 0, "stood_down": 0, "n_void": 0,
             "n_out_of_credits": 0, "n_timed_out": 0, "n_finalize_error": 0,
+            "n_no_decision_log": 0,
             "pnl": 0.0, "r_sum": 0.0, "eff_r_sum": 0.0, "eff_n": 0,
             "cap_sum": 0.0, "cap_n": 0, "hashes": set(),
             "batches": set(), "models": set(),
@@ -1812,6 +1940,9 @@ def report_by_version(
             # Infra failure (harness killed the run at the timeout) — like out-of-credits,
             # the agent never reached a real decision; exclude from the cohort entirely.
             b["n_timed_out"] += 1
+            continue
+        if _is_no_decision_log(session):
+            b["n_no_decision_log"] += 1
             continue
         if session.get("void") or pnl.get("void"):
             b["n_void"] += 1          # audit-tainted → excluded from stats
@@ -1846,6 +1977,7 @@ def report_by_version(
             "n_out_of_credits": b["n_out_of_credits"],
             "n_timed_out": b["n_timed_out"],
             "n_finalize_error": fin_err_buckets.pop(b["version"], 0),
+            "n_no_decision_log": no_intent_buckets.pop(b["version"], 0),
             "win_pct": round(100 * b["wins"] / n) if n else None,
             "pnl": round(b["pnl"], 2),
             "avg_r": round(b["r_sum"] / n, 2) if n else None,          # clean (traded only)
@@ -1857,10 +1989,13 @@ def report_by_version(
         })
     # a version whose ONLY leaves are finalize-errors has no bucket above (never
     # traded/stood-down) — still surface it so the failure isn't invisible.
-    for ver, n_fe in fin_err_buckets.items():
+    for ver in sorted(set(fin_err_buckets) | set(no_intent_buckets)):
+        n_fe = fin_err_buckets[ver]
+        n_no_intent = no_intent_buckets[ver]
         rows.append({
             "version": ver, "n": 0, "stood_down": 0, "n_void": 0,
             "n_out_of_credits": 0, "n_timed_out": 0, "n_finalize_error": n_fe,
+            "n_no_decision_log": n_no_intent,
             "win_pct": None, "pnl": 0.0, "avg_r": None, "eff_r": None,
             "avg_capture": None, "n_batches": 0, "n_models": 0, "hashes": [],
         })
@@ -1892,6 +2027,8 @@ def _print_report(rows: list[dict]) -> None:
             notes.append(f"⚠ {r['n_timed_out']} timed-out")
         if r.get("n_finalize_error"):
             notes.append(f"⚠ {r['n_finalize_error']} finalize-error")
+        if r.get("n_no_decision_log"):
+            notes.append(f"⚠ {r['n_no_decision_log']} no-intent")
         # A version aggregated across >1 batch or >1 model is NOT a valid ranking row.
         if r.get("n_batches", 0) > 1:
             notes.append(f"⚠ {r['n_batches']} batches MIXED"); mixed = True

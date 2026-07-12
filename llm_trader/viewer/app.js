@@ -259,7 +259,9 @@ function sessionRowHtml(s) {
   const statusCell = (running
     ? `<span class="badge running">● running${prog}</span>`
     : `<span class="badge complete">done</span>`) + ooc + tout;
-  return `<tr data-id="${escapeHtml(s.id)}">
+  // Row tint by rule-set lifecycle: base=green, candidate=blue, rejected=red.
+  const vrowCls = s.version_status ? ` vrow-${s.version_status}` : "";
+  return `<tr class="srow${vrowCls}" data-id="${escapeHtml(s.id)}">
       <td>${display}</td>
       <td><span class="badge ${isLive ? "live" : "sim"}">${isLive ? "live" : "sim"}</span></td>
       <td>${statusCell}</td>

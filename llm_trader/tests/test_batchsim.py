@@ -92,6 +92,7 @@ def _fake_session(root, tag, sid="20250102000000-TK-abc123", ticker="TK",
     (d / "pnl.json").write_text(json.dumps(
         {"traded": True, "win": True, "realized_pnl": 10.0, "r_multiple": 0.25,
          "skill_version": "9.9.9", "batch": tag}))
+    (d / "decisions.jsonl").write_text('{"i": 0, "action": "OBSERVE"}\n')
     return d
 
 
@@ -229,6 +230,33 @@ def test_stamp_timeout(tmp_path, monkeypatch):
     batchsim._stamp_timeout(sdir)
     s = json.loads((sdir / "session.json").read_text())
     assert s["timed_out"] and "void" not in s
+
+
+def test_empty_intent_log_is_infra_failure_and_rerunnable(tmp_path, monkeypatch):
+    # An empty decisions.jsonl is never a valid stand-down: the model/harness made
+    # no decision at all. Audit backfills the stamp, reporting excludes the leaf,
+    # and --resume sees the slot as unfinished.
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    tag = "no-intent"
+    d = _fake_session(tmp_path, tag)
+    (d / "decisions.jsonl").write_text("")
+    monkeypatch.setattr(batchsim, "_resolve_batch_commands", lambda sids: {d.name: "step next"})
+
+    assert batchsim.audit(tag) == 0
+    session = json.loads((d / "session.json").read_text())
+    assert session["no_decision_log"]
+    assert "void" not in session
+    assert batchsim._completed_counts(tag) == {}
+    assert batchsim._effective_r({
+        "void": False, "ooc": False, "timeout": False, "finalize_error": False,
+        "no_decision_log": True, "status": "complete", "traded": False, "r": None,
+    }) is None
+
+    view = recorder.get_top_session_view(tag)
+    assert view["metrics"]["n_no_decision_log"] == 1
+    assert view["metrics"]["n_planned"] == 0
+    assert view["tickers"][0]["status"] == "no_decision_log"
 
 
 def test_timed_out_excluded_from_stats_and_rerun(tmp_path, monkeypatch):

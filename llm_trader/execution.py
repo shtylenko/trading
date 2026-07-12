@@ -86,6 +86,7 @@ class ExecutionEngine:
         self.stop: Optional[float] = None
         self.armed: Optional[dict[str, Any]] = None
         self.targets: list[dict[str, Any]] = []
+        self.pyramid: Optional[dict[str, Any]] = None
         self.actions: list[dict[str, Any]] = []
         self.timeline: list[dict[str, Any]] = []
         self.entry_i: Optional[int] = None
@@ -284,6 +285,109 @@ class ExecutionEngine:
                 "bracket_r_multiple": scale["r_multiple"],
             })
 
+    @staticmethod
+    def _pyramid_spec(decision: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Validate the optional engine-managed starter/add plan on an entry."""
+        pyramid = decision.get("pyramid")
+        if pyramid is None:
+            return None
+        if not isinstance(pyramid, dict):
+            raise ValueError("entry pyramid must be an object")
+        starter = pyramid.get("starter_fraction")
+        max_adds = pyramid.get("max_adds")
+        if (not isinstance(starter, (int, float)) or isinstance(starter, bool)
+                or not 0 < float(starter) <= 0.5):
+            raise ValueError("entry pyramid 'starter_fraction' must be in (0, 0.5]")
+        if not isinstance(max_adds, int) or isinstance(max_adds, bool) or max_adds not in {1, 2}:
+            raise ValueError("entry pyramid 'max_adds' must be 1 or 2")
+        return {"starter_fraction": float(starter), "max_adds": max_adds}
+
+    @staticmethod
+    def _starter_qty(full_qty: int, pyramid: Optional[dict[str, Any]]) -> int:
+        if not pyramid or full_qty <= 0:
+            return full_qty
+        return min(full_qty, max(1, floor(full_qty * pyramid["starter_fraction"])))
+
+    def _start_pyramid(self, decision: dict[str, Any], fill: Optional[dict[str, Any]]) -> None:
+        spec = self._pyramid_spec(decision)
+        if spec is None or fill is None:
+            return
+        self.pyramid = {
+            "stage": 0,
+            "max_adds": spec["max_adds"],
+            # Every add is the same share count as the actual starter. This is
+            # a position plan, not a second independent risk budget.
+            "tranche_shares": fill["shares"],
+            "queued": None,
+        }
+
+    def _queue_pyramid_add(self, bar: dict[str, Any]) -> None:
+        """Queue a next-bar add from a completed confirmation/continuation bar."""
+        plan = self.pyramid
+        if (plan is None or self.shares <= 0 or plan["queued"] is not None
+                or plan["stage"] >= plan["max_adds"] or self.entry_i is None
+                or int(bar["i"]) <= self.entry_i):
+            return
+        green_above_cost = float(bar["c"]) >= float(bar["o"]) and float(bar["c"]) > self.avg_entry
+        if plan["stage"] == 0:
+            qualifies = green_above_cost
+        else:
+            rvol = bar.get("rvol_bar")
+            rvol_ok = rvol is None or float(rvol) >= 1.5
+            qualifies = (
+                green_above_cost and bool(bar.get("new_high")) and rvol_ok
+                and float(bar.get("macd_hist") or 0.0) >= 0.0
+            )
+        if qualifies:
+            plan["queued"] = {
+                "armed_i": int(bar["i"]),
+                "remaining": plan["tranche_shares"],
+                "stage": plan["stage"] + 1,
+            }
+
+    def _resolve_pyramid_add(self, bar: dict[str, Any], capacity: int) -> int:
+        """Fill a previously queued add at this bar's open, never averaging down.
+
+        The re-anchored stop is raised (never loosened) after the actual fill so
+        the entire enlarged position remains within the original risk budget.
+        """
+        plan = self.pyramid
+        queued = plan.get("queued") if plan else None
+        if (queued is None or self.shares <= 0 or int(bar["i"]) <= queued["armed_i"]
+                or capacity <= 0 or self.stop is None):
+            return capacity
+        price = self._buy_price(float(bar["o"]))
+        if price <= self.avg_entry:
+            # The continuation failed to hold into the next bar. Cancel this
+            # add attempt but leave the plan available for a later clean signal.
+            plan["queued"] = None
+            return capacity
+        buying_power_qty = floor(max(0.0, self.config.buying_power - self.shares * self.avg_entry) / price)
+        qty = min(int(queued["remaining"]), capacity, buying_power_qty)
+        if qty <= 0:
+            plan["queued"] = None
+            return capacity
+        new_total = self.shares + qty
+        new_avg = (self.avg_entry * self.shares + price * qty) / new_total
+        required_stop = new_avg - self.config.risk_budget / new_total
+        new_stop = max(self.stop, self._round_price(required_stop, buy=True))
+        if new_stop >= new_avg:
+            plan["queued"] = None
+            return capacity
+        filled = self._append_fill(
+            bar, action="ADD", buy=True, shares=qty, price=price,
+            reason=f"engine pyramid add #{queued['stage']} (confirmed continuation)",
+        )
+        if filled is None:
+            return capacity
+        self.stop = new_stop
+        capacity -= filled["shares"]
+        queued["remaining"] -= filled["shares"]
+        if queued["remaining"] <= 0:
+            plan["stage"] = queued["stage"]
+            plan["queued"] = None
+        return capacity
+
     # ── order resolution ───────────────────────────────────────────────────
 
     def _resolve_open_orders(self, bar: dict[str, Any]) -> None:
@@ -301,6 +405,7 @@ class ExecutionEngine:
                 bar, action="EXIT", buy=False, shares=self.shares, price=price,
                 reason="protective stop (gap-aware; stop-first on ambiguous OHLC)",
             )
+            self.pyramid = None
             return
 
         # Limit scales are active only after the bar on which they were placed.
@@ -325,6 +430,8 @@ class ExecutionEngine:
                 if filled is None:
                     continue
                 capacity -= filled["shares"]
+                # Banking a scale invalidates the starter/add position plan.
+                self.pyramid = None
                 remaining = wanted - filled["shares"]
                 if remaining <= 0 or self.shares == 0:
                     self.targets.remove(target)
@@ -347,6 +454,7 @@ class ExecutionEngine:
                 if filled is not None:
                     capacity -= filled["shares"]
                     self._attach_bracket(armed, fill=filled, placed_i=int(bar["i"]))
+                    self._start_pyramid(armed, filled)
                     # If both the entry and stop are reachable, use the adverse
                     # entry-then-stop path.  The bar does not reveal their order.
                     if float(bar["l"]) <= self.stop:
@@ -356,6 +464,9 @@ class ExecutionEngine:
                             price=stop_price,
                             reason="same-bar armed-entry/stop ambiguity (adverse stop-first policy)",
                         )
+                        self.pyramid = None
+
+        self._resolve_pyramid_add(bar, capacity)
 
     def _apply_decision(self, bar: dict[str, Any], decision: dict[str, Any]) -> None:
         action = decision["action"]
@@ -382,9 +493,11 @@ class ExecutionEngine:
             # Validate bracket shape at placement time, before a later trigger
             # could make an invalid order state actionable.
             self._bracket_scales(decision)
+            self._pyramid_spec(decision)
             self.armed = {
                 "trigger": trigger, "stop": stop, "placed_i": int(bar["i"]),
                 "bracket": decision.get("bracket"),
+                "pyramid": decision.get("pyramid"),
             }
             return
         if action == "ENTER_CLOSE":
@@ -392,14 +505,18 @@ class ExecutionEngine:
                 raise ValueError("ENTER_CLOSE requires a flat position")
             self.stop = float(decision["stop"])
             price = self._buy_price(float(bar["c"]))
-            qty = self._entry_qty(price, self.stop, capacity, add=False)
+            pyramid = self._pyramid_spec(decision)
+            qty = self._starter_qty(self._entry_qty(price, self.stop, capacity, add=False), pyramid)
             filled = self._append_fill(
                 bar, action="ENTER", buy=True, shares=qty, price=price,
                 reason="close-confirmed entry",
             )
             self._attach_bracket(decision, fill=filled, placed_i=int(bar["i"]))
+            self._start_pyramid(decision, filled)
             return
         if action == "ADD_CLOSE":
+            if self.pyramid is not None:
+                raise ValueError("ADD_CLOSE is incompatible with an active engine pyramid")
             if self.shares <= 0:
                 raise ValueError("ADD_CLOSE requires an open position")
             new_stop = float(decision["stop"])
@@ -435,6 +552,7 @@ class ExecutionEngine:
                 bar, action="EXIT", buy=False, shares=min(self.shares, capacity), price=price,
                 reason="close-confirmed exit",
             )
+            self.pyramid = None
             return
         raise ValueError(f"unsupported deterministic action {action!r}")
 
@@ -482,6 +600,7 @@ class ExecutionEngine:
                 before = len(self.actions)
                 self._apply_decision(bar, decision)
                 self._timeline_row(bar, decision, before)
+            self._queue_pyramid_add(bar)
 
         forced = False
         if force_close and self.shares > 0 and self._last_bar is not None:
@@ -552,4 +671,5 @@ class ExecutionEngine:
             "fees": round(self.fees, 2),
             "armed_entry": self.armed,
             "scale_orders": self.targets,
+            "pyramid": self.pyramid,
         }

@@ -386,6 +386,16 @@ header {
   cursor: pointer;
 }
 
+/* Rule-set lifecycle row tint (base = green, candidate = blue, rejected = red).
+   Applied to <td> so it paints reliably under border-collapse; hover deepens the
+   same hue since a td background would otherwise hide the generic tr:hover. */
+.session-table tr.vrow-base td      { background: rgba(38, 166, 154, 0.12); }
+.session-table tr.vrow-candidate td { background: rgba(91, 157, 255, 0.12); }
+.session-table tr.vrow-rejected td  { background: rgba(239, 83, 80, 0.12); }
+.session-table tr.vrow-base:hover td      { background: rgba(38, 166, 154, 0.22); }
+.session-table tr.vrow-candidate:hover td { background: rgba(91, 157, 255, 0.22); }
+.session-table tr.vrow-rejected:hover td  { background: rgba(239, 83, 80, 0.22); }
+
 /* Sidebar title button */
 .sidebar-title-btn {
   font: inherit; font-weight: 600; font-size: 12px;

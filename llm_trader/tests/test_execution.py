@@ -140,6 +140,50 @@ def test_armed_entry_bracket_waits_until_the_bar_after_its_fill():
     ]
 
 
+def test_engine_pyramid_uses_starter_then_adds_only_after_strength_with_risk_cap():
+    engine = ExecutionEngine(_config())
+    bars = [
+        _bar(0, 10, 10.2, 9.8, 10),
+        _bar(1, 10, 10.6, 9.9, 10.5),
+        _bar(2, 11, 11.4, 10.8, 11.2),
+        _bar(3, 12, 12.4, 11.8, 12.2),
+    ]
+    bars[2].update({"new_high": True, "rvol_bar": None, "macd_hist": 0.1})
+    actions, _, _ = engine.run(
+        bars,
+        [{
+            "i": 0, "time": "10:20", "action": "ENTER_CLOSE", "stop": 9.0,
+            "pyramid": {"starter_fraction": 0.333, "max_adds": 2},
+        }],
+        force_close=False,
+    )
+    assert [(a["action"], a["i"], a["shares"], a["price"]) for a in actions] == [
+        ("ENTER", 0, 33, 10.0), ("ADD", 2, 33, 11.0), ("ADD", 3, 33, 12.0),
+    ]
+    assert engine.shares == 99
+    assert engine.stop == 9.99
+    assert engine._open_risk() <= 100.0
+    assert engine.snapshot(3)["pyramid"]["stage"] == 2
+
+
+def test_engine_pyramid_cancels_a_queued_add_that_would_average_down():
+    engine = ExecutionEngine(_config())
+    actions, _, _ = engine.run(
+        [
+            _bar(0, 10, 10.2, 9.8, 10),
+            _bar(1, 10, 10.6, 9.9, 10.5),  # queues add #1
+            _bar(2, 9.5, 10.0, 9.2, 9.8),  # next open is below average entry
+        ],
+        [{
+            "i": 0, "time": "10:20", "action": "ENTER_CLOSE", "stop": 9.0,
+            "pyramid": {"starter_fraction": 0.333, "max_adds": 2},
+        }],
+        force_close=False,
+    )
+    assert [(a["action"], a["shares"]) for a in actions] == [("ENTER", 33)]
+    assert engine.snapshot(2)["pyramid"]["queued"] is None
+
+
 def test_sizing_enforces_buying_power_and_volume_cap():
     engine = ExecutionEngine(_config(buying_power=50.0, max_participation_rate=0.2))
     actions, _, pnl = engine.run(
@@ -219,6 +263,24 @@ def test_recorder_validates_entry_bracket_shape(tmp_path):
         })
 
 
+def test_recorder_validates_entry_pyramid_shape(tmp_path):
+    sdir = recorder.init("TEST", "2025-03-10", root=tmp_path, now=datetime(2026, 7, 10, 10, 0, 0))
+    session_path = sdir / "session.json"
+    session = json.loads(session_path.read_text())
+    session["config"]["execution_model"] = EXECUTION_MODEL
+    session["skill"]["entry_pyramid_required"] = "true"
+    session_path.write_text(json.dumps(session))
+    _stream(sdir / "stream.jsonl")
+
+    with pytest.raises(ValueError, match="requires an entry pyramid"):
+        recorder.log(sdir, {
+            "i": 0, "time": "10:20", "action": "ENTER_CLOSE", "stop": 9.0,
+        })
+    with pytest.raises(ValueError, match="max_adds"):
+        recorder.log(sdir, {
+            "i": 0, "time": "10:20", "action": "ENTER_CLOSE", "stop": 9.0,
+            "pyramid": {"starter_fraction": 0.333, "max_adds": 3},
+        })
 def test_recorder_replays_a_valid_entry_bracket(tmp_path):
     sdir = recorder.init("TEST", "2025-03-10", root=tmp_path, now=datetime(2026, 7, 10, 10, 0, 0))
     session_path = sdir / "session.json"
@@ -257,7 +319,8 @@ def test_init_freezes_deterministic_execution_assumptions(tmp_path):
     skill = tmp_path / "candidate.md"
     skill.write_text(
         "---\nname: trade-simulator\nversion: 3.0.0\n"
-        "execution_model: deterministic_ohlc_v1\nentry_bracket_required: true\n---\n# candidate\n"
+        "execution_model: deterministic_ohlc_v1\nentry_bracket_required: true\n"
+        "entry_pyramid_required: true\n---\n# candidate\n"
     )
     runner_contract = {"harness_version": "test", "prompt_hash": "sha256:p"}
     sdir = recorder.init("TEST", "2025-03-10", root=tmp_path, skill=skill,
@@ -273,6 +336,7 @@ def test_init_freezes_deterministic_execution_assumptions(tmp_path):
     session = json.loads((sdir / "session.json").read_text())
     assert session["runner_contract"]["prompt_hash"] == "sha256:p"
     assert session["skill"]["entry_bracket_required"] == "true"
+    assert session["skill"]["entry_pyramid_required"] == "true"
 
 
 def _attribution_stream(path):

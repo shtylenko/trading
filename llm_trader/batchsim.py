@@ -199,6 +199,7 @@ RUNNER_CONTRACT_VERSION = "isolated_one_tick_v1"
 # forever: invisible to stats/audit/resume, indistinguishable from a session that
 # is still legitimately in flight. Stamp it instead, same pattern as timeout/ooc.
 _FINALIZE_ERROR_LABEL = "finalize failed — inconsistent decision log (see finalize_error)"
+_NO_DECISION_LOG_LABEL = "agent produced no decision intents"
 
 
 def _text_out_of_credits(text: Optional[str]) -> bool:
@@ -509,7 +510,8 @@ def _completed_counts(tag: str) -> dict[tuple, int]:
         s = recorder._load_json(d / "session.json", {}) or {}
         if (s.get("status") == "complete"
                 and not s.get("void") and not s.get("out_of_credits")
-                and not s.get("timed_out")):
+                and not s.get("timed_out") and not s.get("finalize_error")
+                and not s.get("no_decision_log")):
             counts[(s.get("ticker"), s.get("historical_date"))] += 1
     return counts
 
@@ -604,6 +606,9 @@ def _run_one(work: dict) -> dict:
         try:
             gateway.publish()
             recorder.finalize(sdir)
+            if _has_no_decision_log(sdir):
+                _stamp_no_decision_log(sdir)
+                status = "no-decisions"
         except Exception as e:  # noqa: BLE001 — never let finalize sink the batch
             # finalize() raised BEFORE writing session.json, so status is still
             # whatever it was pre-run ("running") — stamp it directly so the leaf
@@ -1364,6 +1369,28 @@ def _stamp_finalize_error(sdir: Path, message: str) -> None:
     atomic_write_json(sj, s, indent=2)
 
 
+def _has_no_decision_log(sdir: Path) -> bool:
+    """True when an agent finalized a session without one logged intent.
+
+    Every valid strategy outcome, including a deliberate stand-down, requires at
+    least one intent record. An empty log means the agent/harness failed before it
+    made a trading decision; it must never be scored as a 0R stand-down.
+    """
+    try:
+        return not any(line.strip() for line in (Path(sdir) / "decisions.jsonl").read_text().splitlines())
+    except OSError:
+        return True
+
+
+def _stamp_no_decision_log(sdir: Path) -> None:
+    """Mark an empty-intent session as a re-runnable infrastructure failure."""
+    sj = Path(sdir) / "session.json"
+    s = recorder._load_json(sj, {}) or {}
+    s["no_decision_log"] = _NO_DECISION_LOG_LABEL
+    s.pop("void", None)
+    atomic_write_json(sj, s, indent=2)
+
+
 def _agent_log_for(tag: str, session_name: Optional[str]) -> Optional[Path]:
     """The captured agent log for one run, if present (BATCH_LOGS/<tag>/<name>.log)."""
     if not session_name:
@@ -1412,6 +1439,9 @@ def audit(tag: str) -> int:
                 recorder.finalize(d)
             except Exception as e:  # noqa: BLE001
                 _stamp_finalize_error(d, str(e))
+        session = recorder._load_json(d / "session.json", {}) or {}
+        if session.get("status") == "complete" and _has_no_decision_log(d):
+            _stamp_no_decision_log(d)
 
     sessions = [d for d in all_dirs
                 if (recorder._load_json(d / "session.json", {}) or {}).get("status") == "complete"]
@@ -1426,6 +1456,8 @@ def audit(tag: str) -> int:
     voided = 0
     for d in sessions:
         session = recorder._load_json(d / "session.json", {}) or {}
+        if session.get("no_decision_log"):
+            continue  # infra failure; excludes from stats and is re-run by --resume
         if session.get("timed_out") or d.name in timeout_sids:
             # A timeout infra failure (excluded from stats, re-run by --resume). Ensure
             # it's stamped (backfills old runs finalized as a bare "complete") and never
@@ -1489,6 +1521,7 @@ def _leaves_by_key(tag: str) -> dict:
             "void": bool(s.get("void")), "ooc": bool(s.get("out_of_credits")),
             "timeout": bool(s.get("timed_out")),
             "finalize_error": bool(s.get("finalize_error")),
+            "no_decision_log": bool(s.get("no_decision_log")),
             "status": s.get("status"), "ts": s.get("real_run_ts") or "",
             "traded": bool(p.get("traded")), "r": p.get("r_multiple"),
             "pnl": p.get("realized_pnl"), "win": bool(p.get("win")),
@@ -1509,7 +1542,8 @@ def _leaves_by_key(tag: str) -> dict:
         }
         def clean(r):
             return (r["status"] == "complete" and not r["void"] and not r["ooc"]
-                    and not r["timeout"] and not r["finalize_error"])
+                    and not r["timeout"] and not r["finalize_error"]
+                    and not r["no_decision_log"])
         prev = best.get(key)
         if (prev is None or (clean(rec) and not clean(prev))
                 or (clean(rec) == clean(prev) and rec["ts"] > prev["ts"])):
@@ -1521,6 +1555,7 @@ def _effective_r(rec: dict) -> Optional[float]:
     """Deployment R for one leaf: traded → realized R; stood-down → 0R; void/ooc/timeout
     → None (excluded from the pair). None if a completed traded leaf is missing its R."""
     if (rec["void"] or rec["ooc"] or rec["timeout"] or rec["finalize_error"]
+            or rec.get("no_decision_log", False)
             or rec["status"] != "complete"):
         return None
     if not rec["traded"]:
@@ -1659,6 +1694,7 @@ def compare(tag_a: str, tag_b: str) -> dict:
             "ooc": sum(1 for r in vals if r["ooc"]),
             "timeout": sum(1 for r in vals if r["timeout"]),
             "finalize_error": sum(1 for r in vals if r["finalize_error"]),
+            "no_decision_log": sum(1 for r in vals if r["no_decision_log"]),
             "stood": sum(1 for r in vals if _effective_r(r) == 0.0 and not r["traded"]),
             "avg_loser": (sum(losers) / len(losers)) if losers else None,
         }
@@ -1677,7 +1713,7 @@ def compare(tag_a: str, tag_b: str) -> dict:
 def _print_compare(r: dict) -> None:
     a, b = r["stats_a"], r["stats_b"]
     print(f"=== compare  A(baseline)={r['tag_a']}  vs  B(candidate)={r['tag_b']} ===")
-    print(f"paired on {r['n_pairs']} shared setups (effective R; stood-down=0R; void/ooc/timeout/fin-err excluded)\n")
+    print(f"paired on {r['n_pairs']} shared setups (effective R; stood-down=0R; invalid runs excluded)\n")
     print(f"  mean ΔR (B−A) : {r['mean_dR']:+.3f}")
     print(f"  median ΔR     : {r['median_dR']:+.3f}")
     print(f"  better/worse/≈: {r['better']} / {r['worse']} / {r['equal']}")
@@ -1688,9 +1724,9 @@ def _print_compare(r: dict) -> None:
     print(f"\n  guardrails            A={r['tag_a']:<28} B={r['tag_b']}")
     al_a = f"${a['avg_loser']:.0f}" if a['avg_loser'] is not None else "—"
     al_b = f"${b['avg_loser']:.0f}" if b['avg_loser'] is not None else "—"
-    kv_a = f"{a['n_keys']}/{a['void']}/{a['ooc']}/{a['timeout']}/{a['finalize_error']}"
-    kv_b = f"{b['n_keys']}/{b['void']}/{b['ooc']}/{b['timeout']}/{b['finalize_error']}"
-    print(f"    keys/void/ooc/t.out/fin-err {kv_a:<28} {kv_b}")
+    kv_a = f"{a['n_keys']}/{a['void']}/{a['ooc']}/{a['timeout']}/{a['finalize_error']}/{a['no_decision_log']}"
+    kv_b = f"{b['n_keys']}/{b['void']}/{b['ooc']}/{b['timeout']}/{b['finalize_error']}/{b['no_decision_log']}"
+    print(f"    keys/void/ooc/t.out/fin-err/no-intent {kv_a:<20} {kv_b}")
     print(f"    stood-down          {a['stood']:<28} {b['stood']}")
     print(f"    avg loser           {al_a:<28} {al_b}")
 
@@ -1698,7 +1734,7 @@ def _print_compare(r: dict) -> None:
     sig = r["sign_p"] is not None and r["sign_p"] < 0.05
     broad = r["median_dR"] >= 0 and r["top3_share"] <= 0.5
     guard_ok = (b["void"] <= a["void"] + 2 and b["ooc"] == 0 and b["timeout"] == 0
-                and b["finalize_error"] == 0)
+                and b["finalize_error"] == 0 and b["no_decision_log"] == 0)
     if r["mean_dR"] > 0 and sig and broad and guard_ok:
         verdict = "✅ ACCEPT — B is broadly better and clears the gate."
     elif r["mean_dR"] > 0 and (sig or r["median_dR"] > 0):
@@ -1731,6 +1767,7 @@ def _batch_stats(leaves: dict) -> dict:
         "ooc": sum(1 for r in vals if r["ooc"]),
         "timeout": sum(1 for r in vals if r["timeout"]),
         "finalize_error": sum(1 for r in vals if r["finalize_error"]),
+        "no_decision_log": sum(1 for r in vals if r["no_decision_log"]),
         "avg_loser": round(sum(losers) / len(losers), 2) if losers else None,
     }
 
@@ -1845,7 +1882,7 @@ def _print_repeat_panel(panel: dict) -> None:
     for run in panel["runs"]:
         print(f"  {run['tag']}: P&L ${run['pnl']:.2f}, effR {run['effective_r']:.3f}, "
               f"trades {run['trades']}, stood down {run['stood']}, "
-              f"void/ooc/timeout/error {run['void']}/{run['ooc']}/{run['timeout']}/{run['finalize_error']}")
+              f"void/ooc/timeout/error/no-intent {run['void']}/{run['ooc']}/{run['timeout']}/{run['finalize_error']}/{run['no_decision_log']}")
     print(f"  P&L range/mean: ${panel['pnl']['min']:.2f} to ${panel['pnl']['max']:.2f} "
           f"(mean ${panel['pnl']['mean']:.2f})")
     print(f"  effective-R range/mean: {panel['effective_r']['min']:.3f} to "
@@ -1950,6 +1987,8 @@ def diagnostics(tag: str) -> dict:
     chosen: dict[tuple, tuple[Path, dict, dict]] = {}
     for sdir in _sessions_for_batch(tag):
         session = recorder._load_json(sdir / "session.json", {}) or {}
+        if recorder._is_infra_fail(session) or session.get("void"):
+            continue
         key = (session.get("ticker"), session.get("historical_date"))
         if key == (None, None):
             continue

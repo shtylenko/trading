@@ -9,6 +9,27 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
 
 ---
 
+### 3.3.0 — engine-managed starter/add pyramid  ⏳ CANDIDATE — NOT YET VALIDATED
+- **Why:** diagnostics across the three 3.0.0 DeepSeek control runs found only two
+  filled adds total. The written pyramid rule is effectively absent because an
+  agent has only one management intent per bar and stop/scale actions consume it.
+- **Change:** every entry carries a mandatory plan: about one-third starter size,
+  then at most two equal-share engine adds. Add #1 is queued after a green close
+  above actual average entry; add #2 after a green new-high continuation with
+  supportive MACD and volume. An add fills at the next open only while above average
+  entry. After every add the engine raises the stop as necessary to keep the whole
+  position within the original $40 open-risk cap. Stops, scales, and discretionary
+  exits cancel the plan; the agent cannot submit a competing `ADD_CLOSE`.
+- **Type:** canon-grounded operationalization of the three-step pyramid; a
+  deterministic execution/position-plan change, not a fill-model relaxation.
+- **Test:** unit coverage covers starter sizing, delayed next-open adds, no averaging
+  down, stop re-anchoring under the risk cap, and required intent validation.
+  **Next:** run three DeepSeek candidate batches and compare their panel with the
+  three-run 3.0.0 control through `compare-repeats`.
+- **Decision:** ⏳ HOLD — 3.0.0 remains the active baseline.
+
+---
+
 ### 3.2.0 — $3 minimum entry price  ⏳ CANDIDATE — NOT YET VALIDATED
 - **Why:** the v3 dev baseline's 23 below-$3 trades produced −$45.49 / effective
   R −0.048. The $3–$5 and $5–$10 bands were positive. Low-priced shares face a

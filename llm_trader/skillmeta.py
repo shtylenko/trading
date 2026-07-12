@@ -115,6 +115,7 @@ def read_skill_meta(path: str | Path) -> dict:
         # immutable session stamp so recorder validation does not infer rules
         # from a mutable "current version" pointer.
         "entry_bracket_required": fm.get("entry_bracket_required"),
+        "entry_pyramid_required": fm.get("entry_pyramid_required"),
         "content_hash": f"sha256:{digest}",
         # store a repo-relative-ish path for readability, falling back to name
         "path": _rel_path(p),

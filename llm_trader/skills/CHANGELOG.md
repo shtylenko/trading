@@ -9,6 +9,29 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
 
 ---
 
+### 4.0.0 — from-open, completed-five-minute entry  ⏳ CANDIDATE — NOT YET VALIDATED
+- **Why:** v3 supplied the agent with the scanner's historical five-minute trigger
+  time, level, final-day RVOL, and retrospective reason, then began replay at that
+  trigger. That is not how a trader experiences a scanner-selected name.
+- **Change:** the scanner still selects the ticker/date (its point-in-time selection
+  work remains deferred), but the trader starts at 09:30 ET. The visible meta stream
+  hides scanner `entry_time`, `entry_px`, `anchor_px`, final-day `rvol`, and reason.
+  It exposes one sequential minute at a time and an authoritative completed
+  clock-aligned five-minute candle at `:04/:09/...`. The only entry is a completed
+  five-minute break of the preceding three completed candles, with green upper-third
+  close, above-VWAP, 1.5× five-minute volume, and non-negative MACD.
+- **Guardrails:** recorder rejects an entry that is not on a completed five-minute
+  candle; 4.0 forbids armed entries, adds, and re-entries. A flat agent must observe
+  through 11:00 ET before it may stop.
+- **Known limitation:** this removes trigger knowledge from the trading session but
+  does **not** alter scanner selection or solve its whole-day-volume leakage. That
+  point-in-time scan/replay parity work remains intentionally deferred.
+- **Test:** establish a new 4.0.0 repeated control panel. Do not compare its raw P&L
+  to 3.0.0: the information/timing contract changed, so this is a major rebaseline.
+- **Decision:** ⏳ HOLD — 3.0.0 remains the active baseline.
+
+---
+
 ### 3.3.0 — engine-managed starter/add pyramid  ⏳ CANDIDATE — NOT YET VALIDATED
 - **Why:** diagnostics across the three 3.0.0 DeepSeek control runs found only two
   filled adds total. The written pyramid rule is effectively absent because an

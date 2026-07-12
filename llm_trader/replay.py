@@ -237,6 +237,8 @@ def replay(
     setup: Setup,
     *,
     from_open: bool = False,
+    neutral_meta: bool = False,
+    five_minute_context: bool = False,
     delay: float = 0.0,
     force: bool = False,
     fmt: str = "human",
@@ -250,6 +252,9 @@ def replay(
     every line is also appended there (so a backgrounded run can be polled).
     Returns the number of bars streamed. Indicators are computed over the full
     RTH session so they match a chart; only bars from the start point are shown.
+    ``neutral_meta`` hides the scanner's historical trigger fields. When
+    ``five_minute_context`` is set, each fifth revealed minute carries one completed,
+    clock-aligned 5-minute candle built only from revealed minutes.
     """
     if fmt == "jsonl":
         ext_df = fetch_minute_bars(setup.ticker, setup.day, force=force, session="extended")
@@ -283,7 +288,10 @@ def replay(
         anchor = setup.entry_px if setup.entry_px else float(df["open"].iloc[0])
 
         if fmt == "jsonl":
-            return _stream_jsonl(setup, df, start_t, anchor, streams, delay, force=force, ext_df=ext_df)
+            return _stream_jsonl(
+                setup, df, start_t, anchor, streams, delay, force=force, ext_df=ext_df,
+                neutral_meta=neutral_meta, five_minute_context=five_minute_context,
+            )
         return _stream_human(setup, df, start_t, anchor, streams, delay)
     finally:
         if fh is not None:
@@ -352,21 +360,18 @@ def _stream_human(setup, df, start_t, anchor, streams, delay) -> int:
     return n
 
 
-def _stream_jsonl(setup, df, start_t, anchor, streams, delay, force: bool = False, ext_df: Optional[pd.DataFrame] = None) -> int:
+def _stream_jsonl(
+    setup, df, start_t, anchor, streams, delay, force: bool = False,
+    ext_df: Optional[pd.DataFrame] = None, *, neutral_meta: bool = False,
+    five_minute_context: bool = False,
+) -> int:
     ctx = _context(setup.ticker, setup.day, force=force, ext_df=ext_df)
     meta = {
         "type": "meta",
         "ticker": setup.ticker,
         "date": setup.day.isoformat(),
-        "entry_time": setup.time_et,
-        "entry_px": setup.entry_px,
         "gap_pct": setup.gap_pct,
-        "rvol": setup.rvol,
         "float_shares": setup.float_shares,
-        "anchor_px": round(anchor, 4) if anchor else None,
-        "anchor_note": ("anchor_px is the recorded 5-MIN breakout level, not your "
-                        "fill — enter on the 1-min criteria and track P&L from your "
-                        "actual 1-min entry; vs_anchor_pct below is vs anchor_px."),
         "prior_close": ctx["prior_close"],
         "prior_high": ctx["prior_high"],
         "prior_low": ctx["prior_low"],
@@ -374,13 +379,31 @@ def _stream_jsonl(setup, df, start_t, anchor, streams, delay, force: bool = Fals
         "pm_low": ctx["pm_low"],
         "context_warnings": ctx["context_warnings"],
         "session_end": RTH_CLOSE.strftime("%H:%M"),
-        "reason": setup.reason,
     }
+    if neutral_meta:
+        # The scanner chose the ticker/date, but the trader must discover its own
+        # entry from the live tape. Do not reveal the scanner's completed-bar trigger,
+        # its all-day RVOL, or its retrospective explanation.
+        meta["session_start"] = RTH_OPEN.strftime("%H:%M")
+        meta["scanner_trigger_hidden"] = True
+    else:
+        meta.update({
+            "entry_time": setup.time_et,
+            "entry_px": setup.entry_px,
+            "rvol": setup.rvol,
+            "anchor_px": round(anchor, 4) if anchor else None,
+            "anchor_note": ("anchor_px is the recorded 5-MIN breakout level, not your "
+                            "fill — enter on the 1-min criteria and track P&L from your "
+                            "actual 1-min entry; vs_anchor_pct below is vs anchor_px."),
+            "reason": setup.reason,
+        })
     _emit(json.dumps(meta), streams)
 
     n = 0
     day_high = float("-inf")
     entry_idx = None
+    active5: Optional[dict] = None
+    completed5: list[dict] = []
     for ts, row in df.iterrows():
         t = ts.time()
         if t < start_t or t >= RTH_CLOSE:
@@ -391,10 +414,42 @@ def _stream_jsonl(setup, df, start_t, anchor, streams, delay, force: bool = Fals
         is_entry = setup.entry_px is not None and ts.strftime("%H:%M") == setup.time_et
         if is_entry:
             entry_idx = n
+        bar5 = None
+        if five_minute_context:
+            bucket = ts.replace(minute=(ts.minute // 5) * 5, second=0, microsecond=0)
+            if active5 is None or active5["bucket"] != bucket:
+                active5 = {
+                    "bucket": bucket,
+                    "time": bucket.strftime("%H:%M"),
+                    "o": float(row["open"]), "h": hi, "l": float(row["low"]),
+                    "c": close, "v": int(row["volume"]),
+                }
+            else:
+                active5["h"] = max(active5["h"], hi)
+                active5["l"] = min(active5["l"], float(row["low"]))
+                active5["c"] = close
+                active5["v"] += int(row["volume"])
+            # The 5-minute candle is actionable only after minute :04/:09/... closes.
+            if ts.minute % 5 == 4:
+                prior = completed5[-3:]
+                prior_high = max((b["h"] for b in prior), default=None)
+                prior_low = min((b["l"] for b in prior), default=None)
+                prior_avg_volume = (sum(b["v"] for b in prior) / len(prior)) if prior else None
+                bar5 = {
+                    "time": active5["time"],
+                    "o": round(active5["o"], 4), "h": round(active5["h"], 4),
+                    "l": round(active5["l"], 4), "c": round(active5["c"], 4),
+                    "v": active5["v"],
+                    "prior_3_high": round(prior_high, 4) if prior_high is not None else None,
+                    "prior_3_low": round(prior_low, 4) if prior_low is not None else None,
+                    "prior_3_avg_volume": round(prior_avg_volume, 2) if prior_avg_volume else None,
+                    "volume_ratio": round(active5["v"] / prior_avg_volume, 2)
+                    if prior_avg_volume else None,
+                }
+                completed5.append(dict(active5))
         tick = {
             "type": "tick",
             "i": n,
-            "bars_since_entry": (n - entry_idx) if entry_idx is not None else None,
             "time": ts.strftime("%H:%M"),
             "o": round(float(row["open"]), 4),
             "h": round(hi, 4),
@@ -412,9 +467,18 @@ def _stream_jsonl(setup, df, start_t, anchor, streams, delay, force: bool = Fals
             "new_high": bool(row["new_high"]),
             "above_vwap": bool(close >= float(row["vwap"])) if pd.notna(row["vwap"]) else None,
             "rvol_bar": round(float(row["rvol_bar"]), 2) if pd.notna(row["rvol_bar"]) else None,
-            "vs_anchor_pct": round((close - anchor) / anchor * 100.0, 3) if anchor else None,
-            "is_entry_bar": is_entry,
         }
+        if neutral_meta:
+            # No scanner trigger timing or price leaks into the live decision stream.
+            pass
+        else:
+            tick.update({
+                "bars_since_entry": (n - entry_idx) if entry_idx is not None else None,
+                "vs_anchor_pct": round((close - anchor) / anchor * 100.0, 3) if anchor else None,
+                "is_entry_bar": is_entry,
+            })
+        if five_minute_context:
+            tick["bar5_complete"] = bar5
         _emit(json.dumps(tick), streams)
         n += 1
         if delay > 0:
@@ -426,9 +490,12 @@ def _stream_jsonl(setup, df, start_t, anchor, streams, delay, force: bool = Fals
         "bars": n,
         "session_high": round(day_high, 4) if day_high != float("-inf") else None,
         "close": round(last, 4),
-        "run_vs_anchor_pct": round((day_high - anchor) / anchor * 100.0, 3) if anchor else None,
-        "close_vs_anchor_pct": round((last - anchor) / anchor * 100.0, 3) if anchor else None,
     }
+    if not neutral_meta:
+        end.update({
+            "run_vs_anchor_pct": round((day_high - anchor) / anchor * 100.0, 3) if anchor else None,
+            "close_vs_anchor_pct": round((last - anchor) / anchor * 100.0, 3) if anchor else None,
+        })
     _emit(json.dumps(end), streams)
     return n
 
@@ -459,6 +526,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, help="seed the random pick (reproducible)")
     p.add_argument("--from-open", action="store_true",
                    help="stream from 09:30 instead of from the entry time")
+    p.add_argument("--neutral-meta", action="store_true",
+                   help="hide the scanner's historical trigger/RVOL/reason from JSONL output")
+    p.add_argument("--five-minute-context", action="store_true",
+                   help="include one completed 5-minute candle after each fifth minute")
     p.add_argument("--delay", type=float, default=0.0,
                    help="seconds to pause between bars (stream ~live; default 0). "
                         "Use 60 for one tick per wall-clock minute.")
@@ -483,6 +554,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     replay(
         setup,
         from_open=args.from_open,
+        neutral_meta=args.neutral_meta,
+        five_minute_context=args.five_minute_context,
         delay=args.delay,
         force=args.force,
         fmt=args.format,

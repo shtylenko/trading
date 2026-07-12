@@ -383,6 +383,8 @@ def start_isolated(
     date: Optional[str] = None,
     after: str = "09:30",
     from_open: bool = False,
+    neutral_meta: bool = False,
+    five_minute_context: bool = False,
     db: str | Path = DEFAULT_DB,
     at_time: Optional[str] = None,
 ) -> IsolatedStreamGateway:
@@ -402,7 +404,8 @@ def start_isolated(
         db, ticker=ticker, day=day, after=dtime(h, m), seed=seed, at_time=at_time
     )
     captured = io.StringIO()
-    replay.replay(setup, from_open=from_open, delay=0, force=False,
+    replay.replay(setup, from_open=from_open, neutral_meta=neutral_meta,
+                  five_minute_context=five_minute_context, delay=0, force=False,
                   fmt="jsonl", out=captured)
     records = []
     for line in captured.getvalue().splitlines():
@@ -423,6 +426,8 @@ def start(
     date: Optional[str] = None,
     after: str = "09:30",
     from_open: bool = False,
+    neutral_meta: bool = False,
+    five_minute_context: bool = False,
     db: str | Path = DEFAULT_DB,
     force: bool = False,
     at_time: Optional[str] = None,
@@ -464,7 +469,8 @@ def start(
                               seed=seed, at_time=at_time)
 
     # generate the whole day, instantly, into the sealed (private) file
-    replay.replay(setup, from_open=from_open, delay=0, force=force,
+    replay.replay(setup, from_open=from_open, neutral_meta=neutral_meta,
+                  five_minute_context=five_minute_context, delay=0, force=force,
                   fmt="jsonl", out=io.StringIO(), out_file=str(sealed))
     meta, ticks, end = _parse_sealed(sealed)
     if meta is None:
@@ -562,6 +568,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="pin the EXACT setup at this time_et (HH:MM); "
                     "disambiguates same-day setups for reproducible backtests")
     ps.add_argument("--from-open", action="store_true")
+    ps.add_argument("--neutral-meta", action="store_true",
+                    help="hide scanner trigger/time/RVOL/reason from the visible stream")
+    ps.add_argument("--five-minute-context", action="store_true",
+                    help="add a completed 5-minute candle to each fifth revealed tick")
     ps.add_argument("--db", default=str(DEFAULT_DB))
     ps.add_argument("--force", action="store_true")
 
@@ -578,7 +588,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.cmd == "start":
         return start(args.session, seed=args.seed, ticker=args.ticker, date=args.date,
                      after=args.after, from_open=args.from_open, db=args.db,
-                     force=args.force, at_time=args.at_time)
+                     force=args.force, at_time=args.at_time,
+                     neutral_meta=args.neutral_meta,
+                     five_minute_context=args.five_minute_context)
     if args.cmd == "next":
         return next_(args.session)
     if args.cmd == "status":

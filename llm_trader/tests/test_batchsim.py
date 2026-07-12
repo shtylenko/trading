@@ -679,6 +679,15 @@ def test_prompt_uses_resolve_and_intents_for_deterministic_skill():
     assert '"fill_px":null' not in p
 
 
+def test_from_open_prompt_hides_scanner_time_and_prevents_flat_early_stop():
+    p = batchsim._prompt("4.0.0", "SKILL-TEXT", "tag", "SESSION-ID",
+                         "BQ", "2026-01-01", "10:35", "/tmp/session",
+                         execution_model="deterministic_ohlc_v1", session_from_open=True)
+    assert "ticker=BQ  date=2026-01-01" in p
+    assert "time=10:35" not in p
+    assert "keep revealing bars through 11:00 ET" in p
+
+
 # --- compare: the paired promotion gate ---
 
 def test_sign_test_p_two_sided():

@@ -4,6 +4,16 @@ Source: three external reviews in `peer_reviews/2026-07-08-skill/`
 (`antigravity_feedback.md`, `codex_feedback.md`, `grok_feedback.md`) of the
 skill-improvement methodology. This backlog is the implementation plan.
 
+## V4 — from-open five-minute rebaseline
+
+- [x] Build 4.0.0: neutral scanner-selected session contract from 09:30, completed
+  5-minute feed, objective five-minute first-entry rule, and deterministic execution.
+- [ ] Run three 4.0.0 DeepSeek control batches on the fixed 100-set. This establishes
+  the new baseline; do not compare raw results to v3 because trigger information is
+  intentionally removed.
+- [ ] Later: replace the scanner's whole-day-volume selection with a point-in-time
+  scanner and enforce scan/replay parity. Explicitly deferred by the user.
+
 ## Decisions (locked)
 
 1. **Single canon doc = `library/ross_cameron/all_content_structured.md`.**

@@ -357,7 +357,10 @@ def init(
                       "content_hash": content_hash, "path": str(skill_path),
                       "execution_model": m.get("execution_model"),
                       "entry_bracket_required": m.get("entry_bracket_required"),
-                      "entry_pyramid_required": m.get("entry_pyramid_required")}
+                      "entry_pyramid_required": m.get("entry_pyramid_required"),
+                      "session_from_open": m.get("session_from_open"),
+                      "five_minute_context": m.get("five_minute_context"),
+                      "completed_five_minute_entry_required": m.get("completed_five_minute_entry_required")}
     else:
         try:
             # A caller-supplied `skill` override (tests, ad-hoc runs) gets its own
@@ -621,6 +624,8 @@ def log(session_dir: str | Path, record: dict) -> None:
         require_entry_bracket = bracket_contract is True or str(bracket_contract).lower() == "true"
         pyramid_contract = session.get("skill", {}).get("entry_pyramid_required")
         require_entry_pyramid = pyramid_contract is True or str(pyramid_contract).lower() == "true"
+        bar5_contract = session.get("skill", {}).get("completed_five_minute_entry_required")
+        require_completed_bar5_entry = bar5_contract is True or str(bar5_contract).lower() == "true"
         _validate_decision_record(
             record, execution_model,
             require_entry_bracket=require_entry_bracket,
@@ -640,6 +645,16 @@ def log(session_dir: str | Path, record: dict) -> None:
                 raise ValueError(
                     f"decision time {record['time']} does not match revealed tick time {tick.get('time')}"
                 )
+            if require_completed_bar5_entry:
+                if record.get("action") in {"ARM_BUY_STOP", "ADD_CLOSE"}:
+                    raise ValueError("4.0 entry contract permits only completed-5-minute ENTER_CLOSE entries")
+                if record.get("action") == "ENTER_CLOSE":
+                    if not tick.get("bar5_complete"):
+                        raise ValueError("ENTER_CLOSE requires a completed 5-minute candle on this tick")
+                    prior_entries = [d for d in _read_jsonl(sdir / "decisions.jsonl")
+                                     if d.get("action") == "ENTER_CLOSE"]
+                    if prior_entries:
+                        raise ValueError("4.0 permits one first-entry attempt only; re-entry is disabled")
 
         i = record["i"]
         # Decisions are append-only in strictly increasing `i`, so the last written

@@ -231,7 +231,9 @@ function sessionHeadHtml(sortKey, sortDir) {
 function sessionRowHtml(s) {
   const type = s.type || "simulated";
   const isLive = type === "live";
-  const display = s.name && s.name !== s.id ? `${escapeHtml(s.name)} <span class="muted small">(${escapeHtml(s.id)})</span>` : escapeHtml(s.id);
+  const display = escapeHtml(s.name || s.id);
+  // Compact timestamp: YYYYMMDDHHMM (strip separators, drop seconds).
+  const lastAct = s.last_activity ? s.last_activity.replace(/\D/g, "").slice(0, 12) : "—";
   const pnlCls = s.pnl > 0 ? "pos" : s.pnl < 0 ? "neg" : "";
   const wr = s.win_rate != null ? `${s.win_rate}%` : "—";
   const rCls = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
@@ -267,7 +269,7 @@ function sessionRowHtml(s) {
       <td>${statusCell}</td>
       <td>${s.version ? escapeHtml(s.version) : "—"}</td>
       <td>${s.model ? escapeHtml(s.model) : "—"}</td>
-      <td>${escapeHtml(s.last_activity || "—")}</td>
+      <td>${lastAct}</td>
       <td class="num">${s.n_tickers}</td>
       <td class="num">${s.n_trades}</td>
       <td class="num">${s.n_fills != null ? s.n_fills : "—"}</td>

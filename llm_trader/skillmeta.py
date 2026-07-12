@@ -116,6 +116,12 @@ def read_skill_meta(path: str | Path) -> dict:
         # from a mutable "current version" pointer.
         "entry_bracket_required": fm.get("entry_bracket_required"),
         "entry_pyramid_required": fm.get("entry_pyramid_required"),
+        # Optional market-data contract. A major version can begin at the open,
+        # hide the scanner's already-known trigger, and receive completed 5-minute
+        # candles without changing historical replay contracts.
+        "session_from_open": fm.get("session_from_open"),
+        "five_minute_context": fm.get("five_minute_context"),
+        "completed_five_minute_entry_required": fm.get("completed_five_minute_entry_required"),
         "content_hash": f"sha256:{digest}",
         # store a repo-relative-ish path for readability, falling back to name
         "path": _rel_path(p),

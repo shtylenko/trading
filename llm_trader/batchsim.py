@@ -338,7 +338,8 @@ def _archived_skill(version: str) -> Path:
 
 def _prompt(version: str, skill_text: str, tag: str, session_id: str,
             ticker: str, date: str, time_et: Optional[str], sdir: str,
-            reentry: bool = True, execution_model: str = "reported_fill_v1") -> str:
+            reentry: bool = True, execution_model: str = "reported_fill_v1",
+            session_from_open: bool = False) -> str:
     """The per-setup task handed to a headless hermes agent.
 
     The harness has ALREADY created the session and holds the sealed day in a private
@@ -352,6 +353,10 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
     passed to the agent verbatim)."""
     # The early-stop rule (condition b) depends on whether §C re-entry is allowed this run.
     done_rule = (
+        "This is a from-open discovery run. While flat, keep revealing bars through 11:00 ET; "
+        "a valid completed 5-minute entry may still form. After 11:00 ET, if flat with no "
+        "pending order, stop."
+        if session_from_open else
         "and you have decided, per the skill's §C rules, NOT to take a re-entry (or have "
         "already used your one re-entry). Do not sit through the rest of the day 'just in "
         "case' — decide within a few bars of going flat, then stop."
@@ -379,6 +384,9 @@ python3 -m trading.llm_trader.recorder log --session "{sdir}" --record '{{"i":<i
 
 Repeat 1→2.'''
 
+    setup_line = (f"Setup to trade (scanner-selected ticker/date only): ticker={ticker}  date={date}"
+                  if session_from_open else
+                  f"Setup to trade (do NOT choose your own): ticker={ticker}  date={date}  time={time_et}")
     return f"""You are executing ONE trade simulation as an automated backtest.
 
 Your trading rules are provided IN FULL below, between the BEGIN/END markers — they
@@ -388,7 +396,7 @@ are already in your context. Follow them EXACTLY.
 {skill_text}
 ===== END TRADE_SIMULATOR SKILL =====
 
-Setup to trade (do NOT choose your own): ticker={ticker}  date={date}  time={time_et}
+{setup_line}
 Batch tag: {tag}   Session ID: {session_id}   pinned skill version: {version}
 
 === YOUR SESSION IS ALREADY SET UP — DO NOT CREATE OR START ONE ===
@@ -553,7 +561,10 @@ def _preseal(work: dict, skill_path: Path, version: str, session_id: str) -> tup
             root=staging_root,
         )
         gateway = step.start_isolated(
-            sdir, ticker=work["ticker"], date=work["date"], at_time=work.get("time_et")
+            sdir, ticker=work["ticker"], date=work["date"], at_time=work.get("time_et"),
+            from_open=work.get("session_from_open", False),
+            neutral_meta=work.get("session_from_open", False),
+            five_minute_context=work.get("five_minute_context", False),
         )
         return sdir, gateway
     except Exception:
@@ -856,6 +867,10 @@ def run(
             )
     skill_meta = skillmeta.read_skill_meta(skill_path)
     execution_model = skill_meta.get("execution_model") or "reported_fill_v1"
+    session_from_open = str(skill_meta.get("session_from_open")).lower() == "true"
+    five_minute_context = str(skill_meta.get("five_minute_context")).lower() == "true"
+    if five_minute_context and not session_from_open:
+        raise ValueError("five_minute_context requires session_from_open: true")
     skill_text = skill_path.read_text(encoding="utf-8")
     current_runner_contract = runner_contract()
     testset_hash = _file_hash(testset)
@@ -920,6 +935,8 @@ def run(
                 "runner_contract": current_runner_contract,
                 "model": model, "timeout": timeout, "retries": retries,
                 "reentry": reentry, "dry_run": dry_run,
+                "session_from_open": session_from_open,
+                "five_minute_context": five_minute_context,
             })
 
     print(f"batch {tag} (session {session_id}): version {version}, {len(setups)} setups × {repeats} "
@@ -933,7 +950,8 @@ def run(
         for w in work:
             w["prompt"] = _prompt(version, skill_text, tag, session_id, w["ticker"],
                                   w["date"], w.get("time_et"), sdir="<PRE-SEALED-SDIR>",
-                                  reentry=w["reentry"], execution_model=execution_model)
+                                  reentry=w["reentry"], execution_model=execution_model,
+                                  session_from_open=w["session_from_open"])
         print(json.dumps([_run_one(w) for w in work], indent=2))
         return tag
 
@@ -949,7 +967,8 @@ def run(
             w["gateway"] = gateway
             w["prompt"] = _prompt(version, skill_text, tag, session_id, w["ticker"],
                                   w["date"], w.get("time_et"), w["sdir"],
-                                  reentry=w["reentry"], execution_model=execution_model)
+                                  reentry=w["reentry"], execution_model=execution_model,
+                                  session_from_open=w["session_from_open"])
             ready.append(w)
         except Exception as e:  # noqa: BLE001 — one bad setup shouldn't sink the batch
             print(f"  [preseal-err] {w['item']}: {e}", file=sys.stderr)

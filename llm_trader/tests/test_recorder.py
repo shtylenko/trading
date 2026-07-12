@@ -115,6 +115,31 @@ def test_log_rejects_after_finalize(tmp_path):
         recorder.log(sdir, {"i": 1, "time": "10:21", "action": "OBSERVE", "thought": "late"})
 
 
+def test_completed_five_minute_entry_contract_requires_completed_candle(tmp_path):
+    sdir = recorder.init("TEST", "2025-03-10", root=tmp_path)
+    session_path = sdir / "session.json"
+    session = json.loads(session_path.read_text())
+    session["config"]["execution_model"] = recorder.EXECUTION_MODEL
+    session["config"]["execution"] = recorder.ExecutionConfig.from_session_config(session["config"]).to_dict()
+    session["skill"]["completed_five_minute_entry_required"] = "true"
+    session_path.write_text(json.dumps(session))
+    rows = [
+        {"type": "meta", "ticker": "TEST", "date": "2025-03-10"},
+        {"type": "tick", "i": 0, "time": "09:30", "o": 3.0, "h": 3.1, "l": 2.9,
+         "c": 3.05, "v": 1000},
+        {"type": "tick", "i": 1, "time": "09:34", "o": 3.05, "h": 3.2, "l": 3.0,
+         "c": 3.18, "v": 1000, "bar5_complete": {"time": "09:30"}},
+    ]
+    (sdir / "stream.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+
+    with pytest.raises(ValueError, match="completed 5-minute candle"):
+        recorder.log(sdir, {"i": 0, "time": "09:30", "action": "ENTER_CLOSE",
+                            "stop": 2.89, "thought": "too early"})
+    recorder.log(sdir, {"i": 0, "time": "09:30", "action": "OBSERVE", "thought": "wait"})
+    recorder.log(sdir, {"i": 1, "time": "09:34", "action": "ENTER_CLOSE",
+                        "stop": 2.99, "thought": "completed five-minute break"})
+
+
 def test_enter_scale_exit_pnl(tmp_path):
     ticks = [
         ("10:20", 3.6, 3.8, 3.5, 3.75, 100),   # i0 entry bar

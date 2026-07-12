@@ -9,6 +9,26 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
 
 ---
 
+### 3.4.0 — parametrized §C re-entry budget + cutoff time  ⏳ CANDIDATE — NOT YET VALIDATED
+- **Why:** §C hard-capped re-entries at **one** and stopped the loop the moment the
+  agent went flat after using it, so a choppy morning with several distinct A-setups
+  could only ever produce two round trips. We want to *measure* whether allowing more
+  second-leg entries (bounded by the clock) helps or just adds churn.
+- **Change:** the re-entry cap and a trading cutoff are now **run parameters**, not skill
+  constants. Skill §C, the loop-stop rule (b), the state var, and the guardrails read an
+  injected **budget** (`re_entries_used` caps at it; default **1**) and optional **cutoff
+  time** (no new/re-entry at/after it). `batchsim run` gains `--max-reentries N` and
+  `--trade-until HH:MM` (with `--no-reentry` = `--max-reentries 0`); both are recorded in
+  `batch.json` and inherited on `--resume`. **No entry/exit/sizing/friction rule changed.**
+- **Parity anchor:** with `--max-reentries 1` and no cutoff, 3.4.0's behaviour is intended
+  to be identical to 3.0.0 — that equivalence is the first thing to verify before testing
+  a raised budget.
+- **Type:** capability generalization + simulator/CLI plumbing; the re-entry *count* moves
+  from a hardcoded skill constant to a run knob. Not an alpha-rule tweak.
+- **Test:** ⏳ pending. First confirm `--max-reentries 1` ≈ 3.0.0 on the shared 100-set,
+  then sweep budget/cutoff (e.g. 3 until 11:30) as its own paired comparison.
+- **Decision:** ⏳ HOLD — 3.0.0 remains the active baseline.
+
 ### 4.0.0 — from-open, completed-five-minute entry  ⏳ CANDIDATE — NOT YET VALIDATED
 - **Why:** v3 supplied the agent with the scanner's historical five-minute trigger
   time, level, final-day RVOL, and retrospective reason, then began replay at that

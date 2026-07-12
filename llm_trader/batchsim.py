@@ -338,7 +338,8 @@ def _archived_skill(version: str) -> Path:
 
 def _prompt(version: str, skill_text: str, tag: str, session_id: str,
             ticker: str, date: str, time_et: Optional[str], sdir: str,
-            reentry: bool = True, execution_model: str = "reported_fill_v1",
+            max_reentries: int = 1, trade_until: Optional[str] = None,
+            execution_model: str = "reported_fill_v1",
             session_from_open: bool = False) -> str:
     """The per-setup task handed to a headless hermes agent.
 
@@ -351,19 +352,35 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
 
     Command lines are NOT indented (leading whitespace on `\\`-continued lines would be
     passed to the agent verbatim)."""
-    # The early-stop rule (condition b) depends on whether §C re-entry is allowed this run.
-    done_rule = (
-        "This is a from-open discovery run. While flat, keep revealing bars through 11:00 ET; "
-        "a valid completed 5-minute entry may still form. After 11:00 ET, if flat with no "
-        "pending order, stop."
-        if session_from_open else
-        "and you have decided, per the skill's §C rules, NOT to take a re-entry (or have "
-        "already used your one re-entry). Do not sit through the rest of the day 'just in "
-        "case' — decide within a few bars of going flat, then stop."
-        if reentry else
-        "RE-ENTRY IS DISABLED for this run, so being flat means you are done — stop "
-        "immediately. Do NOT take any §C re-entry and do NOT keep revealing bars."
-    )
+    # The early-stop rule (condition b) is set by the run's §C re-entry BUDGET
+    # (max_reentries) and an optional cutoff time (trade_until). Budget 1 + no cutoff
+    # reproduces the classic single-re-entry behaviour exactly.
+    if session_from_open:
+        done_rule = (
+            "This is a from-open discovery run. While flat, keep revealing bars through 11:00 ET; "
+            "a valid completed 5-minute entry may still form. After 11:00 ET, if flat with no "
+            "pending order, stop."
+        )
+    elif max_reentries <= 0:
+        done_rule = (
+            "RE-ENTRY IS DISABLED for this run (budget 0), so being flat means you are done — "
+            "stop immediately. Do NOT take any §C re-entry and do NOT keep revealing bars."
+        )
+    else:
+        cutoff = (
+            f", OR the clock has reached {trade_until} ET (take NO new or re-entry at/after "
+            f"{trade_until} ET — a flat position then ends the run)"
+            if trade_until else ""
+        )
+        keep_going = f" and it is before {trade_until} ET" if trade_until else ""
+        stop_when = "the budget is spent" + (f" or {trade_until} ET has passed" if trade_until else "")
+        done_rule = (
+            f"you have used your entire §C re-entry BUDGET of {max_reentries} "
+            f"(track `re_entries_used`){cutoff}. IMPORTANT: while you are flat with re-entries "
+            f"remaining{keep_going}, do NOT stop — keep revealing bars and watch for the next "
+            "qualifying §C re-entry (respect the mandatory 3-bar cooldown and the full setup "
+            f"gate; each re-entry must stand on its own merits). Only stop once {stop_when}."
+        )
     if execution_model == EXECUTION_MODEL:
         loop_commands = f'''1. Reveal the next bar:
 python3 -m trading.llm_trader.step next --session "{sdir}"
@@ -425,9 +442,11 @@ BATCHSIM_SID={sdir}
 
 WHY THIS MATTERS: every `step next` is a real model turn. Walking the whole day bar-by-bar
 after you are already flat and done wastes the run (and can time it out) for zero value —
-the setup's later bars change nothing once you have no position and no pending entry. While
-you HOLD a position (managing a runner, waiting on an armed trigger), you of course keep
-going; the early stop only applies once you are flat with nothing left to do.
+the setup's later bars change nothing once you have no position, no pending entry, and no
+permitted re-entry left to hunt. While you HOLD a position (managing a runner, waiting on an
+armed trigger) — or are flat but still have §C re-entry budget and the cutoff time (if any)
+has not passed — you of course keep going; the early stop only applies once you are flat
+with nothing left to do.
 
 === ABSOLUTE HARD RULES — ANY VIOLATION VOIDS THE ENTIRE RUN (audit detects this) ===
 
@@ -789,7 +808,8 @@ def run(
     version: Optional[str] = None, *, model: Optional[str] = None,
     testset: Optional[Path] = None, parallel: int = 4,
     repeats: int = 1, tag: Optional[str] = None, timeout: int = 900,
-    retries: int = _DEFAULT_RETRIES, reentry: bool = True,
+    retries: int = _DEFAULT_RETRIES, max_reentries: int = 1,
+    trade_until: Optional[str] = None,
     resume: bool = False, dry_run: bool = False, session: Optional[str] = None,
 ) -> str:
     """Run the batch: spawn agents for every (setup × repeat), then audit + report."""
@@ -826,18 +846,26 @@ def run(
             testset = Path(bmeta["testset"])
         if repeats == 1 and isinstance(bmeta.get("repeats"), int):
             repeats = bmeta["repeats"]
-        # Re-entry mode is fixed for the batch — a resume must match it, so recover it
-        # from batch.json rather than re-deriving from the CLI (you can't mix modes).
-        if "reentry" in bmeta:
-            reentry = bool(bmeta["reentry"])
+        # Re-entry budget + cutoff are fixed for the batch — a resume must match them, so
+        # recover from batch.json rather than re-deriving from the CLI (you can't mix modes).
+        if "max_reentries" in bmeta:
+            max_reentries = int(bmeta["max_reentries"])
+        elif "reentry" in bmeta:  # older batches recorded only the on/off flag
+            max_reentries = 1 if bmeta["reentry"] else 0
+        if "trade_until" in bmeta:
+            trade_until = bmeta["trade_until"]
         print(f"--resume: using version={version} model={model} "
-              f"set={testset} repeats={repeats} reentry={reentry} (from batch.json)",
-              file=sys.stderr)
+              f"set={testset} repeats={repeats} max_reentries={max_reentries} "
+              f"trade_until={trade_until} (from batch.json)", file=sys.stderr)
 
     if not model:
         raise SystemExit("--model is required (resume did not recover one from batch.json).")
     if testset is None:
         testset = TESTSET_DEFAULT
+    if trade_until is not None and not re.fullmatch(r"\d{1,2}:\d{2}", trade_until):
+        raise SystemExit(f"--trade-until must be HH:MM ET (got {trade_until!r}).")
+    if max_reentries < 0:
+        raise SystemExit(f"--max-reentries must be ≥ 0 (got {max_reentries}).")
 
     # Source the skill from the current BASE version by default so a batch tests the
     # accepted rules. Its text is inlined into every agent prompt (see _prompt), so
@@ -934,14 +962,16 @@ def run(
                 "session": session_id,
                 "runner_contract": current_runner_contract,
                 "model": model, "timeout": timeout, "retries": retries,
-                "reentry": reentry, "dry_run": dry_run,
+                "max_reentries": max_reentries, "trade_until": trade_until,
+                "dry_run": dry_run,
                 "session_from_open": session_from_open,
                 "five_minute_context": five_minute_context,
             })
 
+    reentry_desc = (f"reentry-budget {max_reentries}" if max_reentries > 0 else "reentry OFF") + \
+        (f" until {trade_until} ET" if trade_until else "")
     print(f"batch {tag} (session {session_id}): version {version}, {len(setups)} setups × {repeats} "
-          f"= {len(work)} runs (parallel {parallel}, model {model}, "
-          f"reentry {'on' if reentry else 'OFF'})"
+          f"= {len(work)} runs (parallel {parallel}, model {model}, {reentry_desc})"
           f"{' [DRY RUN]' if dry_run else ''}", file=sys.stderr)
 
     if dry_run:
@@ -950,7 +980,8 @@ def run(
         for w in work:
             w["prompt"] = _prompt(version, skill_text, tag, session_id, w["ticker"],
                                   w["date"], w.get("time_et"), sdir="<PRE-SEALED-SDIR>",
-                                  reentry=w["reentry"], execution_model=execution_model,
+                                  max_reentries=w["max_reentries"], trade_until=w["trade_until"],
+                                  execution_model=execution_model,
                                   session_from_open=w["session_from_open"])
         print(json.dumps([_run_one(w) for w in work], indent=2))
         return tag
@@ -967,7 +998,8 @@ def run(
             w["gateway"] = gateway
             w["prompt"] = _prompt(version, skill_text, tag, session_id, w["ticker"],
                                   w["date"], w.get("time_et"), w["sdir"],
-                                  reentry=w["reentry"], execution_model=execution_model,
+                                  max_reentries=w["max_reentries"], trade_until=w["trade_until"],
+                                  execution_model=execution_model,
                                   session_from_open=w["session_from_open"])
             ready.append(w)
         except Exception as e:  # noqa: BLE001 — one bad setup shouldn't sink the batch
@@ -984,7 +1016,9 @@ def run(
         tag, version=version, model=model, testset=str(testset),
         testset_hash=testset_hash, skill_hash=skill_meta.get("content_hash"),
         runner_contract=current_runner_contract,
-        planned=len(setups) * repeats, repeats=repeats, reentry=reentry,
+        planned=len(setups) * repeats, repeats=repeats,
+        reentry=(max_reentries > 0),  # kept for back-compat display / compare guardrail
+        max_reentries=max_reentries, trade_until=trade_until,
         started_ts=datetime.now().isoformat(timespec="seconds"),
         finished_ts=None, status="running",
     )
@@ -2125,11 +2159,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pr.add_argument("--retries", type=int, default=_DEFAULT_RETRIES,
                     help="extra attempts on a timeout before recording it as failed "
                          f"(default {_DEFAULT_RETRIES}; 0 = no retry)")
+    pr.add_argument("--max-reentries", type=int, default=1,
+                    help="§C re-entry budget: how many re-entries the agent may take after "
+                         "its first round trip (default 1 = classic single re-entry; 0 = "
+                         "none; higher = keep taking qualifying second legs). Recorded in "
+                         "batch.json; a resume inherits it. Hold constant across an A/B pair.")
+    pr.add_argument("--trade-until", metavar="HH:MM",
+                    help="cutoff time in ET: take NO new or re-entry at/after this time (a "
+                         "flat position then ends the run). Default: no cutoff — stop once the "
+                         "re-entry budget is spent. Recorded in batch.json; a resume inherits it.")
     pr.add_argument("--no-reentry", action="store_true",
-                    help="disable §C re-entry: the agent stops as soon as it is flat "
-                         "(no second-leg trade, no walking the day to STATUS end). "
-                         "Recorded in batch.json; a resume inherits it. Hold it constant "
-                         "across an A/B pair — it changes what is tested.")
+                    help="shorthand for --max-reentries 0 (agent stops as soon as it is flat).")
     pr.add_argument("--resume", action="store_true", help="skip already-finalized items")
     pr.add_argument("--dry-run", action="store_true",
                     help="print the hermes commands without spawning agents")
@@ -2192,7 +2232,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         run(args.version, model=args.model,
             testset=Path(args.testset) if args.testset else None,
             parallel=args.parallel, repeats=args.repeats, tag=args.tag,
-            timeout=args.timeout, retries=args.retries, reentry=not args.no_reentry,
+            timeout=args.timeout, retries=args.retries,
+            max_reentries=0 if args.no_reentry else args.max_reentries,
+            trade_until=args.trade_until,
             resume=args.resume, dry_run=args.dry_run,
             session=args.session)
     elif args.cmd == "audit":

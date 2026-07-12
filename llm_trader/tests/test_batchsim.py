@@ -688,6 +688,24 @@ def test_from_open_prompt_hides_scanner_time_and_prevents_flat_early_stop():
     assert "keep revealing bars through 11:00 ET" in p
 
 
+def test_prompt_reentry_budget_and_cutoff():
+    """The §C re-entry budget + optional cutoff time drive the flat-stop rule (condition b)."""
+    args = ("3.4.0", "SKILL-TEXT", "tag", "SESSION-ID", "BQ", "2026-01-01", "09:35", "/tmp/s")
+    # default: budget 1, no cutoff — classic single re-entry, no time bound
+    p1 = batchsim._prompt(*args, max_reentries=1)
+    assert "BUDGET of 1" in p1
+    assert "ET has passed" not in p1        # no cutoff clause
+    # raised budget + cutoff: both bounds present, and it must NOT stop while flat with budget left
+    p3 = batchsim._prompt(*args, max_reentries=3, trade_until="11:30")
+    assert "BUDGET of 3" in p3
+    assert "11:30 ET" in p3
+    assert "do NOT stop" in p3
+    # disabled: budget 0 means flat = done immediately
+    p0 = batchsim._prompt(*args, max_reentries=0)
+    assert "RE-ENTRY IS DISABLED" in p0
+    assert "budget 0" in p0
+
+
 # --- compare: the paired promotion gate ---
 
 def test_sign_test_p_two_sided():

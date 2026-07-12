@@ -75,3 +75,18 @@ python3 -m trading.llm_trader.batchsim run \
     --model deepseek-v4-flash \
     --set trading/llm_trader/batch/testset_mini.json \
     --parallel 3 --repeats 1 --tag mini
+
+FULL DAY:
+
+python3 -m trading.llm_trader.batchsim run \
+    --version 3.0.0 \
+    --model deepseek-v4-flash \
+    --set trading/llm_trader/batch/testset-DRUG-2024-10-15.json
+    --parallel 1
+
+
+
+python3 -m trading.llm_trader.batchsim run \
+    --version 3.4.0 --model deepseek-v4-flash \
+    --set trading/llm_trader/batch/testset-DRUG-2024-10-15.json \
+    --max-reentries 100 --trade-until 11:30 --tag drug-reentry

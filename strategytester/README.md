@@ -1,7 +1,32 @@
-# swing_screener
+# strategytester
 
-Historical / research screens for long-only swing strategies, using
+Historical / research screens + backtests for long-only strategies, using
 `trading.marketdata` as the only OHLCV source.
+
+## Short-hold strategy evaluation (2026-07)
+
+Comparative profitability test of the 13 short-hold (≤3-session) candidates from
+`library/youtube-influencers/strategies/ranking_short_hold.md`. **Full write-up +
+ranking: [`REPORT_SHORT_HOLD.md`](REPORT_SHORT_HOLD.md)** (headline: only *Episodic
+Pivot* clears realistic costs). Machine-readable: [`results_short_hold.csv`](results_short_hold.csv).
+
+Shared engine in [`common/`](common/) — one simulator all strategies reuse:
+`indicators.py` (vectorized daily features), `panel.py` (cached daily panel + market
+context), `engine.py` (daily trade sim, ≤3-session mandate), `intraday.py` (1-min VWAP
+engine), `metrics.py` (%-based per-trade stats + capacity-capped portfolio curve).
+Each strategy is one `signals.py` in its own folder (`inside_bar/`, `momentum_burst/`,
+`episodic_pivot/`, …).
+
+```bash
+# from monorepo root /Users/shtylenko/Projects
+python3 -m trading.strategytester.scripts.build_daily_panel            # cache panel (~2 min, once)
+python3 -m trading.strategytester.scripts.run_daily_strategies         # 11 daily strategies (~70s)
+python3 -m trading.strategytester.scripts.run_daily_strategies --cost-bps 10 --tag _10bps
+python3 -m trading.strategytester.scripts.run_intraday_strategies      # VWAP Bounce, Gap and Go
+```
+
+> Note: the older `c1_pullback` / `c2_breakout` modules below still import the pre-rename
+> package name `trading.swing_screener`; the new short-hold work uses `trading.strategytester.*`.
 
 ## C2_BREAKOUT
 

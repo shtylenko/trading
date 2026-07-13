@@ -40,6 +40,7 @@ RELEASES = {
     "m01": "trading.lab.strategies.intraday_momentum.m01:Release",
     "m02": "trading.lab.strategies.intraday_momentum.m02:Release",
     "m03": "trading.lab.strategies.intraday_momentum.m03:Release",
+    "b01": "trading.lab.strategies.momentum_burst.b01:Release",
     "x01": "trading.lab.strategies.xsec_momentum.x01:Release",
     "x03": "trading.lab.strategies.xsec_momentum.x03:Release",
     "x04": "trading.lab.strategies.xsec_momentum.x04:Release",

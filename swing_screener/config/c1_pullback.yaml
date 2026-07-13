@@ -1,0 +1,64 @@
+# C1_PULLBACK historical candidate screen thresholds.
+# See library/strategies/C1_PULLBACK/spec.md
+
+rules_version: "c1_pullback_v1"
+
+universe: liquid_pit
+adjustment: split
+
+# Shared gates
+price_min: 10.0
+avg_vol_window: 20
+avg_vol_min: 500000
+require_above_sma50: true
+require_above_sma200: true
+
+# Optional dollar-volume proxy (close * avg_vol); 0 disables
+min_dollar_vol: 0
+
+# C1_MR — RSI(2) mean reversion
+mr:
+  rsi2_max: 10.0
+  require_perf_21d_positive: true
+
+# C1_PB — pullback zone
+pb:
+  rsi14_min: 35.0
+  rsi14_max: 50.0
+  perf_5d_max: 0.0
+  sma20_extension_max: 0.03
+  relvol_max: 1.2
+
+# Warmup history before --start (for SMA200)
+warmup_calendar_days: 400
+
+# ---------------------------------------------------------------------------
+# Trade simulation (run_c1_backtest)
+# ---------------------------------------------------------------------------
+backtest:
+  # Round-trip friction applied to price (each side).
+  cost_bps_per_side: 5.0
+  # One open position per ticker: ignore new signals until flat.
+  one_position_per_ticker: true
+
+  mr:
+    # next_open = fill at next session open (default; no same-close look-ahead)
+    # signal_close = fill at signal close (optimistic / MOC approximation)
+    entry_mode: next_open
+    stop_atr_mult: 2.0
+    stop_pct_cap: 0.08
+    rsi2_exit: 65.0
+    max_hold_days: 5
+
+  pb:
+    # Daily proxy for reclaim: buy stop at signal-day high * (1 + buffer)
+    entry_stop_buffer: 0.01
+    # Skip if next open gaps more than this many ATRs above the stop price
+    max_gap_atr: 0.75
+    pullback_lookback: 5
+    stop_atr_buffer: 0.10
+    max_stop_atr: 1.25
+    target_r: 2.0
+    max_hold_days: 7
+    # Exit if no close above entry within this many sessions after entry
+    no_progress_days: 2

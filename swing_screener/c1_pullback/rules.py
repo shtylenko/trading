@@ -9,6 +9,8 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from trading.swing_screener.c1_pullback.structure import StructureConfig, structure_mask
+
 _DEFAULT_CONFIG = (
     Path(__file__).resolve().parents[1] / "config" / "c1_pullback.yaml"
 )
@@ -31,7 +33,7 @@ class PBConfig:
 
 @dataclass(frozen=True)
 class C1Config:
-    rules_version: str = "c1_pullback_v1"
+    rules_version: str = "c1_pullback_v2"
     universe: str = "liquid_pit"
     adjustment: str = "split"
     price_min: float = 10.0
@@ -41,8 +43,30 @@ class C1Config:
     require_above_sma200: bool = True
     min_dollar_vol: float = 0.0
     warmup_calendar_days: int = 400
+    structure: StructureConfig = field(default_factory=StructureConfig)
     mr: MRConfig = field(default_factory=MRConfig)
     pb: PBConfig = field(default_factory=PBConfig)
+
+
+def _structure_from_raw(raw: dict[str, Any] | None) -> StructureConfig:
+    s = raw or {}
+    return StructureConfig(
+        enabled=bool(s.get("enabled", True)),
+        sma50_slope_lookback=int(s.get("sma50_slope_lookback", 5)),
+        hh_window=int(s.get("hh_window", 20)),
+        pullback_lookback=int(s.get("pullback_lookback", 15)),
+        pullback_bars_min=int(s.get("pullback_bars_min", 2)),
+        pullback_bars_max=int(s.get("pullback_bars_max", 5)),
+        max_1d_drop_pct=float(s.get("max_1d_drop_pct", 0.06)),
+        max_pullback_atr=float(s.get("max_pullback_atr", 3.5)),
+        min_pullback_atr=float(s.get("min_pullback_atr", 0.15)),
+        vol_pb_bars=int(s.get("vol_pb_bars", 3)),
+        vol_adv_bars=int(s.get("vol_adv_bars", 5)),
+        vol_contract_ratio=float(s.get("vol_contract_ratio", 1.0)),
+        support_band=float(s.get("support_band", 0.03)),
+        swing_lookback=int(s.get("swing_lookback", 15)),
+        swing_low_buffer=float(s.get("swing_low_buffer", 0.002)),
+    )
 
 
 def load_config(path: str | Path | None = None) -> C1Config:
@@ -57,7 +81,7 @@ def load_config(path: str | Path | None = None) -> C1Config:
     mr_raw = raw.get("mr") or {}
     pb_raw = raw.get("pb") or {}
     return C1Config(
-        rules_version=str(raw.get("rules_version", "c1_pullback_v1")),
+        rules_version=str(raw.get("rules_version", "c1_pullback_v2")),
         universe=str(raw.get("universe", "liquid_pit")),
         adjustment=str(raw.get("adjustment", "split")),
         price_min=float(raw.get("price_min", 10.0)),
@@ -67,6 +91,7 @@ def load_config(path: str | Path | None = None) -> C1Config:
         require_above_sma200=bool(raw.get("require_above_sma200", True)),
         min_dollar_vol=float(raw.get("min_dollar_vol", 0.0)),
         warmup_calendar_days=int(raw.get("warmup_calendar_days", 400)),
+        structure=_structure_from_raw(raw.get("structure")),
         mr=MRConfig(
             rsi2_max=float(mr_raw.get("rsi2_max", 10.0)),
             require_perf_21d_positive=bool(
@@ -94,7 +119,7 @@ def np_isfinite(s: pd.Series) -> pd.Series:
 
 
 def shared_mask(df: pd.DataFrame, cfg: C1Config) -> pd.Series:
-    """Boolean mask for shared C1 universe/liquidity/trend gates."""
+    """Boolean mask for shared C1 universe/liquidity/trend gates + structure."""
     close = df["close"].astype(float)
     m = _finite(close) & (close >= cfg.price_min)
     m &= _finite(df["avg_vol_20"]) & (df["avg_vol_20"] >= cfg.avg_vol_min)
@@ -105,11 +130,13 @@ def shared_mask(df: pd.DataFrame, cfg: C1Config) -> pd.Series:
     if cfg.min_dollar_vol and cfg.min_dollar_vol > 0:
         dvol = close * df["avg_vol_20"].astype(float)
         m &= _finite(dvol) & (dvol >= cfg.min_dollar_vol)
+    # Chart structure (rising SMA50, HH, pullback shape, vol, support, swing low)
+    m &= structure_mask(df, cfg.structure)
     return m.fillna(False)
 
 
 def mr_mask(df: pd.DataFrame, cfg: C1Config) -> pd.Series:
-    """C1_MR candidate mask (includes shared gates)."""
+    """C1_MR candidate mask (includes shared + structure gates)."""
     m = shared_mask(df, cfg)
     m &= _finite(df["rsi2"]) & (df["rsi2"] < cfg.mr.rsi2_max)
     if cfg.mr.require_perf_21d_positive:
@@ -118,7 +145,7 @@ def mr_mask(df: pd.DataFrame, cfg: C1Config) -> pd.Series:
 
 
 def pb_mask(df: pd.DataFrame, cfg: C1Config) -> pd.Series:
-    """C1_PB candidate mask (includes shared gates)."""
+    """C1_PB candidate mask (includes shared + structure gates)."""
     m = shared_mask(df, cfg)
     m &= _finite(df["rsi14"])
     m &= (df["rsi14"] >= cfg.pb.rsi14_min) & (df["rsi14"] <= cfg.pb.rsi14_max)
@@ -136,12 +163,17 @@ _METRIC_COLS = [
     "sma20",
     "sma50",
     "sma200",
+    "ema20",
     "rsi2",
     "rsi14",
     "perf_5d",
     "perf_21d",
     "perf_126d",
     "sma20_ext",
+    "days_since_high",
+    "pullback_depth_atr",
+    "prior_swing_low",
+    "struct_ok",
 ]
 
 
@@ -188,4 +220,6 @@ def extract_hits(
     out["universe"] = universe
     out["rules_version"] = rules_version
     out["earnings_ok"] = pd.NA
+    out["sector_ok"] = pd.NA  # not implemented
+    out["headline_ok"] = pd.NA  # not implemented
     return out.reset_index(drop=True)

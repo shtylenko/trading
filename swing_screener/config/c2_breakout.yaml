@@ -1,0 +1,54 @@
+# C2_BREAKOUT — 52w base breakout (Finviz-free)
+# See library/strategies/C2_BREAKOUT/spec.md
+
+rules_version: "c2_breakout_v1"
+
+universe: liquid_pit
+adjustment: split
+warmup_calendar_days: 450
+
+price_min: 10.0
+avg_vol_min: 500000
+require_above_sma20: true
+require_above_sma50: true
+require_above_sma200: true
+
+# Momentum / location
+near_52w_pct: 0.12          # close within 12% of 252d high
+perf_63d_min: 0.10
+perf_21d_min: 0.0
+rsi14_min: 50.0
+rsi14_max: 75.0
+max_ext_above_sma20: 0.12   # reject if close > sma20 * 1.12
+
+# Base structure (prior bars only)
+base_lookback: 15
+base_depth_atr_max: 3.0
+base_range_pct_max: 0.15
+require_vol_dryup: true
+
+# Breakout trigger (signal day)
+relvol_min: 1.5
+max_break_extension_atr: 1.5    # close-pivot ≤ this * ATR (0 disables)
+require_rs_spy_21d: true
+
+# Backtest
+backtest:
+  cost_bps_per_side: 5.0
+  one_position_per_ticker: true
+  entry_mode: next_open
+  stop_atr_buffer: 0.10
+  max_stop_atr: 1.5             # tighten deep bases to this risk cap
+  max_stop_pct: 0.10
+  target_r: 2.5
+  max_hold_days: 8
+  no_progress_days: 3
+  no_progress_min_r: 0.5
+  max_gap_atr: 1.0
+
+# Portfolio (capacity)
+portfolio:
+  max_positions: 4
+  max_per_sector: 2
+  starting_equity: 20000
+  risk_frac: 0.0075

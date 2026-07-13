@@ -101,4 +101,9 @@ def enrich_daily(df: pd.DataFrame) -> pd.DataFrame:
     out["perf_21d"] = performance(close, 21)
     out["perf_126d"] = performance(close, 126)
     out["sma20_ext"] = close / out["sma20"].replace(0.0, np.nan) - 1.0
+
+    # Chart-structure columns (rising SMA50, HH, pullback shape, vol dry-up, etc.)
+    from trading.swing_screener.c1_pullback.structure import add_structure_columns
+
+    out = add_structure_columns(out)
     return out

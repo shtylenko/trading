@@ -1,10 +1,12 @@
 # C1_PULLBACK — Historical Candidate Screener Spec
 
-**Status:** Implementation spec (v1)  
+**Status:** Implementation spec (v2 — structure filters on)  
 **Date:** 2026-07-12  
 **Strategy ref:** `swing_screener/library/strategies/consolidated.md` § C1  
 **Package:** `trading.swing_screener`  
 **Bar source:** `trading.marketdata` only  
+**Rules version:** `c1_pullback_v2`  
+
 
 ---
 
@@ -49,6 +51,24 @@ C1 is two systems that share trend gates. Codex review: treat as separate journa
 | Avg volume (20 sessions) | ≥ `500_000` |
 | Price above SMA50 | yes |
 | Price above SMA200 | yes |
+| **Chart structure** (below) | **required** (`structure.enabled`) |
+
+### 3.1b Chart structure (price/volume — v2)
+
+Mechanical stand-ins for the consolidated chart checklist. Applied inside `shared_mask`.
+
+| Checklist item | Implementation |
+|----------------|----------------|
+| Rising SMA50 | `SMA50[t] > SMA50[t-5]` |
+| Higher high within ~20 sessions | max high last 20 > max high prior 20 |
+| Pullback 2–5 bars, not collapse | days since local high ∈ [2,5]; 1d drop ≥ −6%; depth ∈ [0.15, 3.5] ATR |
+| Volume contracts into low | mean vol last 3d ≤ mean vol prior 5d |
+| Tests aligned support | close within 3% of SMA20 **or** EMA20 **or** SMA50 |
+| Not below prior swing low | close & recent lows ≥ min low of structure window ending at local high |
+| Sector Map neutral-to-green | **Not implemented** (`sector_ok = null`) |
+| No adverse headline | **Not implemented** (`headline_ok = null`) |
+
+Code: `c1_pullback/structure.py`.
 
 ### 3.2 C1_MR — RSI(2) mean reversion (Claude / Connors)
 

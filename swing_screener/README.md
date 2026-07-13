@@ -3,6 +3,21 @@
 Historical / research screens for long-only swing strategies, using
 `trading.marketdata` as the only OHLCV source.
 
+## C2_BREAKOUT
+
+52-week-high base breakout (Finviz-free). Spec: `library/strategies/C2_BREAKOUT/spec.md`.
+
+```bash
+# 2025 screen → backtest → portfolio
+python3 -m trading.swing_screener.scripts.run_c2_screen \
+  --start 2025-01-01 --end 2025-12-31
+python3 -m trading.swing_screener.scripts.run_c2_backtest \
+  --candidates trading/swing_screener/outputs/c2_breakout/candidates_2025-01-01_2025-12-31.parquet
+python3 -m trading.swing_screener.scripts.run_c2_portfolio \
+  --trades trading/swing_screener/outputs/c2_breakout/trades_2025-01-01_2025-12-31.parquet \
+  --candidates trading/swing_screener/outputs/c2_breakout/candidates_2025-01-01_2025-12-31.parquet
+```
+
 ## C1_PULLBACK
 
 Leader pullback candidate screen (RSI(2) mean-reversion + RSI(14) pullback zone).
@@ -28,6 +43,25 @@ python3 -m trading.swing_screener.scripts.run_c1_screen \
   --start 2024-01-01 --end 2024-03-31 \
   --tickers AAPL,MSFT,NVDA,META,AMZN \
   --variant both -v
+```
+
+### Chart structure (v2)
+
+Shared gates now include rising SMA50, 20d higher-high, 2–5 bar orderly
+pullback, volume dry-up, support proximity (SMA20/EMA20/SMA50), and prior
+swing-low hold. **Not** included: sector map, news headlines.
+
+Toggle in `config/c1_pullback.yaml` → `structure.enabled`.
+
+### Portfolio layer (capacity)
+
+After backtest, select a tradable subset (max concurrent positions, sector cap, rank):
+
+```bash
+python3 -m trading.swing_screener.scripts.run_c1_portfolio \
+  --trades trading/swing_screener/outputs/c1_pullback/trades_2025_v2.parquet \
+  --candidates trading/swing_screener/outputs/c1_pullback/candidates_2025_v2.parquet \
+  --max-positions 4 --max-per-sector 2
 ```
 
 ### Backtest (win rate / expectancy)

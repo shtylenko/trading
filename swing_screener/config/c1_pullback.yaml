@@ -1,7 +1,7 @@
 # C1_PULLBACK historical candidate screen thresholds.
 # See library/strategies/C1_PULLBACK/spec.md
 
-rules_version: "c1_pullback_v1"
+rules_version: "c1_pullback_v2"
 
 universe: liquid_pit
 adjustment: split
@@ -15,6 +15,24 @@ require_above_sma200: true
 
 # Optional dollar-volume proxy (close * avg_vol); 0 disables
 min_dollar_vol: 0
+
+# Chart structure (consolidated checklist minus sector map + headlines)
+structure:
+  enabled: true
+  sma50_slope_lookback: 5          # rising SMA50 over N sessions
+  hh_window: 20                    # higher high vs prior 20d window
+  pullback_lookback: 15            # local-high search window
+  pullback_bars_min: 2
+  pullback_bars_max: 5
+  max_1d_drop_pct: 0.06            # reject single-day collapse
+  max_pullback_atr: 3.5            # max depth from local high (ATR)
+  min_pullback_atr: 0.15           # ignore tiny dips
+  vol_pb_bars: 3
+  vol_adv_bars: 5
+  vol_contract_ratio: 1.0          # pullback vol ≤ advance vol
+  support_band: 0.03               # within 3% of SMA20/EMA20/SMA50
+  swing_lookback: 15
+  swing_low_buffer: 0.002
 
 # C1_MR — RSI(2) mean reversion
 mr:
@@ -36,14 +54,10 @@ warmup_calendar_days: 400
 # Trade simulation (run_c1_backtest)
 # ---------------------------------------------------------------------------
 backtest:
-  # Round-trip friction applied to price (each side).
   cost_bps_per_side: 5.0
-  # One open position per ticker: ignore new signals until flat.
   one_position_per_ticker: true
 
   mr:
-    # next_open = fill at next session open (default; no same-close look-ahead)
-    # signal_close = fill at signal close (optimistic / MOC approximation)
     entry_mode: next_open
     stop_atr_mult: 2.0
     stop_pct_cap: 0.08
@@ -51,14 +65,11 @@ backtest:
     max_hold_days: 5
 
   pb:
-    # Daily proxy for reclaim: buy stop at signal-day high * (1 + buffer)
     entry_stop_buffer: 0.01
-    # Skip if next open gaps more than this many ATRs above the stop price
     max_gap_atr: 0.75
     pullback_lookback: 5
     stop_atr_buffer: 0.10
     max_stop_atr: 1.25
     target_r: 2.0
     max_hold_days: 7
-    # Exit if no close above entry within this many sessions after entry
     no_progress_days: 2

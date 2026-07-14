@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Webull Stock Monitor",
-  "version": "0.1.0",
-  "description": "Captures candle data from Webull charts on app.webull.com and sends to local backend.",
+  "version": "0.2.4",
+  "description": "Captures Webull chart candles and configured My Screeners (e.g. Gap'n'Go) into local daily sessions.",
   "permissions": [
     "activeTab",
     "storage",

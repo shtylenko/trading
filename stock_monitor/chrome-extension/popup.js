@@ -1,88 +1,67 @@
-// popup.js — UI for the monitor extension
+// popup.js — Mode-aware UI for chart + screener tabs
 
 const $ = (id) => document.getElementById(id);
 
-async function refresh() {
-  const tab = await getTargetTab();
-  if (!tab?.id || !tab.url || !tab.url.includes("app.webull.com/stocks")) {
-    showNoWebullUI();
-    return; // EARLY EXIT: literally no backend pings, no GET_STATUS, no health checks, no chart messaging
-  }
-
-  // === ONLY on valid app.webull.com/stocks tab from here on ===
-  let backendUrl = "http://127.0.0.1:8787";
+function detectModeFromUrl(url) {
+  if (!url) return "other";
   try {
-    const status = await chrome.runtime.sendMessage({ type: "GET_STATUS" });
-    backendUrl = status?.backendUrl || backendUrl;
-    $("backend").textContent = backendUrl;
-  } catch (e) {
-    $("backend").textContent = "—";
+    const p = new URL(url).pathname.toLowerCase();
+    if (p.includes("/screener")) return "screener";
+    if (p.includes("/stocks") || p.includes("/quote")) return "chart";
+    return "other";
+  } catch {
+    return "other";
   }
+}
 
-  // Reveal webull-specific UI (including backend status)
-  document.getElementById("backend-status").style.display = "";
-  document.getElementById("webull-data").style.display = "";
-  document.getElementById("webull-required").style.display = "none";
-  document.getElementById("capture-section").style.display = "";
+function isMonitorUrl(url) {
+  return detectModeFromUrl(url) !== "other";
+}
 
-  chrome.tabs.sendMessage(tab.id, { type: "GET_CHART_STATUS" }, (resp) => {
-    if (chrome.runtime.lastError || !resp) {
-      console.log("[popup] GET_CHART_STATUS failed:", chrome.runtime.lastError);
-      const err = chrome.runtime.lastError ? chrome.runtime.lastError.message : "";
-      if (err.includes("invalidated") || err.includes("context")) {
-        $("symbol").textContent = "reload the webull tab";
-      } else {
-        $("symbol").textContent = "no response (is the chart loaded?)";
-      }
-      $("tf").textContent = "—";
-      $("buf").textContent = "—";
-      $("last-received").textContent = "—";
-      $("last-pushed").textContent = "—";
-      $("tab-id").textContent = "—";
-      updateCaptureUI(false);
+async function getTargetTab() {
+  let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.url && isMonitorUrl(tab.url)) {
+    return tab;
+  }
+  return null;
+}
 
-      // We reached a webull tab but content didn't respond → treat as "on webull" (blue)
-      try { chrome.runtime.sendMessage({ type: "SET_TAB_ICON", state: "blue" }); } catch (e) {}
-      return;
-    }
+function agoText(ts) {
+  if (!ts) return "—";
+  const ago = Math.round((Date.now() - ts) / 1000);
+  return `${ago}s ago`;
+}
 
-    $("symbol").textContent = resp.symbol || "—";
-    $("tf").textContent = resp.timeframe || "—";
+function showOtherUI() {
+  $("backend-status").style.display = "none";
+  $("chart-data").style.display = "none";
+  $("screener-data").style.display = "none";
+  $("capture-section").style.display = "none";
+  $("screener-hint").style.display = "none";
+  $("webull-required").style.display = "";
+  $("mode-badge").style.display = "none";
 
-    const sizes = resp.bufferSizes || {};
-    const totalBars = Object.values(sizes).reduce((a, b) => a + b, 0);
-    const numSeries = Object.keys(sizes).length;
-    $("buf").textContent = `${totalBars} bars / ${numSeries} series`;
+  const connEl = $("conn");
+  if (connEl) {
+    connEl.textContent = "—";
+    connEl.className = "status";
+  }
+  try { chrome.runtime.sendMessage({ type: "SET_TAB_ICON", state: "gray" }); } catch (e) {}
+}
 
-    const now = Date.now();
-    if (resp.lastDataTs) {
-      const ago = Math.round((now - resp.lastDataTs) / 1000);
-      $("last-received").textContent = `${ago}s ago`;
-    } else {
-      $("last-received").textContent = "—";
-    }
+function setModeBadge(mode) {
+  const el = $("mode-badge");
+  if (!mode || mode === "other") {
+    el.style.display = "none";
+    return;
+  }
+  el.style.display = "";
+  el.textContent = mode === "screener" ? "screener" : "chart";
+  el.style.background = mode === "screener" ? "#312e81" : "#1e3a5f";
+  el.style.color = mode === "screener" ? "#c4b5fd" : "#93c5fd";
+}
 
-    if (resp.lastPushedTs) {
-      const ago = Math.round((now - resp.lastPushedTs) / 1000);
-      $("last-pushed").textContent = `${ago}s ago`;
-    } else {
-      $("last-pushed").textContent = "—";
-    }
-
-    if (resp.tabId) {
-      $("tab-id").textContent = resp.tabId;
-    } else {
-      $("tab-id").textContent = "—";
-    }
-
-    updateCaptureUI(!!resp.enabled);
-
-    // Keep the toolbar icon in sync (blue = on webull, green = actively capturing)
-    const iconState = resp.enabled ? "green" : "blue";
-    try { chrome.runtime.sendMessage({ type: "SET_TAB_ICON", state: iconState }); } catch (e) {}
-  });
-
-  // Health check ONLY when we have a real Webull tab (status section is visible)
+async function checkBackend(backendUrl) {
   try {
     const base = backendUrl.replace(/\/$/, "");
     let r = await fetch(`${base}/health`).catch(() => null);
@@ -92,57 +71,27 @@ async function refresh() {
     if (r && r.ok && (j.status === "ok" || j.ok)) {
       el.textContent = "connected";
       el.className = "status ok";
-    } else {
-      el.textContent = "backend issue";
-      el.className = "status warn";
+      return { ok: true, base, health: j };
     }
+    el.textContent = "backend issue";
+    el.className = "status warn";
+    return { ok: false, base };
   } catch (e) {
     const el = $("conn");
     el.textContent = "offline";
     el.className = "status err";
+    return { ok: false };
   }
 }
 
-function showNoWebullUI() {
-  // Hide everything except the "Go to Webull" prompt. Zero status scanning / pings.
-  document.getElementById("backend-status").style.display = "none";
-  document.getElementById("webull-data").style.display = "none";
-  document.getElementById("capture-section").style.display = "none";
-  document.getElementById("webull-required").style.display = "";
-
-  // Clear data fields (defensive)
-  $("symbol").textContent = "—";
-  $("tf").textContent = "—";
-  $("buf").textContent = "—";
-  $("last-received").textContent = "—";
-  $("last-pushed").textContent = "—";
-  $("tab-id").textContent = "—";
-
-  // Reset conn indicator so it doesn't show stale "checking..." when re-opened elsewhere
-  const connEl = $("conn");
-  if (connEl) {
-    connEl.textContent = "—";
-    connEl.className = "status";
+async function fetchSessionToday(base) {
+  try {
+    const r = await fetch(`${base}/session/today`);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch {
+    return null;
   }
-
-  // Make sure the toolbar icon reflects "not on webull"
-  try { chrome.runtime.sendMessage({ type: "SET_TAB_ICON", state: "gray" }); } catch (e) {}
-}
-
-function goToWebull() {
-  chrome.tabs.create({ url: "https://app.webull.com/stocks" });
-  window.close(); // close the popup
-}
-
-async function getTargetTab() {
-  // Strictly use only the currently active tab.
-  // If the active tab is not on app.webull.com/stocks, return null
-  // so the popup shows the "Go to Webull" button instead of the capture UI.
-  let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.url && tab.url.includes("app.webull.com/stocks")) {
-    return tab;
-  }
-  return null;
 }
 
 function updateCaptureUI(isEnabled) {
@@ -164,67 +113,261 @@ function updateCaptureUI(isEnabled) {
   }
 }
 
+async function refresh() {
+  const tab = await getTargetTab();
+  if (!tab?.id) {
+    showOtherUI();
+    return;
+  }
+
+  const urlMode = detectModeFromUrl(tab.url);
+
+  let backendUrl = "http://127.0.0.1:8787";
+  try {
+    const status = await chrome.runtime.sendMessage({ type: "GET_STATUS" });
+    backendUrl = status?.backendUrl || backendUrl;
+    $("backend").textContent = backendUrl;
+  } catch (e) {
+    $("backend").textContent = "—";
+  }
+
+  $("backend-status").style.display = "";
+  $("webull-required").style.display = "none";
+
+  const backend = await checkBackend(backendUrl);
+
+  chrome.tabs.sendMessage(tab.id, { type: "GET_PAGE_STATUS" }, async (resp) => {
+    if (chrome.runtime.lastError || !resp) {
+      console.log("[popup] GET_PAGE_STATUS failed:", chrome.runtime.lastError);
+      const err = chrome.runtime.lastError ? chrome.runtime.lastError.message : "";
+      // Fall back to URL-based mode shell
+      if (urlMode === "screener") {
+        showScreenerShell(null, backend);
+      } else if (urlMode === "chart") {
+        showChartShell(null, err);
+      } else {
+        showOtherUI();
+      }
+      try { chrome.runtime.sendMessage({ type: "SET_TAB_ICON", state: "blue" }); } catch (e) {}
+      return;
+    }
+
+    const mode = resp.mode || urlMode;
+    setModeBadge(mode);
+
+    if (mode === "screener") {
+      await showScreenerShell(resp, backend);
+      const armed = !!(resp.screener?.armed);
+      try {
+        chrome.runtime.sendMessage({ type: "SET_TAB_ICON", state: armed ? "green" : "blue" });
+      } catch (e) {}
+    } else if (mode === "chart") {
+      showChartShell(resp, null);
+      const capturing = !!(resp.captureEnabled ?? resp.enabled);
+      updateCaptureUI(capturing);
+      const iconState = capturing ? "green" : "blue";
+      try { chrome.runtime.sendMessage({ type: "SET_TAB_ICON", state: iconState }); } catch (e) {}
+    } else {
+      showOtherUI();
+    }
+  });
+}
+
+function showChartShell(resp, err) {
+  $("chart-data").style.display = "";
+  $("screener-data").style.display = "none";
+  $("capture-section").style.display = "";
+  $("screener-hint").style.display = "none";
+  setModeBadge("chart");
+
+  if (!resp) {
+    $("symbol").textContent = err && (err.includes("invalidated") || err.includes("context"))
+      ? "reload the webull tab"
+      : "no response (is the chart loaded?)";
+    $("tf").textContent = "—";
+    $("buf").textContent = "—";
+    $("last-received").textContent = "—";
+    $("last-pushed").textContent = "—";
+    $("tab-id").textContent = "—";
+    updateCaptureUI(false);
+    return;
+  }
+
+  $("symbol").textContent = resp.symbol || "—";
+  $("tf").textContent = resp.timeframe || "—";
+
+  const sizes = resp.bufferSizes || {};
+  const totalBars = Object.values(sizes).reduce((a, b) => a + b, 0);
+  const numSeries = Object.keys(sizes).length;
+  $("buf").textContent = `${totalBars} bars / ${numSeries} series`;
+  $("last-received").textContent = agoText(resp.lastDataTs);
+  $("last-pushed").textContent = agoText(resp.lastPushedTs);
+  $("tab-id").textContent = resp.tabId || "—";
+}
+
+async function showScreenerShell(resp, backend) {
+  $("chart-data").style.display = "none";
+  $("screener-data").style.display = "";
+  $("capture-section").style.display = "none";
+  $("screener-hint").style.display = "";
+  setModeBadge("screener");
+
+  const s = resp?.screener || {};
+  const armed = !!s.armed;
+  const stateEl = $("screener-state");
+  if (armed) {
+    stateEl.textContent = "YES — ingesting";
+    stateEl.style.color = "#86efac";
+  } else {
+    stateEl.textContent = "NO — waiting";
+    stateEl.style.color = "#fdba74";
+  }
+
+  $("screener-region").textContent = s.uiRegion || "—";
+  $("screener-active").textContent = s.activeScreener?.name || "—";
+  const configured = (s.configured || []).map((c) => c.name).join(", ");
+  $("screener-configured").textContent = configured || "Gap'n'Go";
+  $("screener-reason").textContent = s.armReason || "—";
+
+  const diag = s.diagnostics || {};
+  const diagParts = [
+    diag.nameSelected
+      ? `selected: ${(diag.selectedNames || diag.foundNames || []).join(", ") || "yes"}`
+      : "selected: no",
+    diag.nameFoundInPage
+      ? `listed: ${(diag.foundNames || []).join(", ") || "?"}`
+      : "listed: no",
+    `region: ${diag.region || s.uiRegion || "?"}`,
+    s.manual ? "manual arm" : "auto (select only)",
+    s.droppedBatches != null ? `dropped: ${s.droppedBatches}` : null,
+  ].filter(Boolean);
+  $("screener-diag").textContent = diagParts.join(" · ");
+
+  const armBtn = $("toggle-arm");
+  if (armBtn) {
+    if (armed) {
+      armBtn.textContent = s.manual ? "Disarm" : "Disarm (override)";
+      armBtn.style.background = "#450a0a";
+      armBtn.style.borderColor = "#7f1d1d";
+    } else {
+      armBtn.textContent = "Arm Gap'n'Go";
+      armBtn.style.background = "#1e3a5f";
+      armBtn.style.borderColor = "#1d4ed8";
+    }
+  }
+
+  $("screener-unique").textContent = s.uniqueTickers != null ? String(s.uniqueTickers) : "—";
+  $("screener-batch").textContent = s.lastRowCount != null ? String(s.lastRowCount) : "—";
+  $("screener-pushed").textContent = agoText(s.lastPushTs || resp?.lastPushedTs);
+
+  const newTickers = s.lastResult?.new_tickers;
+  $("screener-new").textContent = Array.isArray(newTickers)
+    ? (newTickers.length ? newTickers.join(", ") : "none")
+    : "—";
+
+  const sample = s.sampleTickers || [];
+  if (!armed) {
+    $("screener-sample").textContent = "Open Gap'n'Go, or click Arm Gap'n'Go below";
+  } else {
+    $("screener-sample").textContent = sample.length
+      ? sample.join(" · ")
+      : "armed — waiting for result rows…";
+  }
+
+  // Session from last result or backend
+  let sessionDate = s.lastResult?.session_date || "—";
+  let sessionCount = "—";
+  if (backend?.ok && backend.base) {
+    const sess = await fetchSessionToday(backend.base);
+    if (sess) {
+      if (sess.session_date) sessionDate = sess.session_date;
+      if (sess.ticker_count != null) sessionCount = String(sess.ticker_count);
+      else if (Array.isArray(sess.tickers)) sessionCount = String(sess.tickers.length);
+    }
+  }
+  $("session-date").textContent = sessionDate;
+  $("session-count").textContent = sessionCount;
+}
+
+async function toggleArm() {
+  const tab = await getTargetTab();
+  if (!tab?.id || detectModeFromUrl(tab.url) !== "screener") return;
+
+  // Read current button to decide arm vs disarm
+  const btn = $("toggle-arm");
+  const currentlyArmed = btn && btn.textContent.toLowerCase().includes("disarm");
+  const payload = currentlyArmed
+    ? { type: "SET_SCREENER_ARM", armed: false }
+    : { type: "SET_SCREENER_ARM", armed: true, screener_key: "gap-n-go" };
+
+  chrome.tabs.sendMessage(tab.id, payload, (resp) => {
+    if (chrome.runtime.lastError) {
+      console.error("[popup] SET_SCREENER_ARM error:", chrome.runtime.lastError.message);
+      return;
+    }
+    console.log("[popup] arm response", resp);
+    refresh();
+  });
+}
+
 async function toggleCapture() {
   console.log("[popup] Start/Stop Capture button clicked");
 
   const tab = await getTargetTab();
-  if (!tab?.id || !tab.url || !tab.url.includes("app.webull.com/stocks")) {
-    showNoWebullUI();
+  if (!tab?.id || detectModeFromUrl(tab.url) !== "chart") {
+    showOtherUI();
     return;
   }
 
-  console.log("[popup] Targeting tab", tab.id, tab.url);
-
-  // Determine desired state from current button text
   const currentlyOn = $("toggle-capture").textContent.includes("Stop");
   const newEnabled = !currentlyOn;
 
-  // Optimistically update UI immediately
   updateCaptureUI(newEnabled);
-
-  // Optimistically update the toolbar icon right away
   const targetIcon = newEnabled ? "green" : "blue";
   try { chrome.runtime.sendMessage({ type: "SET_TAB_ICON", state: targetIcon }); } catch (e) {}
 
   chrome.tabs.sendMessage(tab.id, { type: "SET_MONITORING", enabled: newEnabled }, (resp) => {
     if (chrome.runtime.lastError) {
       console.error("[popup] SET_MONITORING error:", chrome.runtime.lastError.message);
-      updateCaptureUI(!newEnabled); // revert on error
+      updateCaptureUI(!newEnabled);
       return;
     }
-    console.log("[popup] SET_MONITORING response:", resp);
-
     if (newEnabled) {
-      chrome.tabs.sendMessage(tab.id, { type: "FORCE_PUSH" }, (fpResp) => {
+      chrome.tabs.sendMessage(tab.id, { type: "FORCE_PUSH" }, () => {
         if (chrome.runtime.lastError) {
           console.warn("[popup] FORCE_PUSH error:", chrome.runtime.lastError.message);
-        } else {
-          console.log("[popup] FORCE_PUSH done");
         }
       });
     }
-    refresh(); // sync with actual state from content
+    refresh();
   });
 }
 
+function goToWebull() {
+  chrome.tabs.create({ url: "https://app.webull.com/stocks" });
+  window.close();
+}
 
+function goToScreener() {
+  chrome.tabs.create({ url: "https://app.webull.com/screener" });
+  window.close();
+}
 
 document.addEventListener("DOMContentLoaded", async () => {
   console.log("[popup] popup loaded");
   $("toggle-capture").addEventListener("click", toggleCapture);
+  const armBtn = $("toggle-arm");
+  if (armBtn) armBtn.addEventListener("click", toggleArm);
 
-  const goBtn = document.getElementById("go-to-webull");
-  if (goBtn) {
-    goBtn.addEventListener("click", goToWebull);
-  }
+  const goBtn = $("go-to-webull");
+  if (goBtn) goBtn.addEventListener("click", goToWebull);
+  const goScr = $("go-to-screener");
+  if (goScr) goScr.addEventListener("click", goToScreener);
 
-  // Initial determination + paint (cheap early exit if not on stocks)
   const initialTab = await getTargetTab();
   await refresh();
 
-  // Only start periodic refresh polling if we are currently on a webull stocks tab.
-  // On any other page: no timers, no pings, almost no activity after the first check.
-  if (initialTab?.id && initialTab.url && initialTab.url.includes("app.webull.com/stocks")) {
+  if (initialTab?.id && isMonitorUrl(initialTab.url)) {
     setInterval(refresh, 1500);
   }
 });

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stock Monitor — Sessions</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div>
+        <h1>Stock Monitor</h1>
+        <p class="sub">Daily screener sessions · America/New_York</p>
+      </div>
+      <div class="header-actions">
+        <span id="conn" class="pill warn">checking…</span>
+        <button id="btn-refresh" type="button" title="Refresh">Refresh</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="panel sessions-panel">
+        <div class="panel-head">
+          <h2>Sessions</h2>
+          <span id="session-count" class="muted">—</span>
+        </div>
+        <div id="sessions-list" class="list">
+          <div class="empty">Loading sessions…</div>
+        </div>
+      </aside>
+
+      <section class="panel tickers-panel">
+        <div class="panel-head">
+          <div>
+            <h2 id="detail-title">Tickers</h2>
+            <p id="detail-meta" class="muted">Select a session</p>
+          </div>
+          <div class="detail-stats">
+            <span id="ticker-count" class="pill">0 tickers</span>
+          </div>
+        </div>
+        <div class="toolbar">
+          <input id="filter" type="search" placeholder="Filter ticker or name…" autocomplete="off" />
+        </div>
+        <div class="table-wrap">
+          <table id="tickers-table">
+            <thead>
+              <tr>
+                <th class="col-sym">Ticker</th>
+                <th class="col-name">Name</th>
+                <th class="col-scr">Screener</th>
+                <th class="col-wl">Watchlist</th>
+                <th class="col-time">First seen</th>
+                <th class="col-time">Last seen</th>
+              </tr>
+            </thead>
+            <tbody id="tickers-body">
+              <tr class="empty-row"><td colspan="6">Select a session to view tickers</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

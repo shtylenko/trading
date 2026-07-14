@@ -1,27 +1,13 @@
 #!/usr/bin/env python3
 """
-Minimal local receiver for Webull candle data.
+Minimal local receiver for Webull chart candles + screener daily sessions.
 
-Primary goal (per spec answers 2026-07-02):
-  Collect **closed** candlebar data into local JSON file(s).
+Chart (POST /push):
+  Closed candlebar data → local JSON files under data/captures/.
 
-Rules applied by the extension:
-- Only fully closed candles (no forming/incomplete bars).
-- Pushes happen when a candle closes (newer bar timestamp seen for that symbol+tf).
-- The timeframe that is currently open/selected in the Webull chart is recorded.
-- Multiple tabs can have monitoring enabled independently.
-
-POST /push  (from extension)
-  {
-    "symbol": "AAPL",
-    "timeframe": "5m",     // the active/open timeframe on that tab
-    "captured_at": "...",
-    "candles": [ {"t": ms_since_epoch, "o":, "h":, "l":, "c":, "v": }, ... ]   // closed bars only
-  }
-
-Outputs (backend/data/captures/):
-  candles.ndjson                     (append-only log, one line per candle)
-  {SYMBOL}_{TF}.json                 (current view, deduped by t)
+Screener (POST /screener):
+  Rows from Webull screener tab → SQLite daily session membership + raw snapshots.
+  Session day rolls on America/New_York calendar date.
 
 Run:  python3 receiver.py   (or ./run.sh)
 """
@@ -37,7 +23,11 @@ from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from threading import RLock
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
+
+import db as session_db
+import screener_config
+import webull_watchlist
 
 # Config
 HOST = "127.0.0.1"
@@ -49,7 +39,10 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DEBUG_DIR = DATA_DIR / "debug"
 DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
+DB_PATH = Path(os.environ.get("DB_PATH", str(BASE_DIR / "data" / "stock_monitor.db")))
+
 NDJSON_PATH = DATA_DIR / "candles.ndjson"
+STATIC_DIR = BASE_DIR / "static"
 lock = RLock()  # reentrant to allow append inside update lock
 
 MAX_BODY_BYTES = int(os.environ.get("MAX_BODY_BYTES", str(5 * 1024 * 1024)))
@@ -57,6 +50,28 @@ MAX_DEBUG_FILES = int(os.environ.get("MAX_DEBUG_FILES", "500"))
 MIN_TS_MS = 946684800000      # 2000-01-01
 MAX_TS_MS = 4102444800000     # 2100-01-01
 SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+STATIC_CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+}
+
+
+def init_session_db(path: Path | None = None) -> None:
+    """Initialize SQLite path (callable from tests with a temp path)."""
+    db_path = path or DB_PATH
+    session_db.set_db_path(db_path)
+    # Share the same SQLite file for watchlist sync tracking
+    webull_watchlist.set_db_path(db_path)
+
+
+# Default init at import so the server is ready; tests re-point via init_session_db.
+init_session_db()
 
 
 def now_iso() -> str:
@@ -269,6 +284,37 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_bytes(self, data: bytes, content_type: str, status: int = 200):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _safe_static_path(self, url_path: str) -> Path | None:
+        """Resolve /static/... under STATIC_DIR; reject path traversal."""
+        rel = url_path[len("/static/"):] if url_path.startswith("/static/") else url_path.lstrip("/")
+        if not rel or ".." in rel.split("/"):
+            return None
+        candidate = (STATIC_DIR / rel).resolve()
+        try:
+            candidate.relative_to(STATIC_DIR.resolve())
+        except ValueError:
+            return None
+        if not candidate.is_file():
+            return None
+        return candidate
+
+    def _serve_static(self, url_path: str) -> bool:
+        path = self._safe_static_path(url_path)
+        if path is None:
+            return False
+        data = path.read_bytes()
+        ctype = STATIC_CONTENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
+        self._send_bytes(data, ctype)
+        return True
+
     def do_OPTIONS(self):
         self.send_response(204)
         cors_origin = self._cors_origin()
@@ -279,54 +325,165 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
+    def _read_json_body(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            return None, ({"error": "bad content length"}, 400)
+        if length <= 0:
+            return None, ({"error": "empty body"}, 400)
+        if length > MAX_BODY_BYTES:
+            return None, ({"error": "body too large", "max_bytes": MAX_BODY_BYTES}, 413)
+        raw = self.rfile.read(length)
+        try:
+            payload = json.loads(raw)
+        except Exception as e:
+            return None, ({"error": "bad json", "detail": str(e)}, 400)
+        if not isinstance(payload, dict):
+            return None, ({"error": "payload must be an object"}, 400)
+        return payload, None
+
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path in ("/health", "/api/health"):
+        path = parsed.path
+        qs = parse_qs(parsed.query or "")
+
+        if path in ("/health", "/api/health"):
+            db_info = session_db.health_check()
             self._send_json({
                 "status": "ok",
-                "version": "0.1.0-minimal-json",
+                "version": "0.2.1-named-screeners",
                 "ndjson": str(NDJSON_PATH),
                 "data_dir": str(DATA_DIR),
+                "db": db_info,
             })
             return
-        if parsed.path == "/":
+
+        if path in ("/config/screeners", "/api/config/screeners"):
+            self._send_json(screener_config.public_config())
+            return
+
+        if path == "/session/today":
+            sess = session_db.get_session(None, include_tickers=True)
+            if sess is None:
+                self._send_json({
+                    "ok": True,
+                    "session_date": session_db.session_date_today(),
+                    "tickers": [],
+                    "ticker_count": 0,
+                    "exists": False,
+                })
+            else:
+                self._send_json({"ok": True, "exists": True, **sess})
+            return
+
+        if path == "/session":
+            date = (qs.get("date") or [None])[0]
+            if not date:
+                self._send_json({"error": "date query param required (YYYY-MM-DD)"}, 400)
+                return
+            sess = session_db.get_session(date, include_tickers=True)
+            if sess is None:
+                self._send_json({"ok": True, "exists": False, "session_date": date, "tickers": [], "ticker_count": 0})
+            else:
+                self._send_json({"ok": True, "exists": True, **sess})
+            return
+
+        if path == "/sessions":
+            try:
+                limit = int((qs.get("limit") or ["30"])[0])
+            except ValueError:
+                limit = 30
+            limit = max(1, min(limit, 365))
+            self._send_json({"ok": True, "sessions": session_db.list_sessions(limit=limit)})
+            return
+
+        if path in ("/watchlist/status", "/api/watchlist/status"):
+            cfg = webull_watchlist.load_config()
+            date = (qs.get("date") or [None])[0] or session_db.session_date_today()
+            try:
+                rows = webull_watchlist.list_sync_for_session(date)
+            except Exception as e:
+                rows = []
+                err = str(e)
+            else:
+                err = None
             self._send_json({
-                "name": "webull-stock-monitor minimal receiver",
-                "endpoints": ["/push (POST)", "/health", "/api/health"],
-                "output": "local JSON files under data/captures/",
+                "ok": err is None,
+                "session_date": date,
+                "config": {
+                    "enabled": cfg.get("enabled"),
+                    "dry_run": cfg.get("dry_run"),
+                    "watchlist_name": cfg.get("watchlist_name"),
+                    "screener_keys": cfg.get("screener_keys"),
+                    "has_credentials": bool(
+                        os.environ.get("WEBULL_APP_KEY") and os.environ.get("WEBULL_APP_SECRET")
+                    ),
+                },
+                "sync": rows,
+                "error": err,
+            })
+            return
+
+        # Web UI
+        if path in ("/", "/ui", "/ui/"):
+            index = STATIC_DIR / "index.html"
+            if index.is_file():
+                self._send_bytes(index.read_bytes(), "text/html; charset=utf-8")
+            else:
+                self._send_json({"error": "UI not found — missing static/index.html"}, 404)
+            return
+
+        if path.startswith("/static/"):
+            if self._serve_static(path):
+                return
+            self._send_json({"error": "static file not found"}, 404)
+            return
+
+        if path in ("/api", "/api/"):
+            self._send_json({
+                "name": "webull-stock-monitor receiver",
+                "version": "0.2.1-named-screeners",
+                "ui": "http://127.0.0.1:8787/",
+                "endpoints": [
+                    "GET / — session UI",
+                    "POST /push — closed candles → JSON files",
+                    "POST /screener — screener rows → daily session SQLite",
+                    "GET /config/screeners — enabled named screeners (Gap'n'Go, …)",
+                    "GET /session/today",
+                    "GET /session?date=YYYY-MM-DD",
+                    "GET /sessions",
+                    "GET /health",
+                    "POST /debug/dom",
+                ],
+                "output": {
+                    "candles": str(DATA_DIR),
+                    "db": str(session_db.get_db_path()),
+                },
             })
             return
         self._send_json({"error": "not found"}, 404)
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path not in ("/push", "/api/candles"):
-            if parsed.path == "/debug/dom":
-                self.handle_debug_dom()
-                return
-            self._send_json({"error": "use /push"}, 404)
+        path = parsed.path
+
+        if path == "/debug/dom":
+            self.handle_debug_dom()
             return
 
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-        except ValueError:
-            self._send_json({"error": "bad content length"}, 400)
-            return
-        if length <= 0:
-            self._send_json({"error": "empty body"}, 400)
-            return
-        if length > MAX_BODY_BYTES:
-            self._send_json({"error": "body too large", "max_bytes": MAX_BODY_BYTES}, 413)
-            return
-        raw = self.rfile.read(length)
-        try:
-            payload = json.loads(raw)
-        except Exception as e:
-            self._send_json({"error": "bad json", "detail": str(e)}, 400)
+        if path in ("/screener", "/api/screener"):
+            self.handle_screener()
             return
 
-        if not isinstance(payload, dict):
-            self._send_json({"error": "payload must be an object"}, 400)
+        if path not in ("/push", "/api/candles"):
+            self._send_json({"error": "use /push or /screener"}, 404)
+            return
+
+        payload, err = self._read_json_body()
+        if err:
+            body, status = err
+            self._send_json(body, status)
             return
 
         symbol = safe_name((payload.get("symbol") or "UNKNOWN").upper())
@@ -368,29 +525,100 @@ class Handler(BaseHTTPRequestHandler):
             "json_file": str(per_symbol_path(symbol, tf)),
         })
 
+    def handle_screener(self):
+        payload, err = self._read_json_body()
+        if err:
+            body, status = err
+            self._send_json(body, status)
+            return
+
+        rows = payload.get("rows") or []
+        if not isinstance(rows, list):
+            self._send_json({"error": "rows must be an array"}, 400)
+            return
+
+        source_url = payload.get("source_url") or payload.get("url")
+        captured_at = payload.get("captured_at") or now_iso()
+        tab_id = payload.get("tab_id") or "unknown"
+        session_date = payload.get("session_date")  # optional override (tests)
+        screener_key = payload.get("screener_key")
+        screener_name = payload.get("screener_name")
+
+        # Extension must arm on a configured My Screener (e.g. Gap'n'Go)
+        if not screener_key:
+            print(f"[receiver] REJECTED screener push from {tab_id}: missing screener_key (not armed)")
+            self._send_json({
+                "ok": False,
+                "error": "screener_key required — open My Screeners and select a configured screener",
+            }, 400)
+            return
+
+        cfg = screener_config.load_config()
+        enabled_keys = {s["key"] for s in screener_config.enabled_screeners(cfg)}
+        if screener_key not in enabled_keys:
+            print(f"[receiver] REJECTED screener push: key={screener_key!r} not in enabled config")
+            self._send_json({
+                "ok": False,
+                "error": f"screener_key {screener_key!r} is not an enabled configured screener",
+                "enabled": sorted(enabled_keys),
+            }, 400)
+            return
+
+        # Prefer canonical name from config
+        for s in screener_config.enabled_screeners(cfg):
+            if s["key"] == screener_key:
+                screener_name = s["name"]
+                break
+
+        print(
+            f"[receiver] screener push: {len(rows)} rows from {tab_id} "
+            f"screener={screener_name!r} ({screener_key})"
+        )
+
+        result = session_db.upsert_screener_rows(
+            rows,
+            source_url=source_url,
+            captured_at=captured_at,
+            session_date=session_date,
+            screener_key=screener_key,
+            screener_name=screener_name,
+        )
+        if result.get("new_tickers"):
+            print(f"[receiver] new session tickers ({screener_key}): {result['new_tickers']}")
+            # Auto-add brand-new Gap'n'Go names to Webull "Today's Gap'n'Go" watchlist
+            try:
+                wl = webull_watchlist.sync_new_tickers(
+                    result["new_tickers"],
+                    session_date=result.get("session_date") or session_date,
+                    screener_key=screener_key,
+                )
+                result["watchlist"] = wl
+                if wl.get("added"):
+                    mode = "dry-run " if wl.get("dry_run") else ""
+                    print(
+                        f"[receiver] watchlist {mode}sync → {wl.get('watchlist_name')}: "
+                        f"added {wl['added']}"
+                    )
+                if wl.get("errors"):
+                    print(f"[receiver] watchlist sync errors: {wl['errors']}")
+            except Exception as e:
+                print(f"[receiver] watchlist sync failed: {e}")
+                result["watchlist"] = {"ok": False, "errors": [str(e)]}
+
+        self._send_json(result)
+
     def handle_debug_dom(self):
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-        except ValueError:
-            self._send_json({"error": "bad content length"}, 400)
-            return
-        if length <= 0:
-            self._send_json({"error": "empty body"}, 400)
-            return
-        if length > MAX_BODY_BYTES:
-            self._send_json({"error": "body too large", "max_bytes": MAX_BODY_BYTES}, 413)
-            return
-        raw = self.rfile.read(length)
-        try:
-            payload = json.loads(raw)
-        except Exception as e:
-            self._send_json({"error": "bad json", "detail": str(e)}, 400)
+        payload, err = self._read_json_body()
+        if err:
+            body, status = err
+            self._send_json(body, status)
             return
 
         ts = int(payload.get("timestamp", time.time() * 1000))
         reason = safe_name(payload.get("reason", "dom"), "dom")
         fname = f"{reason}-{ts}.json"
         path = DEBUG_DIR / fname
+        raw_size = len(json.dumps(payload).encode("utf-8"))
 
         with lock:
             atomic_write_json(path, payload)
@@ -404,23 +632,37 @@ class Handler(BaseHTTPRequestHandler):
             url = r.get("url", "") if isinstance(r, dict) else ""
             if "kline" in url.lower() or "bar" in url.lower() or "candle" in url.lower():
                 print(f"  >>> LOOKS LIKE KLINE URL: {url[:120]}")
+            if isinstance(url, str) and any(x in url.lower() for x in ("screener", "scanner", "rank")):
+                print(f"  >>> LOOKS LIKE SCREENER URL: {url[:120]}")
             print(f"  raw keys sample: {list(r.keys())[:6] if isinstance(r, dict) else 'array'}")
 
         self._send_json({
             "ok": True,
             "written": str(path),
-            "size": len(raw),
+            "size": raw_size,
         })
 
 
 def main():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Webull Stock Monitor — minimal JSON receiver (closed candles only)")
+    init_session_db()
+    print(f"Webull Stock Monitor — candles + screener sessions")
     print(f"Listening on http://{HOST}:{PORT}")
-    print(f"Writing to: {DATA_DIR}")
-    print("Only closed bars (no forming candles) from the active/open timeframe per tab.")
-    print("POST /push  — multiple tabs ok")
-    print("POST /debug/dom — DOM + RAW JSON dumps (DEBUG_ALL_RESPONSES mode is ON in inject.js)")
+    webull_watchlist.load_dotenv()
+    wl_cfg = webull_watchlist.load_config()
+    has_creds = bool(os.environ.get("WEBULL_APP_KEY") and os.environ.get("WEBULL_APP_SECRET"))
+    print(f"UI        → http://{HOST}:{PORT}/")
+    print(f"Candles   → {DATA_DIR}")
+    print(f"Sessions  → {session_db.get_db_path()}")
+    print(
+        f"Watchlist → {wl_cfg.get('watchlist_name')!r} "
+        f"enabled={wl_cfg.get('enabled')} dry_run={wl_cfg.get('dry_run') or not has_creds} "
+        f"creds={'yes' if has_creds else 'NO (set WEBULL_APP_KEY/SECRET)'}"
+    )
+    print("POST /push     — closed candles (chart tabs)")
+    print("POST /screener — screener rows → daily session (America/New_York)")
+    print("GET  /session/today | /session?date= | /sessions | /watchlist/status")
+    print("POST /debug/dom")
     print("Ctrl-C to stop.\n")
 
     server = HTTPServer((HOST, PORT), Handler)

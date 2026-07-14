@@ -1,0 +1,11 @@
+{
+  "enabled": true,
+  "dry_run": false,
+  "watchlist_name": "Today's Gap'n'Go",
+  "screener_keys": ["gap-n-go"],
+  "instrument_category": "US_STOCK",
+  "reset_daily": true,
+  "region_id": "us",
+  "environment": "uat",
+  "notes": "Uses Webull OpenAPI watchlist endpoints (same as MCP: get_watchlists, create_watchlist, add_watchlist_instruments). Paper/test apps → environment=uat (default). Live prod apps → environment=prod. Set WEBULL_APP_KEY + WEBULL_APP_SECRET in backend/.env"
+}

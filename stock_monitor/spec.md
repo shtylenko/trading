@@ -2,9 +2,12 @@
 
 **Project location**: `/Users/shtylenko/Hermes/projects/trading/stock_monitor`
 
-**Goal**: A Chrome extension + local backend that observes an open chart on https://app.webull.com/stocks (and related quote pages), extracts the visible/loaded candlestick (OHLCV) data in real time or near-real time, and pushes it to a local backend for storage, querying, and downstream use.
+**Goal**: A Chrome extension + local backend that:
 
-This gives you a reliable way to capture the exact candles the trader is viewing inside the Webull web UI (including any custom timeframe, extended hours view, or symbol the user has navigated to), without relying solely on external APIs.
+1. Observes an open **chart** on https://app.webull.com/stocks (and related quote pages), extracts closed candlestick (OHLCV) data, and stores it locally.
+2. Observes an open **screener** on https://app.webull.com/screener, and when a new ticker appears, adds it to a **daily session** in local SQLite (with full raw row snapshots).
+
+This gives you a reliable way to capture the exact candles the trader is viewing, and a day-by-day membership list of names that showed up in your screener — without relying solely on external APIs.
 
 ---
 
@@ -87,8 +90,15 @@ This gives you a reliable way to capture the exact candles the trader is viewing
 
 **Constraints**: UNIQUE(symbol_id, timeframe_id, ts)
 
-**sessions** (optional v1 or v2)
-- id, started_at, symbol, tf, notes
+**sessions (v0.2 — daily screener sessions, SQLite)**
+
+Session day rolls on **America/New_York** calendar date. Auto-created on first screener push of that day.
+
+- **daily_sessions**: id, session_date (UNIQUE YYYY-MM-DD), created_at, updated_at
+- **session_tickers**: id, session_id, ticker (UNIQUE per session), ticker_id, name, first_seen_at, last_seen_at, first_source, meta_json, last_raw_hash, last_snapshot_at
+- **screener_snapshots**: id, session_id, ticker, seen_at, raw_json, source_url
+
+Chart candles remain in JSON files under `data/captures/` (not SQLite).
 
 Indexes on (symbol, ts), (symbol, tf, ts)
 

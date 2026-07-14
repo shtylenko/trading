@@ -1,8 +1,8 @@
 // inject.js — Runs in the PAGE MAIN world on app.webull.com
-// Purpose: Hook network activity (fetch, XHR, WebSocket) to discover candle data payloads.
+// Purpose: Hook network activity (fetch, XHR, WebSocket) to discover:
+//   - candle/kdata payloads (chart tabs)
+//   - screener row lists (screener tab)
 // This file is listed in web_accessible_resources and injected by content.js.
-//
-// Heuristics will improve after we observe real traffic on a logged-in chart.
 //
 // Communication: window.postMessage({ source: "webull-monitor-inject", type: "...", payload })
 
@@ -12,6 +12,8 @@
   // DEBUG: dump EVERY JSON response (only for initial discovery).
   // Set to false for normal operation (cleaner, less spam in debug folder).
   const DEBUG_ALL_RESPONSES = false;
+  // When true, also dump responses that look like screener lists (useful first live pass).
+  const DEBUG_SCREENER = true;
 
   function post(type, payload) {
     try {
@@ -189,6 +191,194 @@
     } catch (e) {}
   }
 
+  // --- Screener list detection ---
+  const SCREENER_URL_HINTS = [
+    "screener", "scanner", "wlas", "stock/screener", "strategy",
+    "rank", "filter", "screen", "queryTicker", "tickerList",
+  ];
+
+  function urlLooksLikeScreener(url) {
+    if (!url) return false;
+    const u = String(url).toLowerCase();
+    // kline/chart endpoints are not screener
+    if (u.includes("kdata") || u.includes("/charts/") || u.includes("kline")) return false;
+    return SCREENER_URL_HINTS.some((h) => u.includes(h.toLowerCase()));
+  }
+
+  function looksLikeScreenerRow(item) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    const hasSymbol =
+      item.symbol || item.disSymbol || item.tickerSymbol || item.code ||
+      (item.tickerId && (item.name || item.close != null || item.changeRatio != null));
+    if (!hasSymbol) return false;
+    // Prefer objects that also look quote-ish (avoid random entities)
+    const keys = Object.keys(item).map((k) => k.toLowerCase());
+    const quoteHints = [
+      "close", "change", "volume", "turnover", "marketcap", "market_value",
+      "changeratio", "pchg", "price", "name", "disname", "tickerid",
+    ];
+    const hits = quoteHints.filter((h) => keys.some((k) => k.includes(h))).length;
+    // symbol + tickerId alone is enough if URL already looks like screener
+    return hits >= 1 || !!(item.tickerId && (item.symbol || item.disSymbol));
+  }
+
+  function extractScreenerArrays(obj, depth = 0, maxDepth = 5, out = []) {
+    if (depth > maxDepth || !obj || typeof obj !== "object") return out;
+    if (Array.isArray(obj)) {
+      if (obj.length > 0 && obj.length <= 5000) {
+        const sample = obj.slice(0, 8);
+        const score = sample.filter(looksLikeScreenerRow).length;
+        if (score >= Math.min(2, sample.length) || (sample.length === 1 && score === 1)) {
+          out.push(obj);
+        }
+      }
+      // Also walk into array items (nested)
+      for (const item of obj.slice(0, 20)) {
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          extractScreenerArrays(item, depth + 1, maxDepth, out);
+        }
+      }
+      return out;
+    }
+    for (const k of Object.keys(obj)) {
+      // Prefer common list keys
+      const kl = k.toLowerCase();
+      if (["data", "list", "rows", "items", "result", "tickers", "records"].includes(kl) || depth < 3) {
+        extractScreenerArrays(obj[k], depth + 1, maxDepth, out);
+      }
+    }
+    return out;
+  }
+
+  function normalizeScreenerRow(item) {
+    if (!item || typeof item !== "object") return null;
+    const tickerRaw =
+      item.symbol || item.disSymbol || item.tickerSymbol || item.code || item.ticker;
+    let ticker = tickerRaw != null ? String(tickerRaw).trim().toUpperCase() : null;
+    const tickerId = item.tickerId != null ? String(item.tickerId) : (item.ticker_id != null ? String(item.ticker_id) : null);
+    // If only numeric tickerId, keep it as ticker fallback (content may map later)
+    if (!ticker && tickerId) ticker = tickerId;
+    if (!ticker) return null;
+    if (!/[A-Z]/.test(ticker) && !/^\d+$/.test(ticker)) return null;
+
+    const name = item.name || item.disName || item.companyName || item.desc || null;
+    const fieldKeys = [
+      "close", "change", "changeRatio", "pChRatio", "volume", "turnover",
+      "marketValue", "marketCap", "pe", "pb", "high", "low", "open", "preClose",
+      "vibrateRatio", "avgVol3M", "fiftyTwoWkHigh", "fiftyTwoWkLow",
+    ];
+    const fields = {};
+    for (const k of fieldKeys) {
+      if (item[k] != null) fields[k] = item[k];
+    }
+    // Include any other numeric fields lightly
+    for (const [k, v] of Object.entries(item)) {
+      if (fields[k] != null) continue;
+      if (typeof v === "number" && Number.isFinite(v) && Object.keys(fields).length < 40) {
+        fields[k] = v;
+      }
+    }
+
+    return {
+      ticker,
+      tickerId,
+      name: name ? String(name) : null,
+      fields,
+      raw: item,
+    };
+  }
+
+  function extractScreenerIdFromRequest(url, body) {
+    try {
+      const u = new URL(url, location.origin);
+      const keys = [
+        "screenerId", "screener_id", "strategyId", "strategy_id",
+        "id", "userScreenerId", "ruleId", "screenId",
+      ];
+      for (const k of keys) {
+        const v = u.searchParams.get(k);
+        if (v) return v;
+      }
+      if (body) {
+        let p = body;
+        if (typeof body === "string") {
+          try { p = JSON.parse(body); } catch { p = null; }
+        }
+        if (p && typeof p === "object") {
+          for (const k of keys) {
+            if (p[k] != null && p[k] !== "") return String(p[k]);
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function maybeExtractScreener(source, url, json, body) {
+    try {
+      if (!json) return;
+      const urlHint = urlLooksLikeScreener(url);
+      // On screener pages, also try payload-only detection (API paths vary)
+      const onScreenerPage = typeof location !== "undefined" &&
+        String(location.pathname || "").toLowerCase().includes("/screener");
+
+      if (!urlHint && !onScreenerPage) return;
+
+      const arrays = extractScreenerArrays(json);
+      if (!arrays.length) return;
+
+      // Prefer the longest qualifying array
+      arrays.sort((a, b) => b.length - a.length);
+      const best = arrays[0];
+      const rows = [];
+      const seen = new Set();
+      for (const item of best) {
+        const norm = normalizeScreenerRow(item);
+        if (!norm) continue;
+        if (seen.has(norm.ticker)) continue;
+        seen.add(norm.ticker);
+        rows.push(norm);
+      }
+      if (rows.length === 0) return;
+
+      // Avoid tiny false positives on non-screener pages unless URL strongly matches
+      if (!urlHint && rows.length < 3) return;
+
+      const requestScreenerId = extractScreenerIdFromRequest(url, body);
+
+      console.log("[webull-monitor-inject] screener rows", {
+        source,
+        count: rows.length,
+        url: String(url).substring(0, 120),
+        sample: rows[0]?.ticker,
+        request_screener_id: requestScreenerId,
+      });
+
+      post("SCREENER_ROWS", {
+        source,
+        url: String(url).substring(0, 400),
+        request_screener_id: requestScreenerId,
+        rows,
+      });
+
+      if (DEBUG_SCREENER || DEBUG_ALL_RESPONSES) {
+        post("DEBUG_JSON", {
+          source: source + "-screener",
+          url: String(url).substring(0, 400),
+          data_sample: {
+            type: "screener",
+            count: rows.length,
+            request_screener_id: requestScreenerId,
+            tickers: rows.slice(0, 15).map((r) => r.ticker),
+            sample_row_keys: Object.keys(rows[0]?.raw || {}).slice(0, 20),
+          },
+        });
+      }
+    } catch (e) {
+      // never break the page
+    }
+  }
+
   // Special parser for Webull kdata responses
   function parseKdataResponse(json, url) {
     try {
@@ -238,6 +428,7 @@
         if (json) {
           maybeDebugDump("fetch", url, json, body);
           maybeExtractTickerInfo(url, json);
+          maybeExtractScreener("fetch", url, json, body);
 
           // Special handling for Webull kdata (kline) responses
           if (url.includes("kdata")) {
@@ -319,6 +510,7 @@
           const json = JSON.parse(xhr.responseText);
           maybeDebugDump("xhr", _url, json, _body);
           maybeExtractTickerInfo(_url, json);
+          maybeExtractScreener("xhr", _url, json, _body);
 
           if (_url.includes("kdata")) {
             const kparsed = parseKdataResponse(json, _url);

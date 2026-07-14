@@ -1,0 +1,19 @@
+{
+  "require_my_screeners": true,
+  "screeners": [
+    {
+      "key": "gap-n-go",
+      "name": "Gap'n'Go",
+      "name_match": [
+        "gap'n'go",
+        "gap n go",
+        "gapngo",
+        "gap-n-go",
+        "gap and go"
+      ],
+      "enabled": true,
+      "webull_screener_id": null,
+      "notes": "My Screeners → select Gap'n'Go before data is ingested"
+    }
+  ]
+}

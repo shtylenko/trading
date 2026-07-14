@@ -1,8 +1,16 @@
-# Minimal path uses only stdlib (receiver.py).
-# If you ever run the FastAPI version:
-# pip install -r requirements.txt
-fastapi>=0.111
-uvicorn[standard]>=0.30
-pydantic>=2.7
-python-dotenv>=1.0
-# For future: pandas for exports, aiosqlite if async needed
+# Minimal path (receiver.py) is stdlib-only except optional Webull OpenAPI SDK
+# for "Today's Gap'n'Go" watchlist sync (same ops as Webull Cloud MCP watchlist tools).
+#
+#   pip install webull-openapi-python-sdk
+#   export WEBULL_APP_KEY=...
+#   export WEBULL_APP_SECRET=...
+#
+# Without credentials, watchlist sync runs in dry-run (logs only).
+webull-openapi-python-sdk>=2.0.0
+
+# FastAPI path (optional heavier backend):
+# fastapi>=0.111
+# uvicorn[standard]>=0.30
+# pydantic>=2.7
+# python-dotenv>=1.0
+

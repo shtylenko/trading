@@ -3,14 +3,16 @@
 // - Receive messages from content.js
 // - Proxy HTTP POSTs to local backend (avoids https->http mixed content)
 // - Health checks / config
-// - Future: alarms for periodic tasks
+// - Icon state: gray / blue (on page, idle) / green (chart capture OR screener armed)
 
 const DEFAULT_BACKEND = "http://127.0.0.1:8787";
 
 let backendUrl = DEFAULT_BACKEND;
 
 // === Dynamic action icon states ===
-// gray = not on Webull, blue = on Webull (capture off), green = capture active
+// gray  = not on Webull monitor page
+// blue  = chart capture off OR screener open but not armed
+// green = chart capture active OR screener armed (Gap'n'Go selected)
 const ICON_PATHS = {
   gray: {
     16: "icons/icon-gray-16.png",
@@ -28,6 +30,28 @@ const ICON_PATHS = {
     128: "icons/icon-green-128.png",
   },
 };
+
+function isWebullMonitorUrl(url) {
+  if (!url || !url.includes("app.webull.com")) return false;
+  try {
+    const p = new URL(url).pathname.toLowerCase();
+    return p.includes("/stocks") || p.includes("/screener") || p.includes("/quote");
+  } catch {
+    return url.includes("app.webull.com");
+  }
+}
+
+function detectModeFromUrl(url) {
+  if (!url) return "other";
+  try {
+    const p = new URL(url).pathname.toLowerCase();
+    if (p.includes("/screener")) return "screener";
+    if (p.includes("/stocks") || p.includes("/quote")) return "chart";
+    return "other";
+  } catch {
+    return "other";
+  }
+}
 
 async function setExtensionIcon(tabId, state) {
   const paths = ICON_PATHS[state] || ICON_PATHS.gray;
@@ -48,19 +72,20 @@ async function setDefaultIcon(state = "gray") {
 async function updateIconForTab(tabId) {
   try {
     const tab = await chrome.tabs.get(tabId);
-    if (!tab || !tab.url || !tab.url.includes("app.webull.com/stocks")) {
+    if (!tab || !isWebullMonitorUrl(tab.url)) {
       await setExtensionIcon(tabId, "gray");
       return;
     }
 
-    // On a Webull stocks page — ask the content script for capture state
-    chrome.tabs.sendMessage(tabId, { type: "GET_CHART_STATUS" }, (resp) => {
+    const mode = detectModeFromUrl(tab.url);
+
+    // Chart or screener — ask content script for active state
+    chrome.tabs.sendMessage(tabId, { type: "GET_PAGE_STATUS" }, (resp) => {
       if (chrome.runtime.lastError || !resp) {
-        // Content not ready or chart not loaded yet → blue (we are on webull)
         setExtensionIcon(tabId, "blue").catch(() => {});
         return;
       }
-      const state = resp.enabled ? "green" : "blue";
+      const state = iconStateFromStatus(resp, mode);
       setExtensionIcon(tabId, state).catch(() => {});
     });
   } catch (e) {
@@ -68,19 +93,37 @@ async function updateIconForTab(tabId) {
   }
 }
 
+function iconStateFromStatus(resp, urlMode) {
+  const mode = resp?.mode || urlMode || "other";
+  if (mode === "other") return "gray";
+  if (mode === "chart") {
+    return !!(resp.captureEnabled ?? resp.enabled) ? "green" : "blue";
+  }
+  if (mode === "screener") {
+    // Green when Gap'n'Go (configured screener) is armed
+    const armed = !!(resp.screener?.armed ?? resp.armed ?? resp.enabled);
+    return armed ? "green" : "blue";
+  }
+  return "blue";
+}
+
 // Track last known states (helpful for quick decisions)
 const tabCaptureState = new Map(); // tabId -> true/false
 
-async function applyIconState(tabId, enabled) {
+async function applyIconState(tabId, enabled, mode, armed) {
   if (!tabId) return;
-  tabCaptureState.set(tabId, !!enabled);
-  const state = enabled ? "green" : "blue";
+  const isActive = mode === "screener" ? !!(armed ?? enabled) : !!enabled;
+  tabCaptureState.set(tabId, isActive);
+  let state = "blue";
+  if (mode === "other") state = "gray";
+  else if (mode === "chart" && enabled) state = "green";
+  else if (mode === "screener" && (armed ?? enabled)) state = "green";
+  else state = "blue"; // on page but idle
   await setExtensionIcon(tabId, state);
 }
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[stock-monitor] Extension installed/updated");
-  // Load saved config if any
   chrome.storage.local.get(["backendUrl"], (result) => {
     if (result.backendUrl) backendUrl = result.backendUrl;
   });
@@ -113,6 +156,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // async
   }
 
+  if (message.type === "PUSH_SCREENER") {
+    const n = message.payload?.rows?.length || 0;
+    console.log("[background] received PUSH_SCREENER rows=", n);
+    handlePushScreener(message.payload)
+      .then((result) => {
+        console.log("[background] screener accepted", result?.new_tickers);
+        sendResponse({ ok: true, result });
+      })
+      .catch((err) => {
+        console.error("[background] screener push failed:", err);
+        sendResponse({ ok: false, error: String(err) });
+      });
+    return true;
+  }
+
   if (message.type === "DUMP_DEBUG") {
     console.log("[background] received DOM debug dump");
     handleDebugDump(message.payload)
@@ -124,22 +182,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "GET_STATUS") {
     sendResponse({
       backendUrl,
-      version: "0.1.0",
+      version: "0.2.1",
     });
     return true;
   }
 
+  if (message.type === "GET_SCREENER_CONFIG") {
+    handleGetScreenerConfig()
+      .then((config) => sendResponse({ ok: true, config }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+
   if (message.type === "PING") {
-    sendResponse({ status: "ok", version: "0.1.0" });
+    sendResponse({ status: "ok", version: "0.2.1" });
     return true;
   }
 
   if (message.type === "REPORT_ICON_STATE") {
-    // Content script is telling us the capture state changed
     const tabId = sender.tab?.id;
     if (tabId != null) {
       const enabled = !!message.enabled;
-      applyIconState(tabId, enabled).catch(() => {});
+      const mode = message.mode || "chart";
+      const armed = message.armed != null ? !!message.armed : enabled;
+      applyIconState(tabId, enabled, mode, armed).catch(() => {});
     }
     sendResponse({ ok: true });
     return true;
@@ -189,6 +255,46 @@ async function handlePushCandles(payload) {
   return resp.json();
 }
 
+async function handleGetScreenerConfig() {
+  const base = backendUrl.replace(/\/$/, "");
+  let url = `${base}/config/screeners`;
+  let resp = await fetch(url);
+  if (!resp.ok && resp.status === 404) {
+    resp = await fetch(`${base}/api/config/screeners`);
+  }
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`config error ${resp.status}: ${text}`);
+  }
+  return resp.json();
+}
+
+async function handlePushScreener(payload) {
+  const base = backendUrl.replace(/\/$/, "");
+  let url = `${base}/screener`;
+
+  let resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!resp.ok && resp.status === 404) {
+    url = `${base}/api/screener`;
+    resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`Backend screener error ${resp.status}: ${text}`);
+  }
+  return resp.json();
+}
+
 async function handleDebugDump(payload) {
   const base = backendUrl.replace(/\/$/, "");
   const url = `${base}/debug/dom`;
@@ -209,7 +315,7 @@ async function handleDebugDump(payload) {
 // Optional: external message support (similar to metaia example)
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   if (message.type === "PING") {
-    sendResponse({ status: "ok", version: "0.1.0" });
+    sendResponse({ status: "ok", version: "0.2.1" });
   }
   return true;
 });
@@ -217,7 +323,6 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 // === Tab event listeners to keep icon in sync ===
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
-  // When user switches to a tab, immediately reflect correct icon
   updateIconForTab(tabId);
 });
 

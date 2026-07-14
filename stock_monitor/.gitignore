@@ -26,8 +26,11 @@ venv/
 ENV/
 env/
 
-# Backend data
+# Backend data + secrets
 backend/data/
+backend/conf/
+backend/.env
+.env
 *.db
 *.db-shm
 *.db-wal

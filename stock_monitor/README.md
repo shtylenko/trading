@@ -49,53 +49,37 @@ Add more entries under `screeners` with `enabled: true` to monitor additional na
 
 ### Webull watchlist auto-sync (Today's Gap'n'Go)
 
-When a **new** ticker first appears in the Gap'n'Go session, the backend calls Webull OpenAPI
-watchlist methods (same ops as [Cloud MCP](https://developer.webull.com/apis/docs/AI-friendly-Resources/mcp/)
-`get_watchlists` / `create_watchlist` / `add_watchlist_instruments`):
+When a **new** ticker first appears in the Gap'n'Go session, the backend adds it to a Webull
+watchlist named **`Today's Gap'n'Go`**.
 
-1. Ensure a watchlist named **`Today's Gap'n'Go`** exists (create if needed)  
-2. On a new NY trading day, clear prior instruments (`reset_daily`)  
-3. Add each brand-new screener ticker once (tracked in SQLite)
-
-```bash
-# credentials
-cp backend/.env.example backend/.env   # fill WEBULL_APP_KEY / WEBULL_APP_SECRET
-pip install -r backend/requirements.txt
-
-# status
-curl -s 'http://127.0.0.1:8787/watchlist/status' | python3 -m json.tool
-```
-
-Without credentials the sync runs in **dry-run** (logged + DB status `dry_run`, nothing sent to Webull).
-
-#### CLI: add / remove / reconcile
+**Preferred auth: Cloud MCP OAuth** (retail paper/live account you log into in the browser)  
+Docs: https://developer.webull.com/apis/docs/AI-friendly-Resources/mcp/
 
 ```bash
 cd trading/stock_monitor/backend
+source .venv/bin/activate
 
-# List Webull watchlists (get_watchlists)
-python3 manage_watchlist.py list
+# One-time: browser login to Webull Cloud MCP (api.webull.com/mcp)
+python manage_watchlist.py login
 
-# Ensure "Today's Gap'n'Go" exists (create_watchlist)
-python3 manage_watchlist.py ensure
-
-# Show symbols on the list (get_watchlist_instruments)
-python3 manage_watchlist.py show
-
-# Manual add / remove (add_watchlist_instruments / remove_watchlist_instruments)
-python3 manage_watchlist.py add AAPL NVDA
-python3 manage_watchlist.py remove AAPL
-
-# Reconcile with today's local Gap'n'Go session DB:
-#   + add session tickers missing from the watchlist
-#   - remove watchlist tickers no longer in the session
-python3 manage_watchlist.py sync --remove-stale
-
-# Preview without writing
-python3 manage_watchlist.py sync --remove-stale --dry-run
+# Then:
+python manage_watchlist.py list
+python manage_watchlist.py ensure
+python manage_watchlist.py show
+python manage_watchlist.py add AAPL NVDA
+python manage_watchlist.py remove AAPL
+python manage_watchlist.py sync --remove-stale
 ```
 
-Ops map 1:1 to [Webull Cloud MCP watchlist tools](https://developer.webull.com/apis/docs/AI-friendly-Resources/mcp/).
+Tokens are stored in `backend/conf/webull_mcp_tokens.json` (gitignored).  
+Config: `config/watchlist.json` → `"auth_mode": "mcp_oauth"`.
+
+| Path | What it is |
+|------|------------|
+| **mcp_oauth** (default) | Cloud MCP OAuth → your Webull account watchlists |
+| **openapi_sdk** | App key/secret OpenAPI SDK (developer sandbox/prod API) |
+
+Optional fallback OpenAPI keys in `.env` only if you set `"auth_mode": "openapi_sdk"`.
 
 ### Daily sessions
 

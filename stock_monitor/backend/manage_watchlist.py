@@ -21,6 +21,9 @@ Credentials (backend/.env or environment):
   WEBULL_REGION_ID=us
 
 Examples:
+  # One-time browser OAuth login (Cloud MCP — paper/live account)
+  python3 manage_watchlist.py login
+
   # List all Webull watchlists
   python3 manage_watchlist.py list
 
@@ -30,7 +33,7 @@ Examples:
   # Reconcile with today's local session DB:
   #   - add tickers that are in the session but not on the watchlist
   #   - remove tickers that are on the watchlist but no longer in the session
-  python3 manage_watchlist.py sync
+  python3 manage_watchlist.py sync --remove-stale
 
   # Manual add / remove
   python3 manage_watchlist.py add AAPL NVDA
@@ -64,19 +67,20 @@ def _cfg(args: argparse.Namespace) -> dict:
 
 
 # Reuse one client instance per process so dry-run state (created lists / symbols) persists
-_CLIENT: wl.WebullWatchlistClient | None = None
+_CLIENT = None
 
 
-def _client(cfg: dict) -> wl.WebullWatchlistClient:
+def _client(cfg: dict):
     global _CLIENT
     dry = bool(cfg.get("dry_run"))
-    if _CLIENT is not None and _CLIENT.dry_run == dry:
+    if _CLIENT is not None and getattr(_CLIENT, "dry_run", False) == dry:
         return _CLIENT
-    _CLIENT = wl.WebullWatchlistClient.from_env(
-        region_id=str(cfg.get("region_id") or "us"),
-        environment=str(cfg.get("environment") or "prod"),
-        dry_run=dry,
-    )
+    if dry:
+        _CLIENT = wl.WebullWatchlistClient(data_client=None, dry_run=True)
+        return _CLIENT
+    # Prefer MCP OAuth (retail paper/live account) unless config says openapi_sdk
+    cfg = dict(cfg)
+    _CLIENT = wl.make_client(cfg)
     return _CLIENT
 
 
@@ -88,27 +92,56 @@ def _print_json(obj) -> None:
     print(json.dumps(obj, indent=2, default=str))
 
 
+def cmd_login(args: argparse.Namespace) -> int:
+    """Browser OAuth login for Webull Cloud MCP (api.webull.com/mcp)."""
+    import webull_mcp
+    try:
+        webull_mcp.login_interactive(open_browser=not args.no_browser)
+    except webull_mcp.McpError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    # Smoke-test: initialize + list tools path
+    try:
+        init = webull_mcp.initialize_session()
+        print("MCP initialize OK:", json.dumps(init, default=str)[:200])
+    except Exception as e:
+        print(f"Note: MCP initialize after login: {e}")
+    return 0
+
+
+def cmd_logout(args: argparse.Namespace) -> int:
+    import webull_mcp
+    webull_mcp.clear_tokens()
+    print("Cleared Cloud MCP tokens.")
+    return 0
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     """get_watchlists"""
     wl.load_dotenv()
     cfg = _cfg(args)
-    client = _client(cfg)
-    lists = client.get_watchlists()
-    if client.dry_run and not lists:
-        print("(dry-run / no credentials — cannot fetch live watchlists)")
-        print("Set WEBULL_APP_KEY and WEBULL_APP_SECRET to call get_watchlists.")
+    try:
+        client = _client(cfg)
+        lists = client.get_watchlists()
+    except Exception as e:
+        print(str(e), file=sys.stderr)
+        print("\nIf using MCP OAuth, run:  python manage_watchlist.py login", file=sys.stderr)
+        return 1
+    if getattr(client, "dry_run", False) and not lists:
+        print("(dry-run — no live watchlists)")
         return 0
     if not lists:
-        print("No watchlists returned.")
+        print("No watchlists returned (empty account or parse failed).")
         return 0
-    print(f"{'ID':<24}  {'NAME'}")
-    print("-" * 50)
+    print(f"{'ID':<40}  {'NAME'}")
+    print("-" * 60)
     for w in lists:
-        wid = w.get("watchlist_id") or w.get("id") or "?"
+        wid = str(w.get("watchlist_id") or w.get("id") or "?")
         name = w.get("name") or "?"
         marker = "  <-- target" if name == cfg.get("watchlist_name") else ""
-        print(f"{wid:<24}  {name}{marker}")
+        print(f"{wid:<40}  {name}{marker}")
     print(f"\n{len(lists)} watchlist(s)")
+    print(f"auth_mode={cfg.get('auth_mode')}")
     return 0
 
 
@@ -332,6 +365,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    p_login = sub.add_parser(
+        "login",
+        parents=[common],
+        help="Browser OAuth login to Webull Cloud MCP (required once)",
+    )
+    p_login.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not auto-open browser; print URL only",
+    )
+    p_login.set_defaults(func=cmd_login)
+
+    p_logout = sub.add_parser(
+        "logout",
+        parents=[common],
+        help="Clear saved Cloud MCP OAuth tokens",
+    )
+    p_logout.set_defaults(func=cmd_logout)
 
     p_list = sub.add_parser(
         "list",

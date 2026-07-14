@@ -38,12 +38,15 @@ _client_factory: Callable[[], Any] | None = None  # test override
 DEFAULT_CONFIG = {
     "enabled": True,
     "dry_run": False,
+    # mcp_oauth  → Cloud MCP OAuth (browser login) — retail paper/live account
+    # openapi_sdk → App key/secret OpenAPI SDK — developer sandbox/prod API
+    "auth_mode": "mcp_oauth",
     "watchlist_name": "Today's Gap'n'Go",
     "screener_keys": ["gap-n-go"],
     "instrument_category": "US_STOCK",
     "reset_daily": True,
     "region_id": "us",
-    # Paper / test OpenAPI apps use uat; live production apps use prod.
+    # Only used when auth_mode=openapi_sdk
     "environment": "uat",
 }
 
@@ -95,7 +98,32 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
         cfg["region_id"] = os.environ["WEBULL_REGION_ID"]
     if os.environ.get("WEBULL_ENVIRONMENT"):
         cfg["environment"] = os.environ["WEBULL_ENVIRONMENT"]
+    if os.environ.get("WEBULL_AUTH_MODE"):
+        cfg["auth_mode"] = os.environ["WEBULL_AUTH_MODE"].strip().lower()
     return cfg
+
+
+def make_client(cfg: dict | None = None) -> Any:
+    """Build the active watchlist client from config (MCP OAuth or OpenAPI SDK)."""
+    cfg = cfg or load_config()
+    mode = str(cfg.get("auth_mode") or "mcp_oauth").lower().strip()
+    dry = bool(cfg.get("dry_run"))
+
+    if dry:
+        return WebullWatchlistClient(data_client=None, dry_run=True)
+
+    if mode in ("mcp_oauth", "mcp", "oauth", "cloud_mcp"):
+        import webull_mcp
+        # Ensure we have a token; raise a clear error if not logged in
+        webull_mcp.get_valid_access_token()
+        return webull_mcp.WebullMcpWatchlistClient()
+
+    # Legacy / developer API path
+    return WebullWatchlistClient.from_env(
+        region_id=str(cfg.get("region_id") or "us"),
+        environment=str(cfg.get("environment") or "uat"),
+        dry_run=False,
+    )
 
 
 def set_db_path(path: Path | str) -> None:
@@ -526,22 +554,38 @@ def sync_new_tickers(
         return result
 
     dry = bool(cfg.get("dry_run"))
-    # Auto dry-run if credentials missing
     load_dotenv()
-    if not os.environ.get("WEBULL_APP_KEY") or not os.environ.get("WEBULL_APP_SECRET"):
-        dry = True
-        result["actions"].append("no WEBULL_APP_KEY/SECRET — dry_run mode")
+    mode = str(cfg.get("auth_mode") or "mcp_oauth").lower()
 
     if client is None:
         if _client_factory:
             client = _client_factory()
+        elif dry:
+            client = WebullWatchlistClient(data_client=None, dry_run=True)
+            result["actions"].append("dry_run=true")
+        elif mode in ("mcp_oauth", "mcp", "oauth", "cloud_mcp"):
+            try:
+                client = make_client(cfg)
+                result["actions"].append("auth_mode=mcp_oauth")
+            except Exception as e:
+                result["ok"] = False
+                result["errors"].append(str(e))
+                for t in to_add:
+                    _record_sync(date, t, status="error", watchlist_name=str(cfg.get("watchlist_name")), error=str(e))
+                return result
         else:
+            # OpenAPI SDK — dry-run if no app keys
+            if not os.environ.get("WEBULL_APP_KEY") or not os.environ.get("WEBULL_APP_SECRET"):
+                dry = True
+                result["actions"].append("no WEBULL_APP_KEY/SECRET — dry_run mode")
             client = WebullWatchlistClient.from_env(
                 region_id=str(cfg.get("region_id") or "us"),
-                environment=str(cfg.get("environment") or "prod"),
+                environment=str(cfg.get("environment") or "uat"),
                 dry_run=dry,
             )
-    result["dry_run"] = client.dry_run
+            result["actions"].append(f"auth_mode=openapi_sdk dry_run={client.dry_run}")
+
+    result["dry_run"] = bool(getattr(client, "dry_run", False))
 
     name = str(cfg.get("watchlist_name") or "Today's Gap'n'Go")
     category = str(cfg.get("instrument_category") or "US_STOCK")

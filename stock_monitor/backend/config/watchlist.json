@@ -1,11 +1,12 @@
 {
   "enabled": true,
   "dry_run": false,
+  "auth_mode": "mcp_oauth",
   "watchlist_name": "Today's Gap'n'Go",
   "screener_keys": ["gap-n-go"],
   "instrument_category": "US_STOCK",
   "reset_daily": true,
   "region_id": "us",
   "environment": "uat",
-  "notes": "Uses Webull OpenAPI watchlist endpoints (same as MCP: get_watchlists, create_watchlist, add_watchlist_instruments). Paper/test apps → environment=uat (default). Live prod apps → environment=prod. Set WEBULL_APP_KEY + WEBULL_APP_SECRET in backend/.env"
+  "notes": "auth_mode=mcp_oauth → Webull Cloud MCP OAuth (browser login at api.webull.com/mcp) — preferred for paper/live retail account watchlists. auth_mode=openapi_sdk → app key/secret OpenAPI (sandbox/prod developer API). Run: python manage_watchlist.py login"
 }

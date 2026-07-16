@@ -1,5 +1,5 @@
 {
-  "base": "0.2.0",
+  "base": "0.3.0",
   "versions": {
     "0.1.0": {
       "content_hash": "sha256:e79b3135",
@@ -9,6 +9,11 @@
       "content_hash": "sha256:e0e65e37",
       "first_seen": null,
       "notes": "Arm-early + same-bar ENTER_CLOSE; SMA200 soft if null; post-BNY pilot"
+    },
+    "0.3.0": {
+      "content_hash": "sha256:3592de9b",
+      "first_seen": null,
+      "notes": "Never abandon live ARM/position; manage until flat"
     }
   }
 }

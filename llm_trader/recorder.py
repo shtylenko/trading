@@ -1479,6 +1479,7 @@ def _session_entry(d: Path, s: dict) -> dict:
         "timed_out": s.get("timed_out"),
         "finalize_error": s.get("finalize_error"),
         "no_decision_log": s.get("no_decision_log"),
+        "agent_abandoned": s.get("agent_abandoned"),
     }
 
     # For running sessions, include a current PnL snapshot (mtime-cached).
@@ -1725,12 +1726,21 @@ def _is_no_decision_log(s: dict) -> bool:
     return bool(s.get("no_decision_log"))
 
 
+def _is_agent_abandoned(s: dict) -> bool:
+    """True when the agent stopped the loop while still armed or in a position.
+
+    Stamped by batchsim after finalize. Artifacts remain viewable (status complete)
+    but the run is excluded from stats and re-run by ``--resume``.
+    """
+    return bool(s.get("agent_abandoned"))
+
+
 def _is_infra_fail(s: dict) -> bool:
     """Any non-result infra failure (out-of-credits, timeout, or finalize error):
     the agent didn't run to a real decision, so the run is excluded from stats
     rather than scored."""
     return (_is_out_of_credits(s) or _is_timed_out(s) or _is_finalize_error(s)
-            or _is_no_decision_log(s))
+            or _is_no_decision_log(s) or _is_agent_abandoned(s))
 
 
 def _is_archived(s: dict) -> bool:
@@ -1791,6 +1801,7 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
     n_timed_out = 0
     n_finalize_error = 0
     n_no_decision_log = 0
+    n_agent_abandoned = 0
     n_stood = 0
     n_traded = 0
     total_pnl = 0.0
@@ -1816,6 +1827,9 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
             continue
         if _is_no_decision_log(m):
             n_no_decision_log += 1
+            continue
+        if _is_agent_abandoned(m):
+            n_agent_abandoned += 1
             continue
         n_planned += 1
         if _is_void(m):
@@ -1908,6 +1922,7 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
         "n_timed_out": n_timed_out,
         "n_finalize_error": n_finalize_error,
         "n_no_decision_log": n_no_decision_log,
+        "n_agent_abandoned": n_agent_abandoned,
         "n_stood_down": n_stood,
         "sequence_drawdown_r": seq_dd,
         "recovery_factor_r": recovery,
@@ -1941,6 +1956,7 @@ def get_top_session_view(sess_id: str) -> dict:
         "n_timed_out": 0,  # leaf runs the harness killed for exceeding the timeout
         "n_finalize_error": 0,  # leaf runs whose finalize() replay raised
         "n_no_decision_log": 0,  # complete leaf with no agent intent
+        "n_agent_abandoned": 0,  # agent stopped while armed / in position
         "n_leaves": 0,     # total leaf runs on this ticker
         "n_complete": 0,   # of those, how many are finalized
         "running_any": False,
@@ -1974,6 +1990,8 @@ def get_top_session_view(sess_id: str) -> dict:
             td["n_finalize_error"] += 1   # terminal infra failure; never "complete"
         elif _is_no_decision_log(s):
             td["n_no_decision_log"] += 1  # completed artifacts, but no trading decision
+        elif _is_agent_abandoned(s):
+            td["n_agent_abandoned"] += 1  # stopped mid-plan; not a clean complete
         elif entry.get("status") == "complete":
             td["n_complete"] += 1
         elif entry.get("stale"):
@@ -1984,7 +2002,7 @@ def get_top_session_view(sess_id: str) -> dict:
             td["n_void"] += 1
             if not td["void_reason"]:
                 td["void_reason"] = str(s.get("void"))
-        if res.get("traded"):
+        if res.get("traded") and not _is_infra_fail(s):
             td["n_traded"] += 1
             td["n_fills"] += res.get("n_fills", 1) or 0
             td["pnl"] += res.get("realized_pnl", 0) or 0.0
@@ -2017,6 +2035,8 @@ def get_top_session_view(sess_id: str) -> dict:
             tstatus = "finalize_error"
         elif data["n_no_decision_log"] > 0:
             tstatus = "no_decision_log"
+        elif data["n_agent_abandoned"] > 0:
+            tstatus = "agent_abandoned"
         elif data["stale_any"]:
             tstatus = "stale"
         else:
@@ -2039,6 +2059,7 @@ def get_top_session_view(sess_id: str) -> dict:
             "n_timed_out": data["n_timed_out"],
             "n_finalize_error": data["n_finalize_error"],
             "n_no_decision_log": data["n_no_decision_log"],
+            "n_agent_abandoned": data["n_agent_abandoned"],
             "status": tstatus,
             "n_leaves": data["n_leaves"],
             "n_complete": data["n_complete"],

@@ -318,6 +318,16 @@ class IsolatedStreamGateway:
                 ],
             }
 
+    def remaining_ticks(self) -> int:
+        """How many sealed ticks have not yet been revealed (owner-only probe)."""
+        with self._state_lock:
+            return max(0, len(self._ticks) - self._cursor)
+
+    def revealed_tick_count(self) -> int:
+        """Number of ticks already revealed to the agent."""
+        with self._state_lock:
+            return self._cursor
+
     def publish(self) -> None:
         """Owner-only finalization: publish the full stream after the agent exits."""
         with self._state_lock, file_lock(_lock_path(self.sdir)):

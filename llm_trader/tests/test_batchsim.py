@@ -259,6 +259,49 @@ def test_empty_intent_log_is_infra_failure_and_rerunnable(tmp_path, monkeypatch)
     assert view["tickers"][0]["status"] == "no_decision_log"
 
 
+def test_agent_abandoned_armed_run_is_infra_failure_and_rerunnable(tmp_path, monkeypatch):
+    """ARM then stop logging before exit fill → agent_abandoned (BNY v0.2.0 pilot)."""
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    tag = "abandon-arm"
+    d = _fake_session(tmp_path, tag)
+    # Agent armed at i=1, last log i=2; engine later filled and stopped without more logs.
+    (d / "decisions.jsonl").write_text(
+        json.dumps({"i": 0, "action": "OBSERVE"}) + "\n"
+        + json.dumps({"i": 1, "action": "ARM_BUY_STOP", "trigger": 10.0, "stop": 9.0}) + "\n"
+        + json.dumps({"i": 2, "action": "OBSERVE"}) + "\n"
+    )
+    (d / "actions.json").write_text(json.dumps([
+        {"i": 5, "side": "buy", "price": 10.1, "shares": 10},
+        {"i": 8, "side": "sell", "price": 9.0, "shares": 10},
+    ]))
+    reason = batchsim._agent_abandoned_stream(d)
+    assert reason and "before exit bar i=8" in reason
+    batchsim._stamp_agent_abandoned(d, reason)
+    session = json.loads((d / "session.json").read_text())
+    assert session["agent_abandoned"]
+    assert batchsim._completed_counts(tag) == {}
+    assert batchsim._effective_r({
+        "void": False, "ooc": False, "timeout": False, "finalize_error": False,
+        "no_decision_log": False, "agent_abandoned": True,
+        "status": "complete", "traded": True, "r": -1.0,
+    }) is None
+
+    # STAND_DOWN as last action is a clean early stop, not abandoned.
+    d2 = _fake_session(tmp_path, tag + "2", sid="20250102000000-TK-stand")
+    (d2 / "decisions.jsonl").write_text(
+        json.dumps({"i": 0, "action": "OBSERVE"}) + "\n"
+        + json.dumps({"i": 3, "action": "STAND_DOWN"}) + "\n"
+    )
+    (d2 / "actions.json").write_text("[]")
+    assert batchsim._agent_abandoned_stream(d2) is None
+
+    view = recorder.get_top_session_view(tag)
+    assert view["metrics"]["n_agent_abandoned"] == 1
+    assert view["metrics"]["n_planned"] == 0
+    assert view["tickers"][0]["status"] == "agent_abandoned"
+
+
 def test_timed_out_excluded_from_stats_and_rerun(tmp_path, monkeypatch):
     # A timed-out run must NOT be a clean "complete": excluded from metrics, shown as a
     # timeout, and re-run by --resume (never counted as done).
@@ -736,6 +779,70 @@ def test_multi_day_prompt_does_not_use_intraday_1100_stop():
     assert "NOT a wait-to-arm clock" in p
     assert "ENTER_CLOSE" in p
     assert "do not wait for that calendar day to arm" in p
+    # BNY v0.2.0: agent armed then abandoned loop while stop still pending.
+    assert "live ARM_BUY_STOP" in p or "pending buy-stop" in p
+    assert "FAILED run" in p
+    assert "Flat + live ARM_BUY_STOP is NOT done" in p
+    assert "NEVER print BATCHSIM_SID while ARMED" in p
+    assert "progress report" in p
+
+
+def test_continue_prompt_forbids_early_batchsim_sid():
+    p = batchsim._continue_prompt(
+        "BASE PROMPT BODY", "/tmp/sdir", "pending ARM_BUY_STOP", 1, 5,
+    )
+    assert "HARNESS CONTINUE (1/5)" in p
+    assert "pending ARM_BUY_STOP" in p
+    assert "Do NOT print BATCHSIM_SID until you are truly done" in p
+    assert "BASE PROMPT BODY" in p
+
+
+def test_agent_needs_continue_when_armed_and_bars_remain(tmp_path, monkeypatch):
+    """Live arm + unrevealed ticks ⇒ harness should re-invoke hermes."""
+    sdir = tmp_path / "sess"
+    sdir.mkdir()
+    (sdir / "session.json").write_text(json.dumps({
+        "id": "s", "status": "running", "ticker": "BNY",
+        "config": {"execution_model": "deterministic_ohlc_v1",
+                   "risk_budget": 500.0, "buying_power": 50000.0},
+    }))
+    # Revealed stream: two daily bars; agent armed on i=0, observed i=1.
+    lines = [
+        {"type": "meta", "ticker": "BNY", "date": "2025-06-18", "horizon": "multi_day"},
+        {"type": "tick", "i": 0, "date": "2025-05-27", "time": "16:00",
+         "o": 90, "h": 90.2, "l": 89, "c": 90.1, "v": 1e6},
+        {"type": "tick", "i": 1, "date": "2025-05-28", "time": "16:00",
+         "o": 90, "h": 90.1, "l": 88.5, "c": 88.8, "v": 1e6},
+    ]
+    (sdir / "stream.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    (sdir / "decisions.jsonl").write_text(
+        json.dumps({"i": 0, "time": "16:00", "action": "ARM_BUY_STOP",
+                    "trigger": 90.63, "stop": 87.94}) + "\n"
+        + json.dumps({"i": 1, "time": "16:00", "action": "OBSERVE"}) + "\n"
+    )
+
+    class _GW:
+        def remaining_ticks(self):
+            return 10  # sealed hold still ahead
+
+    reason = batchsim._agent_needs_continue(sdir, _GW(), multi_day=True)
+    assert reason and "ARM_BUY_STOP" in reason
+
+    # STAND_DOWN ends continue even with bars left.
+    (sdir / "decisions.jsonl").write_text(
+        json.dumps({"i": 0, "action": "OBSERVE"}) + "\n"
+        + json.dumps({"i": 1, "action": "STAND_DOWN"}) + "\n"
+    )
+    assert batchsim._agent_needs_continue(sdir, _GW(), multi_day=True) is None
+
+    # No remaining ticks → no continue.
+    class _Done:
+        def remaining_ticks(self):
+            return 0
+    (sdir / "decisions.jsonl").write_text(
+        json.dumps({"i": 0, "action": "ARM_BUY_STOP", "trigger": 90.63, "stop": 87.9}) + "\n"
+    )
+    assert batchsim._agent_needs_continue(sdir, _Done(), multi_day=True) is None
 
 
 def test_prompt_reentry_budget_and_cutoff():

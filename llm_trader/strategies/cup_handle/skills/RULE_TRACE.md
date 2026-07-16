@@ -13,3 +13,4 @@
 | target.dual_cup_depth | T1/T2 | operationalization | T1=50% measured move half-off; T2=80% | 0.1.0 |
 | size.dollar_risk | engine | sim-constraint | shares from risk_budget / stop_distance | 0.1.0 |
 | manage.no_reentry_after_stop | MANAGE §1 | process | engine stop → flat; no re-entry same setup | 0.2.0 |
+| manage.never_abandon | MANAGE loop | process | keep reveal/resolve/log while armed or in position until flat/STAND_DOWN/STATUS end | 0.3.0 |

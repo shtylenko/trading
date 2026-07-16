@@ -269,6 +269,20 @@ RUNNER_CONTRACT_VERSION = "isolated_one_tick_v1"
 # is still legitimately in flight. Stamp it instead, same pattern as timeout/ooc.
 _FINALIZE_ERROR_LABEL = "finalize failed — inconsistent decision log (see finalize_error)"
 _NO_DECISION_LOG_LABEL = "agent produced no decision intents"
+_AGENT_ABANDONED_LABEL = (
+    "agent stopped logging while still armed or in a position "
+    "(must keep step next until flat with no pending entry, STAND_DOWN, or STATUS end)"
+)
+# Intents that open or keep a multi-day plan live (abandoning after these is incomplete).
+_LIVE_PLAN_ACTIONS = frozenset({
+    "ARM_BUY_STOP", "ENTER_CLOSE", "ENTER", "SCALE_LIMIT", "SET_STOP",
+    "ADD_CLOSE", "EXIT_CLOSE",
+})
+# Multi-day streams are long (~80 daily bars). Hermes agents often exit mid-arm
+# after ~25–30 turns; the harness re-invokes the same SDIR/gateway until the plan
+# is terminal or this budget is exhausted.
+_DEFAULT_MAX_CONTINUES_MULTI_DAY = 5
+_DEFAULT_MAX_CONTINUES_INTRADAY = 0
 
 
 def _text_out_of_credits(text: Optional[str]) -> bool:
@@ -442,20 +456,29 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
         # Daily bars all print time "16:00" — NEVER use clock-of-day cutoffs here.
         # Agent must walk plan lookback → setup day → hold window until STATUS end
         # (or a terminal STAND_DOWN after the plan is fully resolved).
+        # Critical: "flat" alone is NOT done — a live ARM_BUY_STOP is flat + pending.
         done_rule = (
             "This is a MULTI-DAY swing run (one bar = one trading day; time is usually 16:00). "
             "Do NOT stop because the clock says after 11:00 — that rule is for intraday only. "
-            "While flat in the PLAN phase, KEEP revealing bars until you have either: "
-            "(1) armed/entered and later flattened with no further plan, "
-            "(2) logged STAND_DOWN after invalidating the setup, or "
-            "(3) `step next` prints STATUS end (end of sealed lookback+hold window). "
+            "NEVER stop merely because you are flat: a live ARM_BUY_STOP / pending buy-stop "
+            "means you are NOT done — keep `step next` + `resolve` + log every bar until "
+            "the order fills, you CANCEL_ENTRY, or the stream ends. "
+            "While IN a position, keep going every bar (SCALE_LIMIT / SET_STOP / OBSERVE / "
+            "EXIT as the skill requires) until `resolve` shows flat. "
+            "You may stop ONLY when ALL of these are true: "
+            "(1) no open position, AND "
+            "(2) no pending entry order (you never armed, or you cancelled, or it filled and "
+            "you later flattened), AND "
+            "(3) either you logged STAND_DOWN for a terminal invalidation, OR you finished "
+            "the plan after a round-trip and will not re-enter, OR `step next` prints STATUS end. "
             "You must at least reach the scanner setup date before standing down for "
             "'no setup' — early abort mid-lookback is a failed run. "
             "The scanner setup date is NOT a wait-to-arm clock: if the ENTRY checklist "
             "passes during lookback, ARM_BUY_STOP (or ENTER_CLOSE if already broken) "
             "immediately — do not delay arming just because the date has not arrived. "
             "ARM_BUY_STOP only fills on later bars; if this bar already closed above the "
-            "handle high, use ENTER_CLOSE instead of arming a stop that already traded through."
+            "handle high, use ENTER_CLOSE instead of arming a stop that already traded through. "
+            "Abandoning the loop after ARM while still waiting for a fill is a FAILED run."
         )
     elif session_from_open:
         done_rule = (
@@ -547,18 +570,26 @@ price is `step next`.
 STOP as soon as EITHER of these is true — do NOT keep revealing bars past
 the stop point:
   (a) `step next` prints `STATUS end` (the stream is over), OR
-  (b) you are FLAT (no open position) and you are DONE trading this setup — {done_rule}
+  (b) you are truly DONE trading this setup — {done_rule}
 Once you stop, the harness finalizes the run for you; do NOT run finalize yourself. As
 the very last thing you output, print exactly this line so the audit can find your run:
 BATCHSIM_SID={sdir}
 
+CRITICAL — when you may print BATCHSIM_SID:
+  - ONLY after you are truly done (conditions a/b above).
+  - NEVER print BATCHSIM_SID while ARMED (live buy-stop) or IN a position.
+  - NEVER write a "progress report / in progress / need additional turns" and exit —
+    that fails the run. Keep calling step next until done, or the harness will
+    re-invoke you (continue) — but you must not self-stop mid-plan.
+
 WHY THIS MATTERS: every `step next` is a real model turn. Walking the whole day bar-by-bar
 after you are already flat and done wastes the run (and can time it out) for zero value —
 the setup's later bars change nothing once you have no position, no pending entry, and no
-permitted re-entry left to hunt. While you HOLD a position (managing a runner, waiting on an
-armed trigger) — or are flat but still have §C re-entry budget and the cutoff time (if any)
-has not passed — you of course keep going; the early stop only applies once you are flat
-with nothing left to do.
+permitted re-entry left to hunt. While you HOLD a position, OR wait on an armed buy-stop /
+pending entry, OR are flat but still have §C re-entry budget and the cutoff time (if any)
+has not passed — you MUST keep going. Flat + live ARM_BUY_STOP is NOT done. Flat + open
+shares is impossible; open shares means KEEP managing. The early stop only applies once
+you have nothing left to do (no position, no pending entry, no remaining re-entry budget).
 
 === ABSOLUTE HARD RULES — ANY VIOLATION VOIDS THE ENTIRE RUN (audit detects this) ===
 
@@ -650,7 +681,8 @@ def _completed_counts(tag: str) -> dict[tuple, int]:
         if (s.get("status") == "complete"
                 and not s.get("void") and not s.get("out_of_credits")
                 and not s.get("timed_out") and not s.get("finalize_error")
-                and not s.get("no_decision_log")):
+                and not s.get("no_decision_log")
+                and not s.get("agent_abandoned")):
             counts[(s.get("ticker"), s.get("historical_date"))] += 1
     return counts
 
@@ -725,12 +757,141 @@ def _promote_staged_session(sdir: Path) -> Path:
     return destination
 
 
+def _continue_prompt(
+    base_prompt: str,
+    sdir: str | Path,
+    reason: str,
+    continue_n: int,
+    max_continues: int,
+) -> str:
+    """Prompt for a re-invoked hermes agent on the same staged SDIR / gateway."""
+    header = f"""===== HARNESS CONTINUE ({continue_n}/{max_continues}) =====
+A previous agent session exited while the trading plan was STILL LIVE:
+  {reason}
+
+You are RESUMING the same session. Session path (unchanged):
+  SDIR="{sdir}"
+
+Rules for this continue:
+1. Do NOT run init / step start / finalize. The session is already sealed and live.
+2. Immediately resume the loop: step next → resolve → log, every bar.
+3. Do NOT write a "progress report" / "in progress" / "need more turns" and exit.
+4. Do NOT print BATCHSIM_SID until you are truly done (flat, no pending entry,
+   STAND_DOWN, or STATUS end). Printing it while ARMED or IN a position fails the run.
+5. Keep going until the plan is terminal — the harness will re-invoke you again if
+   you stop early, but you should finish in this session if you can.
+
+===== END CONTINUE — original task follows =====
+
+"""
+    return header + base_prompt
+
+
+def _live_plan_state(sdir: Path) -> Optional[str]:
+    """If the revealed stream still has an open position or pending arm, return why."""
+    sdir = Path(sdir)
+    session = recorder._load_json(sdir / "session.json", {}) or {}
+    stream = sdir / "stream.jsonl"
+    if not stream.exists():
+        return None
+    try:
+        meta, ticks, end = recorder._parse_stream(stream)
+    except Exception:  # noqa: BLE001
+        return None
+    if meta is None or not ticks:
+        return None
+    try:
+        decisions = recorder._read_jsonl(sdir / "decisions.jsonl")
+    except Exception:  # noqa: BLE001
+        decisions = []
+    bars = recorder._build_bars(meta, ticks)
+    if not bars:
+        return None
+    config = session.get("config", {}) or {}
+    if config.get("execution_model") == EXECUTION_MODEL:
+        from .execution import ExecutionConfig, ExecutionEngine
+        engine = ExecutionEngine(ExecutionConfig.from_session_config(config))
+        engine.run(bars, decisions, force_close=False)
+        snap = engine.snapshot()
+        if snap.get("position_shares"):
+            return f"open position {snap['position_shares']} sh (stop={snap.get('stop')})"
+        armed = snap.get("armed_entry")
+        if armed:
+            return f"pending ARM_BUY_STOP trigger={armed.get('trigger')} stop={armed.get('stop')}"
+        return None
+    # Legacy reported-fill: heuristic from intents only.
+    actions = {str(d.get("action") or "") for d in decisions}
+    last = max(decisions, key=lambda d: int(d.get("i", -1))) if decisions else None
+    if last and str(last.get("action")) == "STAND_DOWN":
+        return None
+    if "ARM_BUY_STOP" in actions and "ENTER" not in actions and "EXIT" not in actions:
+        if last and str(last.get("action")) != "CANCEL_ENTRY":
+            return "pending ARM_BUY_STOP (legacy)"
+    return None
+
+
+def _agent_needs_continue(
+    sdir: Path,
+    gateway: "step.IsolatedStreamGateway",
+    *,
+    multi_day: bool,
+) -> Optional[str]:
+    """Return a reason to re-invoke hermes, or None if the agent may stop.
+
+    Called *before* gateway.publish so only revealed bars are considered for
+    live-plan state; unrevealed ticks are detected via the gateway cursor.
+    """
+    sdir = Path(sdir)
+    try:
+        remaining = gateway.remaining_ticks()
+    except Exception:  # noqa: BLE001
+        remaining = 0
+    if remaining <= 0:
+        return None
+
+    try:
+        raw = [
+            json.loads(ln) for ln in (sdir / "decisions.jsonl").read_text().splitlines()
+            if ln.strip()
+        ]
+    except (OSError, json.JSONDecodeError):
+        raw = []
+
+    last_action = str(raw[-1].get("action") or "") if raw else ""
+    if last_action == "STAND_DOWN":
+        return None
+
+    live = _live_plan_state(sdir)
+    if live:
+        return f"{live}; {remaining} sealed bar(s) still unrevealed"
+
+    if not multi_day:
+        return None
+
+    # Multi-day: still more sealed days and no terminal stand-down. If a plan was
+    # never engaged, the agent must keep walking lookback to the setup day / end.
+    # If a plan engaged and is now flat with no pending orders, allow stop even
+    # with hold bars remaining (skill allows ending after a completed round-trip).
+    actions_used = {str(d.get("action") or "") for d in raw}
+    if actions_used & _LIVE_PLAN_ACTIONS:
+        # Live plan intents exist but engine says flat+unarmed → round-trip done
+        # (or cancelled). Do not force walking the rest of the hold window.
+        return None
+    # Pure OBSERVE walk mid-stream — keep going (do not abort mid-lookback).
+    return f"multi-day stream incomplete ({remaining} bar(s) unrevealed; last={last_action or 'none'})"
+
+
 def _run_one(work: dict) -> dict:
     """Spawn one headless hermes agent for a single (setup, repeat) whose session was
     ALREADY pre-sealed by the harness (work['sdir']). The agent runs the trading loop
     only (step next + recorder log); this function then finalizes the run harness-side
     (the agent has no data creds and cannot). The session id is known up front (the
-    sdir name), so the audit no longer depends on parsing it from agent output."""
+    sdir name), so the audit no longer depends on parsing it from agent output.
+
+    Multi-day: if the agent exits while still armed / in position (or mid-lookback),
+    the harness re-invokes hermes on the **same** SDIR + gateway with a CONTINUE
+    prompt until the plan is terminal or ``max_continues`` is exhausted.
+    """
     log_dir = BATCH_LOGS / work["tag"]
     log_dir.mkdir(parents=True, exist_ok=True)
     name = work["session_name"]
@@ -744,6 +905,18 @@ def _run_one(work: dict) -> dict:
     sdir = Path(work["sdir"])
     sid = sdir.name
     gateway: step.IsolatedStreamGateway = work["gateway"]
+    multi_day = bool(work.get("multi_day"))
+    if "multi_day" not in work:
+        hz = str(work.get("horizon") or "").lower()
+        br = str(work.get("bar_resolution") or "").lower()
+        multi_day = hz in ("multi_day", "multiday", "swing") or br in ("1day", "daily")
+    max_continues = int(work.get(
+        "max_continues",
+        _DEFAULT_MAX_CONTINUES_MULTI_DAY if multi_day else _DEFAULT_MAX_CONTINUES_INTRADAY,
+    ))
+    base_prompt = work["prompt"]
+    continues_used = 0
+    log_chunks: list[str] = []
 
     def _result(status: str, **extra) -> dict:
         # The agent can only see incrementally revealed bars. Once it exits, publish
@@ -756,6 +929,11 @@ def _run_one(work: dict) -> dict:
             if _has_no_decision_log(sdir):
                 _stamp_no_decision_log(sdir)
                 status = "no-decisions"
+            else:
+                abandoned = _agent_abandoned_stream(sdir)
+                if abandoned:
+                    _stamp_agent_abandoned(sdir, abandoned)
+                    status = "agent-abandoned"
         except Exception as e:  # noqa: BLE001 — never let finalize sink the batch
             # finalize() raised BEFORE writing session.json, so status is still
             # whatever it was pre-run ("running") — stamp it directly so the leaf
@@ -786,18 +964,14 @@ def _run_one(work: dict) -> dict:
             _stamp_timeout(final_sdir)
         base = {"item": work["item"], "session_name": name, "sid": sid,
                 "ticker": work["ticker"], "date": work["date"], "rep": work["rep"],
-                "status": status}
+                "status": status, "continues_used": continues_used}
         base.update(extra)
         return base
 
-    # hermes assigns its own opaque session id (it can't be forced), so the audit
-    # finds this run's session afterward by the unique recorder SDIR it contains
-    # (see _resolve_batch_commands) rather than by a name here.
-    cmd = ["hermes", "-z", work["prompt"], "--yolo", "-m", work["model"]]
-
-    def _attempt() -> tuple[Optional[str], Optional[str], Optional[int]]:
+    def _attempt(prompt_text: str) -> tuple[Optional[str], Optional[str], Optional[int]]:
         """One agent run. Returns (stdout, stderr, returncode); (None, None, None) on
         timeout (process killed)."""
+        cmd = ["hermes", "-z", prompt_text, "--yolo", "-m", work["model"]]
         # Fresh empty marketdata cache per agent so a stray cached bar can never leak
         # the future into another run; auto-removed when the agent exits.
         with tempfile.TemporaryDirectory(prefix="batchsim-nomd-") as nomd:
@@ -821,40 +995,75 @@ def _run_one(work: dict) -> dict:
                     proc.wait()
                     return None, None, None
 
+    def _run_with_timeout_retries(prompt_text: str, label: str) -> tuple[Optional[str], Optional[str], Optional[int]]:
+        """Run hermes; retry pure timeouts. Returns (stdout, stderr, rc) or
+        (None, None, None) if every attempt timed out."""
+        retries = work.get("retries", _DEFAULT_RETRIES)
+        for attempt in range(retries + 1):
+            stdout, stderr, rc = _attempt(prompt_text)
+            if rc is not None:
+                return stdout, stderr, rc
+            if attempt < retries:
+                log_chunks.append(
+                    f"[{label} TIMEOUT after {work['timeout']}s] attempt {attempt + 1}/"
+                    f"{retries + 1} — retrying\n"
+                )
+        log_chunks.append(
+            f"[{label} TIMEOUT after {work['timeout']}s] gave up after {retries + 1} attempt(s)\n"
+        )
+        return None, None, None
+
     try:
         # A timeout is an infra hiccup (slow API / a hung turn), not a trading result, so
         # retry it a few times before giving up. Each attempt re-seals nothing — the same
         # pre-sealed SDIR is reused, so no look-ahead risk. Only a persistent timeout is
         # recorded as a (stamped, re-runnable) failure — never a clean "complete".
-        retries = work.get("retries", _DEFAULT_RETRIES)
-        for attempt in range(retries + 1):
-            stdout, stderr, rc = _attempt()
-            if rc is not None:
-                break  # the agent finished (0, error, or ooc) — stop retrying
-            if attempt < retries:
-                log_path.write_text(
-                    f"[TIMEOUT after {work['timeout']}s] attempt {attempt + 1}/"
-                    f"{retries + 1} — retrying\n"
-                )
-        else:
-            # Exhausted all attempts still timing out → a real (stamped) failure.
-            log_path.write_text(
-                f"[TIMEOUT after {work['timeout']}s] gave up after {retries + 1} attempt(s)\n"
-            )
-            return _result("timeout", attempts=retries + 1)
+        prompt_text = base_prompt
+        last_rc: Optional[int] = None
+        while True:
+            label = "initial" if continues_used == 0 else f"continue-{continues_used}"
+            stdout, stderr, rc = _run_with_timeout_retries(prompt_text, label)
+            if rc is None:
+                log_path.write_text("".join(log_chunks))
+                return _result("timeout", attempts=work.get("retries", _DEFAULT_RETRIES) + 1)
 
-        log_path.write_text(
-            f"[exit {rc}]{' (after retry)' if attempt else ''}\n"
-            f"===== STDOUT =====\n{stdout}\n===== STDERR =====\n{stderr}\n"
+            last_rc = rc
+            log_chunks.append(
+                f"===== {label} exit {rc} =====\n"
+                f"===== STDOUT =====\n{stdout}\n===== STDERR =====\n{stderr}\n"
+            )
+            if _text_out_of_credits(f"{stdout}\n{stderr}"):
+                log_path.write_text("".join(log_chunks))
+                return _result("out-of-credits", returncode=rc, log=str(log_path))
+
+            # Re-invoke while the plan is still live and sealed bars remain.
+            need = _agent_needs_continue(sdir, gateway, multi_day=multi_day)
+            if not need or continues_used >= max_continues:
+                if need and continues_used >= max_continues:
+                    log_chunks.append(
+                        f"[continue-budget] still live after {continues_used} continue(s): {need}\n"
+                    )
+                break
+            continues_used += 1
+            log_chunks.append(f"[continue] re-invoking hermes ({continues_used}/{max_continues}): {need}\n")
+            prompt_text = _continue_prompt(
+                base_prompt, sdir, need, continues_used, max_continues,
+            )
+
+        log_path.write_text("".join(log_chunks))
+        return _result(
+            "ok" if last_rc == 0 else "err",
+            returncode=last_rc,
+            log=str(log_path),
+            continues_used=continues_used,
         )
-        # hermes exits 0 even when the API is out of credits (it just prints an
-        # HTTP 402), so check the output, not the return code, for this case.
-        if _text_out_of_credits(f"{stdout}\n{stderr}"):
-            return _result("out-of-credits", returncode=rc, log=str(log_path))
-        return _result("ok" if rc == 0 else "err", returncode=rc, log=str(log_path))
     except FileNotFoundError:
+        if log_chunks:
+            log_path.write_text("".join(log_chunks))
         return _result("no-hermes", error="`hermes` CLI not found on PATH")
     except RuntimeError as e:
+        if log_chunks:
+            log_path.write_text("".join(log_chunks))
         return _result("isolation-error", error=str(e))
 
 
@@ -1100,6 +1309,8 @@ def run(
                 "strategy": strategy_id,
                 "profile": strat.risk.profile,
                 "db": str(strategy_db),
+                "multi_day": (horizon or "").lower() in ("multi_day", "multiday", "swing")
+                    or (bar_resolution or "").lower() in ("1day", "daily"),
             })
 
     reentry_desc = (f"reentry-budget {max_reentries}" if max_reentries > 0 else "reentry OFF") + \
@@ -1583,6 +1794,90 @@ def _stamp_no_decision_log(sdir: Path) -> None:
     atomic_write_json(sj, s, indent=2)
 
 
+def _agent_abandoned_stream(sdir: Path) -> Optional[str]:
+    """Return a reason if the agent stopped logging while a plan was still live.
+
+    Multi-day agents sometimes ARM and then exit the loop while the buy-stop is
+    still pending (or while a fill later occurs without any manage-phase logs).
+    That is not a clean complete run — flag it so ``--resume`` re-runs the setup.
+    """
+    sdir = Path(sdir)
+    try:
+        raw = [
+            json.loads(ln) for ln in (sdir / "decisions.jsonl").read_text().splitlines()
+            if ln.strip()
+        ]
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not raw:
+        return None
+
+    last = max(raw, key=lambda d: int(d.get("i", -1)))
+    last_i = int(last.get("i", -1))
+    last_action = str(last.get("action") or "")
+    # Deliberate terminal stand-down is a complete early stop even mid-stream.
+    if last_action == "STAND_DOWN":
+        return None
+
+    actions_used = {str(d.get("action") or "") for d in raw}
+    if not (actions_used & _LIVE_PLAN_ACTIONS):
+        return None  # pure OBSERVE walk / no plan engaged — not this failure mode
+
+    # Prefer engine fills after finalize (authoritative entry/exit indices).
+    fills = recorder._load_json(sdir / "actions.json", []) or []
+    buy_is = [int(a["i"]) for a in fills if a.get("side") == "buy" and a.get("i") is not None]
+    sell_is = [int(a["i"]) for a in fills if a.get("side") == "sell" and a.get("i") is not None]
+    entry_i = min(buy_is) if buy_is else None
+    exit_i = max(sell_is) if sell_is else None
+
+    if entry_i is not None and exit_i is not None and last_i < exit_i:
+        return (
+            f"{_AGENT_ABANDONED_LABEL}: last decision i={last_i} before exit bar i={exit_i}"
+        )
+    if entry_i is not None and exit_i is None and last_i < entry_i:
+        return (
+            f"{_AGENT_ABANDONED_LABEL}: last decision i={last_i} before entry bar i={entry_i}"
+        )
+    if entry_i is not None and exit_i is None:
+        # Still open at end of agent log; engine may force-flat later.
+        return (
+            f"{_AGENT_ABANDONED_LABEL}: last decision i={last_i} while position still open "
+            f"(entry i={entry_i}, no exit fill logged under agent control)"
+        )
+
+    # Armed, never filled, never cancelled — abandoned pending entry.
+    if "ARM_BUY_STOP" in actions_used and entry_i is None:
+        if last_action in ("CANCEL_ENTRY",):
+            return None
+        # Confirm stream still had bars after the last log.
+        max_tick = None
+        try:
+            for ln in (sdir / "stream.jsonl").read_text().splitlines():
+                if not ln.strip():
+                    continue
+                o = json.loads(ln)
+                if o.get("type") == "tick" and o.get("i") is not None:
+                    max_tick = int(o["i"]) if max_tick is None else max(max_tick, int(o["i"]))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            max_tick = None
+        if max_tick is not None and last_i < max_tick:
+            return (
+                f"{_AGENT_ABANDONED_LABEL}: last decision i={last_i} with live arm "
+                f"(stream continues to i={max_tick})"
+            )
+    return None
+
+
+def _stamp_agent_abandoned(sdir: Path, reason: str) -> None:
+    """Mark a session the agent left mid-plan as a re-runnable incomplete run."""
+    sj = Path(sdir) / "session.json"
+    s = recorder._load_json(sj, {}) or {}
+    s["agent_abandoned"] = reason or _AGENT_ABANDONED_LABEL
+    # Keep status complete so artifacts remain viewable; resume skips only clean runs.
+    s.pop("void", None)
+    atomic_write_json(sj, s, indent=2)
+
+
 def _agent_log_for(tag: str, session_name: Optional[str]) -> Optional[Path]:
     """The captured agent log for one run, if present (BATCH_LOGS/<tag>/<name>.log)."""
     if not session_name:
@@ -1634,6 +1929,11 @@ def audit(tag: str) -> int:
         session = recorder._load_json(d / "session.json", {}) or {}
         if session.get("status") == "complete" and _has_no_decision_log(d):
             _stamp_no_decision_log(d)
+        session = recorder._load_json(d / "session.json", {}) or {}
+        if session.get("status") == "complete" and not session.get("agent_abandoned"):
+            abandoned = _agent_abandoned_stream(d)
+            if abandoned:
+                _stamp_agent_abandoned(d, abandoned)
 
     sessions = [d for d in all_dirs
                 if (recorder._load_json(d / "session.json", {}) or {}).get("status") == "complete"]
@@ -1648,7 +1948,7 @@ def audit(tag: str) -> int:
     voided = 0
     for d in sessions:
         session = recorder._load_json(d / "session.json", {}) or {}
-        if session.get("no_decision_log"):
+        if session.get("no_decision_log") or session.get("agent_abandoned"):
             continue  # infra failure; excludes from stats and is re-run by --resume
         if session.get("timed_out") or d.name in timeout_sids:
             # A timeout infra failure (excluded from stats, re-run by --resume). Ensure
@@ -1714,6 +2014,7 @@ def _leaves_by_key(tag: str) -> dict:
             "timeout": bool(s.get("timed_out")),
             "finalize_error": bool(s.get("finalize_error")),
             "no_decision_log": bool(s.get("no_decision_log")),
+            "agent_abandoned": bool(s.get("agent_abandoned")),
             "status": s.get("status"), "ts": s.get("real_run_ts") or "",
             "traded": bool(p.get("traded")), "r": p.get("r_multiple"),
             "pnl": p.get("realized_pnl"), "win": bool(p.get("win")),
@@ -1735,7 +2036,7 @@ def _leaves_by_key(tag: str) -> dict:
         def clean(r):
             return (r["status"] == "complete" and not r["void"] and not r["ooc"]
                     and not r["timeout"] and not r["finalize_error"]
-                    and not r["no_decision_log"])
+                    and not r["no_decision_log"] and not r.get("agent_abandoned"))
         prev = best.get(key)
         if (prev is None or (clean(rec) and not clean(prev))
                 or (clean(rec) == clean(prev) and rec["ts"] > prev["ts"])):
@@ -1748,6 +2049,7 @@ def _effective_r(rec: dict) -> Optional[float]:
     → None (excluded from the pair). None if a completed traded leaf is missing its R."""
     if (rec["void"] or rec["ooc"] or rec["timeout"] or rec["finalize_error"]
             or rec.get("no_decision_log", False)
+            or rec.get("agent_abandoned", False)
             or rec["status"] != "complete"):
         return None
     if not rec["traded"]:
@@ -1887,6 +2189,7 @@ def compare(tag_a: str, tag_b: str) -> dict:
             "timeout": sum(1 for r in vals if r["timeout"]),
             "finalize_error": sum(1 for r in vals if r["finalize_error"]),
             "no_decision_log": sum(1 for r in vals if r["no_decision_log"]),
+            "agent_abandoned": sum(1 for r in vals if r.get("agent_abandoned")),
             "stood": sum(1 for r in vals if _effective_r(r) == 0.0 and not r["traded"]),
             "avg_loser": (sum(losers) / len(losers)) if losers else None,
         }
@@ -1916,9 +2219,11 @@ def _print_compare(r: dict) -> None:
     print(f"\n  guardrails            A={r['tag_a']:<28} B={r['tag_b']}")
     al_a = f"${a['avg_loser']:.0f}" if a['avg_loser'] is not None else "—"
     al_b = f"${b['avg_loser']:.0f}" if b['avg_loser'] is not None else "—"
-    kv_a = f"{a['n_keys']}/{a['void']}/{a['ooc']}/{a['timeout']}/{a['finalize_error']}/{a['no_decision_log']}"
-    kv_b = f"{b['n_keys']}/{b['void']}/{b['ooc']}/{b['timeout']}/{b['finalize_error']}/{b['no_decision_log']}"
-    print(f"    keys/void/ooc/t.out/fin-err/no-intent {kv_a:<20} {kv_b}")
+    kv_a = (f"{a['n_keys']}/{a['void']}/{a['ooc']}/{a['timeout']}/"
+            f"{a['finalize_error']}/{a['no_decision_log']}/{a.get('agent_abandoned', 0)}")
+    kv_b = (f"{b['n_keys']}/{b['void']}/{b['ooc']}/{b['timeout']}/"
+            f"{b['finalize_error']}/{b['no_decision_log']}/{b.get('agent_abandoned', 0)}")
+    print(f"    keys/void/ooc/t.out/fin-err/no-intent/abandon {kv_a:<20} {kv_b}")
     print(f"    stood-down          {a['stood']:<28} {b['stood']}")
     print(f"    avg loser           {al_a:<28} {al_b}")
 
@@ -1926,7 +2231,8 @@ def _print_compare(r: dict) -> None:
     sig = r["sign_p"] is not None and r["sign_p"] < 0.05
     broad = r["median_dR"] >= 0 and r["top3_share"] <= 0.5
     guard_ok = (b["void"] <= a["void"] + 2 and b["ooc"] == 0 and b["timeout"] == 0
-                and b["finalize_error"] == 0 and b["no_decision_log"] == 0)
+                and b["finalize_error"] == 0 and b["no_decision_log"] == 0
+                and b.get("agent_abandoned", 0) == 0)
     if r["mean_dR"] > 0 and sig and broad and guard_ok:
         verdict = "✅ ACCEPT — B is broadly better and clears the gate."
     elif r["mean_dR"] > 0 and (sig or r["median_dR"] > 0):
@@ -1960,6 +2266,7 @@ def _batch_stats(leaves: dict) -> dict:
         "timeout": sum(1 for r in vals if r["timeout"]),
         "finalize_error": sum(1 for r in vals if r["finalize_error"]),
         "no_decision_log": sum(1 for r in vals if r["no_decision_log"]),
+        "agent_abandoned": sum(1 for r in vals if r.get("agent_abandoned")),
         "avg_loser": round(sum(losers) / len(losers), 2) if losers else None,
     }
 

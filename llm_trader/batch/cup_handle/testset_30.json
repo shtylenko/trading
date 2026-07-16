@@ -1,0 +1,247 @@
+{
+  "created": "2026-07-16T11:10:20",
+  "seed": 13,
+  "n": 30,
+  "setups": [
+    {
+      "ticker": "AGI",
+      "date": "2025-09-02",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "APLD",
+      "date": "2026-01-02",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "APP",
+      "date": "2025-07-31",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BAC",
+      "date": "2025-06-20",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BNY",
+      "date": "2025-06-18",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BX",
+      "date": "2025-07-16",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CAT",
+      "date": "2025-06-24",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CEG",
+      "date": "2025-07-30",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CF",
+      "date": "2025-06-13",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "COLB",
+      "date": "2025-12-10",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRCL",
+      "date": "2026-05-04",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CTVA",
+      "date": "2026-02-03",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DASH",
+      "date": "2025-12-19",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHI",
+      "date": "2026-01-09",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EA",
+      "date": "2025-05-05",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EQT",
+      "date": "2025-06-16",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GEHC",
+      "date": "2025-10-28",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HALO",
+      "date": "2025-11-24",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HPE",
+      "date": "2026-02-04",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ICE",
+      "date": "2026-01-14",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "INTC",
+      "date": "2026-01-02",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KNX",
+      "date": "2026-04-16",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LIN",
+      "date": "2026-02-04",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MET",
+      "date": "2026-05-21",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MMM",
+      "date": "2025-07-17",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NBIS",
+      "date": "2026-01-16",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "OWL",
+      "date": "2025-01-16",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PANW",
+      "date": "2026-05-07",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PINS",
+      "date": "2025-07-18",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "RDDT",
+      "date": "2025-12-05",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    }
+  ]
+}

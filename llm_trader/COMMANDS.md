@@ -8,7 +8,11 @@ python3 -m trading.llm_trader.viewer
 # Cmd-click a session in the list to open in new tab.
 
 
+cd /Users/shtylenko/Projects
 
+set -a && . trading/.env && set +a
+
+python3 -m trading.llm_trader.viewer
 
 python3 -m trading.llm_trader.replay                # random RTH setup (>09:30)
 python3 -m trading.llm_trader.replay --seed 7       # reproducible pick
@@ -90,3 +94,12 @@ python3 -m trading.llm_trader.batchsim run \
     --version 3.4.0 --model deepseek-v4-flash \
     --set trading/llm_trader/batch/testset-DRUG-2024-10-15.json \
     --max-reentries 100 --trade-until 11:30 --tag drug-reentry
+
+# CUP HANDLE!
+
+shtylenko@Andreys-MacBook-Air Projects % python3 -m trading.llm_trader.batchsim run \
+  --strategy cup_handle \
+  --version 0.1.0 \
+  --set trading/llm_trader/batch/cup_handle/testset_30.json \
+  --parallel 10 \
+  --tag cup-smoke-30

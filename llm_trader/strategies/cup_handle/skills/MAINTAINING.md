@@ -19,4 +19,10 @@ python3 -m trading.llm_trader.batchsim promote --strategy cup_handle --version 0
 **Never edit a sealed version in place.** Files are chmod read-only after first use.
 
 Promotion / experiment method: follow warrior's `IMPROVING.md` process (paired
-batch gate, RULE_TRACE update) with cup_handle testsets and `--strategy cup_handle`.
+batch gate, RULE_TRACE update) with cup_handle testsets under
+`batch/cup_handle/` and `--strategy cup_handle`.
+
+```bash
+python3 -m trading.llm_trader.batchsim build-set --strategy cup_handle --n 30 --unique-ticker
+# → batch/cup_handle/testset.json
+```

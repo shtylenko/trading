@@ -61,7 +61,26 @@ correct resolution stream. Skills resolve from **that family's** registry only.
 1. Copy the layout of `strategies/cup_handle/` or `strategies/warrior/`.
 2. Register in `strategies/__init__._build_registry`.
 3. Ship `skills/trade_skills/0.1.0.md` + `skill_versions.json` with `"base": "0.1.0"`.
-4. Keep testsets and promotion gates **within** the family.
+4. Keep testsets under `batch/<family>/` and promotion gates **within** the family.
+
+## Batch testsets
+
+```text
+llm_trader/batch/
+  warrior/
+    testset.json              # default 30-set
+    testset_100.json          # dev set
+    testset_mini.json         # smoke
+    …
+  cup_handle/
+    testset_30.json           # smoke / first holdout
+    testset.json              # default when build-set --strategy cup_handle
+```
+
+```bash
+python3 -m trading.llm_trader.batchsim build-set --strategy cup_handle --n 30 --unique-ticker
+python3 -m trading.llm_trader.batchsim run --strategy cup_handle --set batch/cup_handle/testset_30.json …
+```
 
 ## Design rules
 

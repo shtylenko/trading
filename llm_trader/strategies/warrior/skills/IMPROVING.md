@@ -172,7 +172,7 @@ the top-20 highest-variance keys) so one lucky sampling can't masquerade as a ru
 
 ## 6. Holdout discipline (we are currently semi-contaminated — don't launder it)
 
-The 100-set (`batch/testset_100.json`) was **inspected to design v2.3/v2.4**, so its
+The 100-set (`batch/warrior/testset_100.json`) was **inspected to design v2.3/v2.4**, so its
 reported edge is an **upper bound** for live generalization (the paired sign-test is
 still valid evidence of a within-sample effect — it just isn't out-of-sample).
 
@@ -182,7 +182,7 @@ Policy:
   dev set. Right now the setup pool (`entries.db`, 414 unique but all 2025-01…2026-06) has
   the dev 100 drawn from inside it, so **expanding the pool with earlier-period data is the
   enabling task** (BACKLOG `DX`). Build the holdout with a new seed via
-  `batchsim build-set --exclude batch/testset_100.json` on the grown pool.
+  `batchsim build-set --exclude batch/warrior/testset_100.json` on the grown pool.
 - **Quarantine rule:** if you opened a setup's chart/decisions to form a hypothesis,
   that setup is dev forever and cannot count as holdout evidence for that rule.
 - Label every published table with the set used, version, batch tag, and model.
@@ -210,7 +210,7 @@ worse, MFE-capture not collapsing). Never maximize max(R).
 
 ```bash
 # run a batch on a pinned version (see MAINTAINING for versioning)
-python3 -m trading.llm_trader.batchsim run --version <v> --model <m> --set batch/testset_100.json
+python3 -m trading.llm_trader.batchsim run --version <v> --model <m> --set batch/warrior/testset_100.json
 # resume (recovers version/model/set from batch.json)
 python3 -m trading.llm_trader.batchsim run --resume --session <…-BATCH-…>
 # audit look-ahead / mark out-of-credits

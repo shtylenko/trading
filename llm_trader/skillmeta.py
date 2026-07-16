@@ -369,7 +369,18 @@ def resolve_version(
             _seal(skill_path)
             return meta, note_suffix or f"registered new version {version}."
 
-        if entry.get("content_hash") == current:  # unchanged
+        registered_hash = entry.get("content_hash")
+        # Placeholder registry rows (e.g. a family shipped with base set and
+        # content_hash: null) seal on first real use rather than erroring.
+        if not registered_hash:
+            entry["content_hash"] = current
+            entry.setdefault("first_seen", now.isoformat(timespec="seconds"))
+            entry.pop("note", None)
+            _save_registry(registry_path, reg)
+            _seal(skill_path)
+            return meta, note_suffix or f"sealed version {version} (first use)."
+
+        if registered_hash == current:  # unchanged
             return meta, None
 
         # entry exists but bytes differ — a sealed file was mutated in place

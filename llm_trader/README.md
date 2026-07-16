@@ -145,7 +145,11 @@ batch stamped, so comparison is apples-to-apples.
 
 ```bash
 # one-time: build a stratified, version-controlled holdout (~30 setups from entries.db)
-python3 -m trading.llm_trader.batchsim build-set --n 30      # → llm_trader/batch/testset.json
+# holdouts live under batch/<strategy>/
+python3 -m trading.llm_trader.batchsim build-set --strategy warrior --n 30
+# → llm_trader/batch/warrior/testset.json
+python3 -m trading.llm_trader.batchsim build-set --strategy cup_handle --n 30 --unique-ticker
+# → llm_trader/batch/cup_handle/testset.json
 
 # run the holdout against a pinned version (spawns local-model agents, then audits + reports)
 python3 -m trading.llm_trader.batchsim run \

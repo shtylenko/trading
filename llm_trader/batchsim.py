@@ -97,10 +97,79 @@ def _agent_env(cache_dir: Path) -> dict:
 # monorepo root — the directory that contains `trading/`, so `import trading` resolves.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENTRIES_DB = DATA_DIR / "entries.db"
-# the holdout is a committed artifact, so it lives in the package (NOT under the
-# gitignored data/ tree). entries.db it's sampled from is regenerable and ignored.
-TESTSET_DEFAULT = Path(__file__).parent / "batch" / "testset.json"
+# Per-strategy holdouts live under batch/<strategy>/ (committed artifacts, not
+# under the gitignored data/ tree). entries.db is regenerable and ignored.
+BATCH_ROOT = Path(__file__).parent / "batch"
+TESTSET_DEFAULT = BATCH_ROOT / "warrior" / "testset.json"
 BATCH_LOGS = recorder.SIM_ROOT / "_batch"   # captured agent transcripts, per cohort
+# Default hermes executor when ``run --model`` is omitted (new batches).
+DEFAULT_MODEL = "deepseek-v4-flash"
+
+
+def batch_dir(strategy_id: str = "warrior") -> Path:
+    """``llm_trader/batch/<strategy>/`` — testsets for that family only."""
+    return BATCH_ROOT / (strategy_id or "warrior").strip().lower().replace("-", "_")
+
+
+def default_testset_path(strategy_id: str = "warrior") -> Path:
+    """Default holdout JSON for a family: ``batch/<strategy>/testset.json``."""
+    return batch_dir(strategy_id) / "testset.json"
+
+
+def resolve_testset_path(
+    spec: str | Path | None,
+    strategy_id: str = "warrior",
+) -> Path:
+    """Resolve a ``--set`` argument to an absolute testset path.
+
+    Accepts:
+      * ``None`` → ``batch/<strategy>/testset.json``
+      * bare name (``testset_30`` / ``testset_30.json``) → under ``batch/<strategy>/``
+      * relative path that exists from cwd
+      * absolute path
+
+    Strategy folder is always preferred for bare names so callers need not type
+    ``trading/llm_trader/batch/cup_handle/…``.
+    """
+    sid = (strategy_id or "warrior").strip().lower().replace("-", "_")
+    family = batch_dir(sid)
+
+    if spec is None or str(spec).strip() == "":
+        path = default_testset_path(sid)
+        if not path.exists():
+            raise SystemExit(
+                f"no default testset at {path} — pass --set <name> or run "
+                f"`batchsim build-set --strategy {sid} --n 30` first."
+            )
+        return path.resolve()
+
+    raw = Path(spec)
+    candidates: list[Path] = []
+
+    # 1. As given (absolute, or relative to cwd)
+    candidates.append(raw)
+    # 2. Bare name under the strategy batch folder
+    name = raw.name
+    candidates.append(family / name)
+    if not name.endswith(".json"):
+        candidates.append(family / f"{name}.json")
+    # 3. Full relative path under package batch root (e.g. cup_handle/testset_30.json)
+    if not raw.is_absolute() and len(raw.parts) > 1:
+        candidates.append(BATCH_ROOT / raw)
+
+    for c in candidates:
+        try:
+            if c.is_file():
+                return c.resolve()
+        except OSError:
+            continue
+
+    tried = ", ".join(str(c) for c in candidates)
+    available = sorted(p.name for p in family.glob("*.json")) if family.is_dir() else []
+    hint = f" Available under {family}: {available}" if available else f" (no *.json in {family})"
+    raise SystemExit(
+        f"testset not found for strategy={sid!r} --set {spec!r}. Tried: {tried}.{hint}"
+    )
 
 
 def _sandbox_executable() -> Optional[str]:
@@ -820,7 +889,7 @@ def _tag_for_session(session_id: str) -> Optional[str]:
 
 def run(
     version: Optional[str] = None, *, model: Optional[str] = None,
-    testset: Optional[Path] = None, parallel: int = 4,
+    testset: Optional[str | Path] = None, parallel: int = 3,
     repeats: int = 1, tag: Optional[str] = None, timeout: int = 900,
     retries: int = _DEFAULT_RETRIES, max_reentries: int = 1,
     trade_until: Optional[str] = None,
@@ -876,9 +945,13 @@ def run(
               f"trade_until={trade_until} (from batch.json)", file=sys.stderr)
 
     if not model:
-        raise SystemExit("--model is required (resume did not recover one from batch.json).")
-    if testset is None:
-        testset = TESTSET_DEFAULT
+        model = DEFAULT_MODEL
+        print(f"no --model provided; using default {model}", file=sys.stderr)
+    # Resolve --set: bare names land under batch/<strategy>/; absolute paths keep working.
+    try:
+        testset = resolve_testset_path(testset, strategy_id)
+    except SystemExit:
+        raise
     if trade_until is not None and not re.fullmatch(r"\d{1,2}:\d{2}", trade_until):
         raise SystemExit(f"--trade-until must be HH:MM ET (got {trade_until!r}).")
     if max_reentries < 0:
@@ -2151,11 +2224,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    pb = sub.add_parser("build-set", help="write a stratified holdout testset.json")
+    pb = sub.add_parser("build-set", help="write a stratified holdout under batch/<strategy>/")
+    pb.add_argument("--strategy", default="warrior",
+                    help="strategy family (warrior, cup_handle, …); picks default --db/--out")
     pb.add_argument("--n", type=int, default=30)
     pb.add_argument("--seed", type=int, default=13)
-    pb.add_argument("--out", default=str(TESTSET_DEFAULT))
-    pb.add_argument("--db", default=str(ENTRIES_DB))
+    pb.add_argument("--out", default=None,
+                    help="output path (default: batch/<strategy>/testset.json)")
+    pb.add_argument("--db", default=None,
+                    help="entries SQLite (default: that family's entries.db)")
     pb.add_argument("--exclude", action="append", default=[],
                     help="testset JSON whose (ticker,date) keys to leave out; repeatable. "
                     "Pass the dev set to carve a disjoint holdout (see IMPROVING.md §6).")
@@ -2169,13 +2246,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pr.add_argument("--version", help="skill version to pin (from that family's trade_skills/); "
                     "defaults to the current base version. On --resume, recovered from "
                     "the batch if omitted.")
-    pr.add_argument("--model", help="hermes model id (the local executor). Required for a "
-                    "new batch; on --resume, recovered from the batch if omitted.")
+    pr.add_argument("--model", default=None,
+                    help=f"hermes model id (default: {DEFAULT_MODEL}). "
+                    "On --resume, recovered from the batch if omitted.")
     pr.add_argument("--set", dest="testset", default=None,
-                    help="testset JSON (default: the bundled set). On --resume, recovered "
-                    "from the batch if omitted.")
-    pr.add_argument("--parallel", type=int, default=4)
-    pr.add_argument("--repeats", type=int, default=1)
+                    help="testset name or path (default: batch/<strategy>/testset.json). "
+                    "Bare names like testset_30 resolve under batch/<strategy>/. "
+                    "On --resume, recovered from the batch if omitted.")
+    pr.add_argument("--parallel", type=int, default=3,
+                    help="concurrent hermes agents (default: 3)")
+    pr.add_argument("--repeats", type=int, default=1,
+                    help="runs per setup (default: 1)")
     pr.add_argument("--tag", help="batch cohort tag (default: <version>-<timestamp>). "
                     "Optional when --session identifies an existing batch to resume.")
     pr.add_argument("--session", help="top-level session id (…-BATCH-<hex>) to (re)join. "
@@ -2249,19 +2330,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     if args.cmd == "build-set":
+        strategy_id = (getattr(args, "strategy", None) or "warrior").strip().lower().replace("-", "_")
+        _, _, strategy_db, _ = _strategy_paths(strategy_id)
+        db_path = Path(args.db) if args.db else strategy_db
+        out_path = Path(args.out) if args.out else default_testset_path(strategy_id)
         exclude: set = set()
         for p in args.exclude:
             exclude |= _load_keys(Path(p))
-        setups = build_set(n=args.n, seed=args.seed, db=Path(args.db), exclude=exclude,
+        setups = build_set(n=args.n, seed=args.seed, db=db_path, exclude=exclude,
                            unique_ticker=args.unique_ticker)
-        write_testset(setups, Path(args.out), args.seed)
+        write_testset(setups, out_path, args.seed)
         extra = f" (excluded {len(exclude)} keys)" if exclude else ""
         if args.unique_ticker:
             extra += f" ({len({s['ticker'] for s in setups})} unique tickers)"
-        print(f"wrote {len(setups)} setups → {args.out}{extra}")
+        print(f"wrote {len(setups)} setups → {out_path}{extra}  [strategy={strategy_id}]")
     elif args.cmd == "run":
         run(args.version, model=args.model,
-            testset=Path(args.testset) if args.testset else None,
+            testset=args.testset,  # bare name or path; resolved inside run()
             parallel=args.parallel, repeats=args.repeats, tag=args.tag,
             timeout=args.timeout, retries=args.retries,
             max_reentries=0 if args.no_reentry else args.max_reentries,

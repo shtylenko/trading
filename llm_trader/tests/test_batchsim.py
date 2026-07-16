@@ -515,10 +515,40 @@ def test_resume_recovers_config_from_batch_json(tmp_path, monkeypatch):
     assert out == tag  # rejoined the right batch
 
 
-def test_run_requires_model_without_resume():
-    # a fresh (non-resume) run still needs a model
-    with pytest.raises(SystemExit):
-        batchsim.run("2.0.2", dry_run=True)
+def test_resolve_testset_path_bare_name_under_strategy():
+    p = batchsim.resolve_testset_path("testset_30", "cup_handle")
+    assert p.is_file()
+    assert p.parent.name == "cup_handle"
+    assert p.name == "testset_30.json"
+    # with or without .json
+    p2 = batchsim.resolve_testset_path("testset_30.json", "cup_handle")
+    assert p2 == p
+    # default when None
+    # warrior default exists as testset.json
+    w = batchsim.resolve_testset_path(None, "warrior")
+    assert w.name == "testset.json" and w.parent.name == "warrior"
+
+
+def test_run_defaults_model_when_omitted(monkeypatch):
+    # a fresh (non-resume) run uses DEFAULT_MODEL when --model is omitted
+    assert batchsim.DEFAULT_MODEL == "deepseek-v4-flash"
+    seen = {}
+
+    def _fake_run_one(work):
+        seen["model"] = work["model"]
+        return {"item": work["item"], "status": "dry-run", "cmd": [], "sid": None}
+
+    monkeypatch.setattr(batchsim, "_run_one", _fake_run_one)
+    # dry-run path builds work items and calls _run_one without hermes
+    batchsim.run(
+        "2.0.2",
+        model=None,
+        testset=batchsim.TESTSET_DEFAULT,
+        dry_run=True,
+        parallel=1,
+        repeats=1,
+    )
+    assert seen.get("model") == "deepseek-v4-flash"
 
 
 def test_scan_commands_denylist_allows_benign_shell():

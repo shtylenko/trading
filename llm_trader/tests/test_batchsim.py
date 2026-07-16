@@ -732,6 +732,10 @@ def test_multi_day_prompt_does_not_use_intraday_1100_stop():
     assert "Do NOT stop because the clock says after 11:00" in p
     assert "scanner setup date" in p
     assert "keep revealing bars through 11:00 ET" not in p
+    # BNY pilot: agents delayed arm until scanner date; prompt must forbid that.
+    assert "NOT a wait-to-arm clock" in p
+    assert "ENTER_CLOSE" in p
+    assert "do not wait for that calendar day to arm" in p
 
 
 def test_prompt_reentry_budget_and_cutoff():

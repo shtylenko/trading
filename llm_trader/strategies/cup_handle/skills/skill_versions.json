@@ -1,9 +1,14 @@
 {
-  "base": "0.1.0",
+  "base": "0.2.0",
   "versions": {
     "0.1.0": {
       "content_hash": "sha256:e79b3135",
       "first_seen": "2026-07-15T00:00:00"
+    },
+    "0.2.0": {
+      "content_hash": "sha256:e0e65e37",
+      "first_seen": null,
+      "notes": "Arm-early + same-bar ENTER_CLOSE; SMA200 soft if null; post-BNY pilot"
     }
   }
 }

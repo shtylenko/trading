@@ -450,7 +450,12 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
             "(2) logged STAND_DOWN after invalidating the setup, or "
             "(3) `step next` prints STATUS end (end of sealed lookback+hold window). "
             "You must at least reach the scanner setup date before standing down for "
-            "'no setup' — early abort mid-lookback is a failed run."
+            "'no setup' — early abort mid-lookback is a failed run. "
+            "The scanner setup date is NOT a wait-to-arm clock: if the ENTRY checklist "
+            "passes during lookback, ARM_BUY_STOP (or ENTER_CLOSE if already broken) "
+            "immediately — do not delay arming just because the date has not arrived. "
+            "ARM_BUY_STOP only fills on later bars; if this bar already closed above the "
+            "handle high, use ENTER_CLOSE instead of arming a stop that already traded through."
         )
     elif session_from_open:
         done_rule = (
@@ -498,9 +503,19 @@ python3 -m trading.llm_trader.recorder log --session "{sdir}" --record '{{"i":<i
 
 Repeat 1→2.'''
 
-    setup_line = (f"Setup to trade (scanner-selected ticker/date only): ticker={ticker}  date={date}"
-                  if session_from_open else
-                  f"Setup to trade (do NOT choose your own): ticker={ticker}  date={date}  time={time_et}")
+    if session_from_open and multi_day:
+        setup_line = (
+            f"Setup to trade (scanner-selected ticker/date): ticker={ticker}  date={date}. "
+            f"The date is the setup reference day in a multi-day daily stream "
+            f"(lookback precedes it). Arm as soon as the skill checklist passes — "
+            f"do not wait for that calendar day to arm."
+        )
+    elif session_from_open:
+        setup_line = f"Setup to trade (scanner-selected ticker/date only): ticker={ticker}  date={date}"
+    else:
+        setup_line = (
+            f"Setup to trade (do NOT choose your own): ticker={ticker}  date={date}  time={time_et}"
+        )
     return f"""You are executing ONE trade simulation as an automated backtest.
 
 Your trading rules are provided IN FULL below, between the BEGIN/END markers — they

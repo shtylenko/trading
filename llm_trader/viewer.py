@@ -170,7 +170,10 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
     # ---------------- API + SSE support ----------------
 
     def _send_json(self, obj, status=200):
-        data = json.dumps(obj, indent=2).encode("utf-8")
+        # allow_nan=False: Python's default dumps emits Infinity/NaN tokens that
+        # are not valid JSON and break browser JSON.parse (e.g. profit_factor_r
+        # when a batch has wins and no losses).
+        data = json.dumps(obj, indent=2, allow_nan=False, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))

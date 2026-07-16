@@ -742,3 +742,26 @@ def test_batch_metrics_expectancy_pf_mae(tmp_path, monkeypatch):
     assert "mae_per_share" in (view["sessions"][0].get("result") or {}) or True  # loose
     # sequence dd rough
     assert "sequence_drawdown_r" in m
+
+
+def test_profit_factor_null_when_no_losses_json_safe(tmp_path, monkeypatch):
+    """All-win batch must not put Infinity into metrics (breaks the viewer JSON)."""
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    for i, (tk, r) in enumerate([("AA", 1.0), ("BB", 1.5), ("CC", 0.5)]):
+        sid = f"2026010100000{i}-{tk}-abc{i}"
+        _finalized_session(tmp_path, sid, tk, n_fills=1, win=True, realized=50.0 * r)
+        sa = json.loads((tmp_path / sid / "session.json").read_text())
+        sa["session"] = "all-wins"
+        sa["batch"] = "all-wins"
+        sa["result"]["r_multiple"] = r
+        sa["result"]["r_multiple_actual"] = r
+        (tmp_path / sid / "session.json").write_text(json.dumps(sa))
+
+    view = recorder.get_top_session_view("all-wins")
+    m = view.get("metrics") or {}
+    assert m.get("n_traded") == 3
+    assert m.get("profit_factor_r") is None  # undefined with zero losses — not Infinity
+    # Must be strict-JSON serializable (browser JSON.parse).
+    encoded = json.dumps(view, allow_nan=False)
+    assert "Infinity" not in encoded
+    assert "NaN" not in encoded

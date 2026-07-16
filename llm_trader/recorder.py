@@ -1859,7 +1859,9 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
     losses = [r for r in clean_rs if r < 0]
     pos = sum(wins)
     neg = abs(sum(losses))
-    pf = round(pos / neg, 4) if neg > 0 else (float("inf") if pos > 0 else None)
+    # Never emit float("inf") — json.dumps writes the token Infinity which is not
+    # valid JSON and breaks the browser viewer (JSON.parse). No-loss books → null.
+    pf = round(pos / neg, 4) if neg > 0 else None
     avg_win_r = round(pos / len(wins), 4) if wins else None
     avg_loss_r = round(-neg / len(losses), 4) if losses else None
 
@@ -1907,6 +1909,8 @@ def _compute_batch_metrics(members: list[dict]) -> dict:
             seq_dd = dd
     seq_dd = round(-seq_dd, 4) if seq_dd < 0 else 0.0
     recovery = round(total_pnl / seq_dd, 4) if seq_dd > 0 else None
+    if isinstance(recovery, float) and (recovery != recovery or abs(recovery) == float("inf")):
+        recovery = None
 
     return {
         "clean_expectancy_r": clean_exp,

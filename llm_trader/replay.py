@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import random
 import sqlite3
 import sys
@@ -52,11 +53,22 @@ import pandas as pd
 from trading.marketdata import fetch_bars
 
 from .config import DATA_DIR, ScanConfig
-from .indicators import enrich_1min_for_replay, session_vwap
+from .indicators import (
+    DAILY_REPLAY_REQUIRED_INDICATORS,
+    enrich_1min_for_replay,
+    session_vwap,
+)
 
 RTH_OPEN = dtime(9, 30)
 RTH_CLOSE = dtime(16, 0)
 logger = logging.getLogger("llm_trader.replay")
+
+# A 200-session SMA plus the 40-bar visible planning window needs substantially
+# more than 280 calendar days once weekends, exchange holidays, and sparse data
+# are accounted for.  This minimum also leaves a small buffer for ATR/RVOL.
+_DAILY_SMA_WARMUP_BARS = 200
+_DAILY_WARMUP_BUFFER_BARS = 10
+_MIN_DAILY_WARMUP_CALENDAR_DAYS = 420
 
 
 @dataclass
@@ -323,7 +335,7 @@ def replay(
             else:
                 for s in streams:
                     print(msg, file=s)
-            return 0
+            return 3
 
         df = _enrich(df)
         start_t = RTH_OPEN if from_open else setup.entry_time
@@ -362,6 +374,42 @@ def fetch_daily_bars(
     return df
 
 
+def _daily_replay_warmup_days(plan_lookback_bars: int) -> int:
+    """Calendar lookback that warms every indicator before the first visible bar."""
+    if plan_lookback_bars < 0:
+        raise ValueError("plan_lookback_bars must be non-negative")
+    required_sessions = (
+        _DAILY_SMA_WARMUP_BARS + plan_lookback_bars + _DAILY_WARMUP_BUFFER_BARS
+    )
+    # Five weekday sessions take seven calendar days; add a further cushion for
+    # market holidays and providers whose date boundaries are slightly coarse.
+    return max(
+        _MIN_DAILY_WARMUP_CALENDAR_DAYS,
+        math.ceil(required_sessions * 7 / 5) + 21,
+    )
+
+
+def _daily_indicator_gaps(window: pd.DataFrame, dates: list[date]) -> list[str]:
+    """Describe missing/non-finite required daily fields in a replay window."""
+    gaps: list[str] = []
+    for field in DAILY_REPLAY_REQUIRED_INDICATORS:
+        if field not in window:
+            gaps.append(f"{field} (missing column)")
+            continue
+        values = window[field]
+        missing = values.isna()
+        if not pd.api.types.is_bool_dtype(values):
+            numeric = pd.to_numeric(values, errors="coerce")
+            missing = missing | ~numeric.map(math.isfinite)
+        positions = [i for i, bad in enumerate(missing.tolist()) if bad]
+        if positions:
+            first = dates[positions[0]].isoformat()
+            last = dates[positions[-1]].isoformat()
+            span = first if first == last else f"{first}..{last}"
+            gaps.append(f"{field} ({len(positions)} bar(s), {span})")
+    return gaps
+
+
 def replay_daily(
     setup: Setup,
     *,
@@ -383,8 +431,10 @@ def replay_daily(
     from .indicators import enrich_daily_for_replay
 
     hold = max_hold_bars if max_hold_bars is not None else 40
-    # Warmup for SMAs + lookback window before the setup day
-    warmup_cal = 280
+    # Warmup must cover the SMA200 *before the first visible planning bar*, not
+    # merely before the setup date.  The old 280-calendar-day fetch left early
+    # bars with null SMA200 and let simulations trade them.
+    warmup_cal = _daily_replay_warmup_days(plan_lookback_bars)
     start_fetch = setup.day - timedelta(days=warmup_cal)
     end_fetch = setup.day + timedelta(days=int(hold * 2.2) + 10)
     raw = fetch_daily_bars(setup.ticker, start_fetch, end_fetch, force=force)
@@ -405,7 +455,7 @@ def replay_daily(
             else:
                 for s in streams:
                     print(msg, file=s)
-            return 0
+            return 3
 
         df = enrich_daily_for_replay(raw)
         # index to dates
@@ -426,12 +476,26 @@ def replay_daily(
             else:
                 for s in streams:
                     print(msg, file=s)
-            return 0
+            return 3
 
         stream_start = max(0, setup_i - plan_lookback_bars)
         stream_end = min(len(df) - 1, setup_i + hold)
         window = df.iloc[stream_start : stream_end + 1]
         win_dates = dates[stream_start : stream_end + 1]
+
+        gaps = _daily_indicator_gaps(window, win_dates)
+        if gaps:
+            msg = (
+                f"Daily replay data-integrity failure for {setup.ticker}: required "
+                f"indicator(s) unavailable in the planned stream: {'; '.join(gaps)}. "
+                "Refusing to emit a tradable stream."
+            )
+            if fmt == "jsonl":
+                _emit(json.dumps({"type": "error", "message": msg}), streams)
+            else:
+                for s in streams:
+                    print(msg, file=s)
+            return 3
 
         feats = setup.features or {}
         anchor = setup.entry_px
@@ -500,6 +564,21 @@ def replay_daily(
                 "sma50_rising": bool(row["sma50_rising"]) if pd.notna(row.get("sma50_rising")) else None,
                 "is_setup_day": d == setup.day,
             }
+            # A causal pre-break scanner can disclose its plan only once the
+            # completed plan bar is revealed.  This lets the execution agent use
+            # deterministic scanner math without leaking a later confirmation.
+            if d == setup.day and feats.get("signal_kind") == "prebreak_arm":
+                tick["scanner_plan"] = {
+                    "signal_as_of": feats.get("signal_as_of"),
+                    "trigger": feats.get("entry_trigger", setup.entry_px),
+                    "stop": feats.get("stop_px"),
+                    "target1": feats.get("target1_px"),
+                    "target2": feats.get("target2_px"),
+                    "atr": feats.get("atr"),
+                    "cup_depth_px": feats.get("cup_depth_px"),
+                    "arm_expiry_bars": feats.get("arm_expiry_bars"),
+                    "max_entry_gap_atr": feats.get("max_entry_gap_atr"),
+                }
             if not neutral_meta and anchor:
                 tick["vs_anchor_pct"] = round((close - anchor) / anchor * 100.0, 3)
             if fmt == "jsonl":
@@ -801,7 +880,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         strategy=strategy,
         skip_time_filter=skip_time,
     )
-    replay(
+    return replay(
         setup,
         from_open=args.from_open,
         neutral_meta=args.neutral_meta,
@@ -813,7 +892,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         bar_resolution=args.bar_resolution,
         max_hold_bars=args.max_hold_bars,
     )
-    return 0
 
 
 if __name__ == "__main__":

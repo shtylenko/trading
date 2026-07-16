@@ -60,6 +60,46 @@ def test_start_reveals_meta_only(tmp_path, monkeypatch):
     assert vmeta is not None and vticks == [] and vend is None
 
 
+def test_multiday_start_forces_neutral_meta(tmp_path, monkeypatch):
+    _install_fake_provider(monkeypatch)
+    sdir = tmp_path / "swing"
+    sdir.mkdir()
+    (sdir / "session.json").write_text(json.dumps({
+        "strategy": "cup_handle",
+        "ticker": "TEST",
+        "historical_date": "2025-03-10",
+        "config": {"horizon": "multi_day", "bar_resolution": "1day"},
+        "skill": {"horizon": "multi_day", "bar_resolution": "1day"},
+    }))
+    seen = {}
+
+    def fake_replay(_setup, **kw):
+        seen["neutral_meta"] = kw["neutral_meta"]
+        Path(kw["out_file"]).write_text("\n".join(json.dumps(x) for x in _SEALED) + "\n")
+        return 2
+
+    monkeypatch.setattr(replay, "replay", fake_replay)
+    assert step.start(sdir, out=StringIO()) == 0
+    assert seen["neutral_meta"] is True
+
+
+def test_start_surfaces_a_replay_data_integrity_failure(tmp_path, monkeypatch):
+    _install_fake_provider(monkeypatch)
+    sdir = tmp_path / "bad-daily"
+
+    def failed_replay(_setup, **kw):
+        Path(kw["out_file"]).write_text(json.dumps({
+            "type": "error", "message": "required indicator sma200 is unavailable",
+        }) + "\n")
+        return 3
+
+    monkeypatch.setattr(replay, "replay", failed_replay)
+    out = StringIO()
+    assert step.start(sdir, out=out) == 3
+    assert "sma200 is unavailable" in out.getvalue()
+    assert not (sdir / "stream.jsonl").exists()
+
+
 def test_next_reveals_one_bar_at_a_time(tmp_path, monkeypatch):
     _install_fake_provider(monkeypatch)
     sdir = tmp_path / "sess"

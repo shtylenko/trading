@@ -1570,17 +1570,28 @@ def _void_stats(tag: str) -> tuple[int, int]:
 
 
 def _sessions_for_batch(tag: str) -> list[Path]:
+    """Return every local leaf for a batch, including manifest-orphaned sessions.
+
+    A manifest is useful for correlating agent transcripts, but it is not an
+    authority for research integrity: interrupted/older runs can exist on disk
+    without a manifest row and must still be audited and excluded from metrics.
+    """
     manifest = _load_manifest(tag)
+    paths: list[Path] = []
+    seen: set[Path] = set()
     if manifest:
-        paths = []
         for r in manifest:
             sid = r.get("sid")
             if sid:
                 d = recorder.SIM_ROOT / sid
-                if d.exists():
+                if d.exists() and d not in seen:
                     paths.append(d)
-        return paths
-    return [d for d, s in recorder.iter_sessions() if s.get("batch") == tag]
+                    seen.add(d)
+    for d, s in recorder.iter_sessions():
+        if s.get("batch") == tag and d not in seen:
+            paths.append(d)
+            seen.add(d)
+    return paths
 
 
 def _tool_calls_in(message: dict):
@@ -2017,6 +2028,23 @@ def audit(tag: str) -> int:
 
     sessions = [d for d in all_dirs
                 if (recorder._load_json(d / "session.json", {}) or {}).get("status") == "complete"]
+    # Data integrity is a precondition for every other audit.  Check it before
+    # asking Hermes for transcripts, both to fail cheaply and to ensure a clean
+    # command log cannot legitimize a stream that should never have traded.
+    voided = 0
+    integrity_invalid: set[Path] = set()
+    for d in sessions:
+        session = recorder._load_json(d / "session.json", {}) or {}
+        indicator_errors = recorder.daily_stream_integrity_errors(d, session)
+        if not indicator_errors:
+            continue
+        integrity_invalid.add(d)
+        reason = "data-integrity: " + "; ".join(indicator_errors)
+        if session.get("void") != reason:
+            session["void"] = reason
+            atomic_write_json(d / "session.json", session, indent=2)
+            voided += 1
+    sessions = [d for d in sessions if d not in integrity_invalid]
     cmd_map = _resolve_batch_commands([d.name for d in sessions])
     # sid → session_name, so a run with no command log can still be matched to its
     # captured agent log to distinguish out-of-credits from genuinely unverifiable.
@@ -2025,7 +2053,6 @@ def audit(tag: str) -> int:
     # sids the harness recorded as killed-on-timeout, so a run finalized before the
     # timeout stamp existed (or by an older build) is still reconciled here.
     timeout_sids = {r.get("sid") for r in manifest if r.get("status") == "timeout"}
-    voided = 0
     for d in sessions:
         session = recorder._load_json(d / "session.json", {}) or {}
         if session.get("no_decision_log") or session.get("agent_abandoned"):

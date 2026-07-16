@@ -17,6 +17,22 @@ import numpy as np
 import pandas as pd
 
 
+# A daily swing stream is actionable only when every one of these fields was
+# computed from sufficient prior history.  Keep the contract here so replay,
+# recorder, and batch audit use the same definition.
+DAILY_REPLAY_REQUIRED_INDICATORS = (
+    "sma20",
+    "sma50",
+    "sma200",
+    "atr14",
+    "rvol",
+    "above_sma20",
+    "above_sma50",
+    "above_sma200",
+    "sma50_rising",
+)
+
+
 def session_vwap(df: pd.DataFrame) -> pd.Series:
     """Typical-price volume-weighted average price over the whole frame.
 
@@ -171,7 +187,12 @@ def atr(
     return tr.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
 
 
-def enrich_daily_for_replay(df: pd.DataFrame) -> pd.DataFrame:
+def enrich_daily_for_replay(
+    df: pd.DataFrame,
+    *,
+    volume_lookback: int = 20,
+    sma50_rising_lookback: int = 20,
+) -> pd.DataFrame:
     """Enrich a daily OHLCV frame for multi-day swing replay.
 
     Adds SMA20/50/200, ATR(14), and simple volume averages used by cup-handle
@@ -182,10 +203,18 @@ def enrich_daily_for_replay(df: pd.DataFrame) -> pd.DataFrame:
     out["sma50"] = sma(out["close"], 50)
     out["sma200"] = sma(out["close"], 200)
     out["atr14"] = atr(out, 14)
-    out["vol_avg20"] = out["volume"].shift(1).rolling(20, min_periods=5).mean()
+    if volume_lookback < 2:
+        raise ValueError("volume_lookback must be at least 2")
+    if sma50_rising_lookback < 1:
+        raise ValueError("sma50_rising_lookback must be positive")
+    out["vol_avg20"] = out["volume"].shift(1).rolling(
+        volume_lookback, min_periods=min(5, volume_lookback)
+    ).mean()
     out["rvol"] = out["volume"] / out["vol_avg20"]
     # rising 50 SMA: current > value 20 bars ago
-    out["sma50_rising"] = out["sma50"] > out["sma50"].shift(20)
+    out["sma50_rising"] = out["sma50"] > out["sma50"].shift(
+        sma50_rising_lookback
+    )
     out["above_sma20"] = out["close"] > out["sma20"]
     out["above_sma50"] = out["close"] > out["sma50"]
     out["above_sma200"] = out["close"] > out["sma200"]

@@ -119,6 +119,13 @@ def read_skill_meta(path: str | Path) -> dict:
         # from a mutable "current version" pointer.
         "entry_bracket_required": fm.get("entry_bracket_required"),
         "entry_pyramid_required": fm.get("entry_pyramid_required"),
+        # Entry timing / order-quality requirements for causal daily skills.
+        # These are frozen in the session stamp, just like bracket/pyramid
+        # requirements, so recorder validation never reads a mutable skill file.
+        "daily_enter_close_prohibited": fm.get("daily_enter_close_prohibited"),
+        "armed_entry_gap_guard_required": fm.get("armed_entry_gap_guard_required"),
+        "armed_entry_expiry_required": fm.get("armed_entry_expiry_required"),
+        "arm_on_scanner_plan_required": fm.get("arm_on_scanner_plan_required"),
         # Optional market-data contract. A major version can begin at the open,
         # hide the scanner's already-known trigger, and receive completed 5-minute
         # candles without changing historical replay contracts.

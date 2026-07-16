@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import yaml
 
@@ -58,6 +58,14 @@ class CupHandleConfig:
     breakout_vol_mult: float = 1.3       # vs 20d avg
     require_green_breakout: bool = True
 
+    # Signal timing.  ``prebreak_arm`` is causal: at the close of a completed
+    # handle it publishes a buy-stop plan for a later session.  The historical
+    # ``confirmed_breakout`` label is useful for research labels only; it must
+    # never be treated as an intraday fill at the trigger price.
+    signal_mode: Literal["prebreak_arm", "confirmed_breakout"] = "prebreak_arm"
+    arm_expiry_bars: int = 5
+    max_entry_gap_atr: float = 0.5
+
     # Risk plan (Baby Bear ATR stop + dual targets)
     atr_period: int = 14
     stop_atr_mult: float = 1.5
@@ -66,6 +74,10 @@ class CupHandleConfig:
 
     # Market regime proxy ("trifecta" lite — overall market)
     require_spy_above_sma50: bool = False  # optional; needs SPY daily bars
+
+    # A completed scan is published only when provider/data failures remain
+    # below this fraction.  The default is intentionally fail-closed.
+    max_scan_failure_rate: float = 0.0
 
     exchanges: tuple[str, ...] = ("XNAS", "XNYS", "XASE")
 
@@ -98,7 +110,9 @@ class CupHandleConfig:
                 f"unknown CupHandleConfig key(s): {sorted(unknown)}; "
                 f"valid keys: {sorted(known)}"
             )
-        return cls(**raw)
+        cfg = cls(**raw)
+        cfg.validate()
+        return cfg
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -107,3 +121,32 @@ class CupHandleConfig:
         d["exchanges"] = list(self.exchanges)
         d["db_path"] = str(self.db_path)
         return d
+
+    def validate(self) -> None:
+        """Fail fast for configurations that would otherwise silently mis-scan."""
+        if self.start > self.end:
+            raise ValueError("CupHandleConfig.start must be on or before end")
+        if self.price_min <= 0 or self.price_max < self.price_min:
+            raise ValueError("price bounds must be positive and price_max >= price_min")
+        if self.avg_vol_min < 0:
+            raise ValueError("avg_vol_min must be non-negative")
+        if self.rvol_lookback < 2:
+            raise ValueError("rvol_lookback must be at least 2")
+        if self.sma50_rising_lookback < 1:
+            raise ValueError("sma50_rising_lookback must be positive")
+        if not 0 < self.cup_min_bars <= self.cup_max_bars:
+            raise ValueError("cup bar bounds must be positive and ordered")
+        if not 0 < self.handle_min_bars <= self.handle_max_bars:
+            raise ValueError("handle bar bounds must be positive and ordered")
+        if not 0 < self.cup_depth_min_pct <= self.cup_depth_max_pct:
+            raise ValueError("cup depth bounds must be positive and ordered")
+        if self.atr_period < 2 or self.stop_atr_mult <= 0:
+            raise ValueError("atr_period must be >= 2 and stop_atr_mult positive")
+        if self.signal_mode not in {"prebreak_arm", "confirmed_breakout"}:
+            raise ValueError("signal_mode must be 'prebreak_arm' or 'confirmed_breakout'")
+        if self.arm_expiry_bars < 1:
+            raise ValueError("arm_expiry_bars must be positive")
+        if self.max_entry_gap_atr < 0:
+            raise ValueError("max_entry_gap_atr must be non-negative")
+        if not 0 <= self.max_scan_failure_rate <= 1:
+            raise ValueError("max_scan_failure_rate must be in [0, 1]")

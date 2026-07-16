@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import re
 import secrets
 import sys
@@ -46,6 +47,7 @@ from . import skillmeta
 from .config import DATA_DIR
 from .execution import EXECUTION_MODEL, ExecutionConfig, ExecutionEngine, INTENT_ACTIONS
 from .fsutils import atomic_write_json, atomic_write_text, file_lock
+from .indicators import DAILY_REPLAY_REQUIRED_INDICATORS
 from .streamio import epoch_et as _epoch_et
 from .streamio import parse_stream as _parse_stream
 from .streamio import read_jsonl as _read_jsonl
@@ -117,6 +119,46 @@ def _is_multi_day_session(session: dict, meta: Optional[dict] = None) -> bool:
         # Non-warrior families default to multi-day chart handling.
         return str(cfg.get("same_day_only", True)).lower() in ("0", "false", "no")
     return False
+
+
+def _daily_indicator_integrity_errors(session: dict, meta: dict, ticks: list[dict]) -> list[str]:
+    """Return unavailable required daily fields; empty means the stream is tradable.
+
+    Replay prevents these states before a session begins.  Keeping this verifier at
+    the recorder boundary makes hand-written streams, old tooling, and direct
+    JSONL edits fail closed too.
+    """
+    if not _is_multi_day_session(session, meta):
+        return []
+    missing: dict[str, list[dict]] = defaultdict(list)
+    for tick in ticks:
+        for field in DAILY_REPLAY_REQUIRED_INDICATORS:
+            value = tick.get(field)
+            unavailable = value is None
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                unavailable = unavailable or not math.isfinite(float(value))
+            if unavailable:
+                missing[field].append(tick)
+    errors: list[str] = []
+    for field, affected in missing.items():
+        first = affected[0]
+        errors.append(
+            f"{field} unavailable on {len(affected)} daily bar(s), first "
+            f"i={first.get('i')} date={first.get('date')}"
+        )
+    return errors
+
+
+def daily_stream_integrity_errors(session_dir: str | Path, session: Optional[dict] = None) -> list[str]:
+    """Check a persisted stream without changing it (used by batch audit)."""
+    sdir = Path(session_dir)
+    session = session or _load_json(sdir / "session.json", {}) or {}
+    if not _is_multi_day_session(session):
+        return []
+    meta, ticks, _end = _parse_stream(sdir / "stream.jsonl")
+    if meta is None:
+        return ["stream has no meta record"]
+    return _daily_indicator_integrity_errors(session, meta, ticks)
 
 # default account profile knobs (mirrors skill / strategy family sizing)
 PROFILE_RISK = {"small": 40.0, "main": 1350.0, "swing": 500.0}
@@ -459,6 +501,10 @@ def init(
             "execution_model": m.get("execution_model"),
             "entry_bracket_required": m.get("entry_bracket_required"),
             "entry_pyramid_required": m.get("entry_pyramid_required"),
+            "daily_enter_close_prohibited": m.get("daily_enter_close_prohibited"),
+            "armed_entry_gap_guard_required": m.get("armed_entry_gap_guard_required"),
+            "armed_entry_expiry_required": m.get("armed_entry_expiry_required"),
+            "arm_on_scanner_plan_required": m.get("arm_on_scanner_plan_required"),
             "session_from_open": m.get("session_from_open"),
             "five_minute_context": m.get("five_minute_context"),
             "completed_five_minute_entry_required": m.get(
@@ -678,6 +724,9 @@ def _validate_intent_record(
     *,
     require_entry_bracket: bool = False,
     require_entry_pyramid: bool = False,
+    forbid_daily_enter_close: bool = False,
+    require_armed_entry_gap_guard: bool = False,
+    require_armed_entry_expiry: bool = False,
 ) -> None:
     """Validate the no-agent-fill contract used by deterministic skills."""
     _validate_common_record(record)
@@ -688,12 +737,28 @@ def _validate_intent_record(
         raise ValueError(
             "deterministic execution derives fills and size; do not supply fill_px or shares_delta"
         )
+    if action == "ENTER_CLOSE" and forbid_daily_enter_close:
+        raise ValueError("this daily skill prohibits ENTER_CLOSE on a revealed daily bar")
     if action in {"ENTER_CLOSE", "ARM_BUY_STOP", "SET_STOP", "ADD_CLOSE"}:
         _number(record, "stop")
     if action == "ARM_BUY_STOP":
         trigger = _number(record, "trigger")
         if _number(record, "stop") >= trigger:
             raise ValueError("ARM_BUY_STOP stop must be below trigger")
+        if require_armed_entry_gap_guard and record.get("max_entry_gap_atr") is None:
+            raise ValueError("this skill requires max_entry_gap_atr and atr on every armed entry")
+        if record.get("max_entry_gap_atr") is not None:
+            if _number(record, "max_entry_gap_atr") < 0:
+                raise ValueError("ARM_BUY_STOP max_entry_gap_atr must be non-negative")
+            if _number(record, "atr") <= 0:
+                raise ValueError("ARM_BUY_STOP gap guard requires positive atr")
+        if require_armed_entry_expiry and record.get("expiry_bars") is None:
+            raise ValueError("this skill requires expiry_bars on every armed entry")
+        if record.get("expiry_bars") is not None:
+            expiry_bars = record["expiry_bars"]
+            if (not isinstance(expiry_bars, int) or isinstance(expiry_bars, bool)
+                    or expiry_bars < 1):
+                raise ValueError("ARM_BUY_STOP expiry_bars must be a positive integer")
     if action in {"ENTER_CLOSE", "ARM_BUY_STOP"}:
         if require_entry_bracket and record.get("bracket") is None:
             raise ValueError("this skill requires an entry bracket on every new entry")
@@ -718,12 +783,18 @@ def _validate_decision_record(
     *,
     require_entry_bracket: bool = False,
     require_entry_pyramid: bool = False,
+    forbid_daily_enter_close: bool = False,
+    require_armed_entry_gap_guard: bool = False,
+    require_armed_entry_expiry: bool = False,
 ) -> None:
     if execution_model == EXECUTION_MODEL:
         _validate_intent_record(
             record,
             require_entry_bracket=require_entry_bracket,
             require_entry_pyramid=require_entry_pyramid,
+            forbid_daily_enter_close=forbid_daily_enter_close,
+            require_armed_entry_gap_guard=require_armed_entry_gap_guard,
+            require_armed_entry_expiry=require_armed_entry_expiry,
         )
     else:
         _validate_legacy_record(record)
@@ -754,12 +825,31 @@ def log(session_dir: str | Path, record: dict) -> None:
         require_entry_bracket = bracket_contract is True or str(bracket_contract).lower() == "true"
         pyramid_contract = session.get("skill", {}).get("entry_pyramid_required")
         require_entry_pyramid = pyramid_contract is True or str(pyramid_contract).lower() == "true"
+        no_daily_close_contract = session.get("skill", {}).get("daily_enter_close_prohibited")
+        forbid_daily_enter_close = (
+            no_daily_close_contract is True or str(no_daily_close_contract).lower() == "true"
+        )
+        gap_guard_contract = session.get("skill", {}).get("armed_entry_gap_guard_required")
+        require_armed_entry_gap_guard = (
+            gap_guard_contract is True or str(gap_guard_contract).lower() == "true"
+        )
+        expiry_contract = session.get("skill", {}).get("armed_entry_expiry_required")
+        require_armed_entry_expiry = (
+            expiry_contract is True or str(expiry_contract).lower() == "true"
+        )
+        scanner_plan_contract = session.get("skill", {}).get("arm_on_scanner_plan_required")
+        require_scanner_plan_arm = (
+            scanner_plan_contract is True or str(scanner_plan_contract).lower() == "true"
+        )
         bar5_contract = session.get("skill", {}).get("completed_five_minute_entry_required")
         require_completed_bar5_entry = bar5_contract is True or str(bar5_contract).lower() == "true"
         _validate_decision_record(
             record, execution_model,
             require_entry_bracket=require_entry_bracket,
             require_entry_pyramid=require_entry_pyramid,
+            forbid_daily_enter_close=forbid_daily_enter_close,
+            require_armed_entry_gap_guard=require_armed_entry_gap_guard,
+            require_armed_entry_expiry=require_armed_entry_expiry,
         )
 
         # Intent sessions must be bound to an already-revealed tick.  This
@@ -775,6 +865,43 @@ def log(session_dir: str | Path, record: dict) -> None:
                 raise ValueError(
                     f"decision time {record['time']} does not match revealed tick time {tick.get('time')}"
                 )
+            indicator_errors = _daily_indicator_integrity_errors(session, _meta or {}, ticks)
+            if indicator_errors:
+                raise ValueError(
+                    "daily stream data-integrity failure — " + "; ".join(indicator_errors)
+                )
+            if require_scanner_plan_arm and record.get("action") == "ARM_BUY_STOP":
+                plan = tick.get("scanner_plan")
+                if not isinstance(plan, dict):
+                    raise ValueError(
+                        "this skill permits ARM_BUY_STOP only on the revealed scanner plan bar"
+                    )
+                # The plan is published at the completed-handle close.  Binding
+                # all executable order parameters to it prevents both early arms
+                # and a model quietly substituting a hindsight-derived level.
+                plan_fields = {
+                    "trigger": "trigger",
+                    "stop": "stop",
+                    "atr": "atr",
+                    "max_entry_gap_atr": "max_entry_gap_atr",
+                    "expiry_bars": "arm_expiry_bars",
+                }
+                for decision_key, plan_key in plan_fields.items():
+                    expected = plan.get(plan_key)
+                    actual = record.get(decision_key)
+                    if expected is None or actual is None:
+                        raise ValueError(
+                            f"scanner plan is missing required armed-entry field {plan_key!r}"
+                        )
+                    if isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
+                        if not math.isclose(float(actual), float(expected), rel_tol=0.0, abs_tol=1e-8):
+                            raise ValueError(
+                                f"ARM_BUY_STOP {decision_key} must match the revealed scanner plan"
+                            )
+                    elif actual != expected:
+                        raise ValueError(
+                            f"ARM_BUY_STOP {decision_key} must match the revealed scanner plan"
+                        )
             if require_completed_bar5_entry:
                 if record.get("action") in {"ARM_BUY_STOP", "ADD_CLOSE"}:
                     raise ValueError("4.0 entry contract permits only completed-5-minute ENTER_CLOSE entries")
@@ -1065,6 +1192,11 @@ def resolve(session_dir: str | Path, i: Optional[int] = None) -> dict:
         tick = next((t for t in ticks if t.get("i") == current_i), None)
         if tick is None:
             raise ValueError(f"tick i={current_i} is not revealed")
+        indicator_errors = _daily_indicator_integrity_errors(session, meta, ticks)
+        if indicator_errors:
+            raise ValueError(
+                "daily stream data-integrity failure — " + "; ".join(indicator_errors)
+            )
         decisions = [d for d in _read_jsonl(sdir / "decisions.jsonl") if d.get("i", -1) < current_i]
         bars = _build_bars(meta, ticks)
         engine = ExecutionEngine(ExecutionConfig.from_session_config(session.get("config", {})))
@@ -1142,6 +1274,11 @@ def finalize(session_dir: str | Path, full_day: bool = True) -> dict:
         meta, ticks, end = _parse_stream(sdir / "stream.jsonl")
         if meta is None:
             raise ValueError(f"{sdir}/stream.jsonl has no meta line — was replay --out-file pointed here?")
+        indicator_errors = _daily_indicator_integrity_errors(session, meta, ticks)
+        if indicator_errors:
+            raise ValueError(
+                "daily stream data-integrity failure — " + "; ".join(indicator_errors)
+            )
         decisions = _read_jsonl(sdir / "decisions.jsonl")
         # Chart bars: multi-day / daily streams already *are* the full sealed
         # context — never replace them with a 1-min RTH fetch of the setup date

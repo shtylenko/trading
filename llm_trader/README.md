@@ -44,8 +44,11 @@ Outputs (gitignored, under `data/`):
 
 **Warrior:** `A0` universe → `A1` gap screen → `A2` float gate → `B` ACD/ORB 5-min → store.
 
-**Cup-handle:** universe → daily SMA/ATR + cup/handle geometry → breakout day with
-ATR stop + dual targets in `features` → store.
+**Cup-handle:** universe → daily SMA/ATR + completed cup/handle geometry →
+end-of-day arm plan for a later buy-stop, with ATR stop + dual targets in
+`features` → store. A completed breakout bar is a research label, not a same-bar
+fill. Daily replay fails closed if any required swing indicator is unavailable;
+it never starts a tradable stream with a partial SMA200 warm-up.
 
 ### Paper-trade cup-handle
 

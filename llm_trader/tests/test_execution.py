@@ -56,6 +56,52 @@ def test_armed_entry_and_stop_same_bar_use_adverse_path():
     assert pnl["realized_pnl"] == -100.0
 
 
+def test_armed_entry_gap_guard_cancels_before_a_chased_fill():
+    engine = ExecutionEngine(_config())
+    actions, _, pnl = engine.run(
+        [_bar(0, 9.5, 9.8, 9.3, 9.6), _bar(1, 10.8, 11.2, 10.7, 11.0)],
+        [{
+            "i": 0, "time": "10:20", "action": "ARM_BUY_STOP",
+            "trigger": 10.0, "stop": 9.0, "atr": 1.0,
+            "max_entry_gap_atr": 0.5,
+        }],
+        force_close=False,
+    )
+    assert actions == []
+    assert pnl["traded"] is False
+    assert engine.order_events == [{
+        "i": 1,
+        "action": "CANCEL_ENTRY",
+        "reason": "entry gap $0.8000 exceeded 0.50×ATR",
+    }]
+
+
+def test_armed_entry_expiry_cancels_before_a_late_breakout():
+    engine = ExecutionEngine(_config())
+    actions, _, pnl = engine.run(
+        [
+            _bar(0, 9.5, 9.8, 9.3, 9.6),
+            _bar(1, 9.6, 9.9, 9.4, 9.7),
+            _bar(2, 9.7, 9.95, 9.5, 9.8),
+            # The order was eligible on bars 1 and 2.  It must expire before
+            # evaluating this late trigger on the third later bar.
+            _bar(3, 9.9, 10.4, 9.8, 10.2),
+        ],
+        [{
+            "i": 0, "time": "10:20", "action": "ARM_BUY_STOP",
+            "trigger": 10.0, "stop": 9.0, "expiry_bars": 2,
+        }],
+        force_close=False,
+    )
+    assert actions == []
+    assert pnl["traded"] is False
+    assert engine.order_events == [{
+        "i": 3,
+        "action": "CANCEL_ENTRY",
+        "reason": "armed entry expired after 2 bar(s)",
+    }]
+
+
 def test_stop_wins_when_ohlc_hits_target_and_stop():
     engine = ExecutionEngine(_config())
     actions, _, _ = engine.run(
@@ -238,6 +284,85 @@ def test_recorder_requires_revealed_intents_and_derives_fills(tmp_path):
     assert finalized["result"]["execution_model"] == EXECUTION_MODEL
     actions = json.loads((sdir / "actions.json").read_text())
     assert [(a["side"], a["shares"]) for a in actions] == [("buy", 100), ("sell", 100)]
+
+
+def test_recorder_enforces_causal_daily_arm_contract(tmp_path):
+    sdir = recorder.init("TEST", "2025-03-10", root=tmp_path, now=datetime(2026, 7, 10, 10, 0, 0))
+    session_path = sdir / "session.json"
+    session = json.loads(session_path.read_text())
+    session["config"]["execution_model"] = EXECUTION_MODEL
+    session["skill"].update({
+        "daily_enter_close_prohibited": True,
+        "armed_entry_gap_guard_required": True,
+        "armed_entry_expiry_required": True,
+        "arm_on_scanner_plan_required": True,
+    })
+    session_path.write_text(json.dumps(session))
+    _stream(sdir / "stream.jsonl")
+
+    stream = [json.loads(line) for line in (sdir / "stream.jsonl").read_text().splitlines()]
+    stream[1]["scanner_plan"] = {
+        "trigger": 10.1, "stop": 9.0, "atr": 1.0,
+        "max_entry_gap_atr": 0.5, "arm_expiry_bars": 5,
+    }
+    (sdir / "stream.jsonl").write_text("\n".join(json.dumps(row) for row in stream) + "\n")
+
+    with pytest.raises(ValueError, match="prohibits ENTER_CLOSE"):
+        recorder.log(sdir, {"i": 0, "time": "10:20", "action": "ENTER_CLOSE", "stop": 9.0})
+    with pytest.raises(ValueError, match="requires max_entry_gap_atr"):
+        recorder.log(sdir, {
+            "i": 0, "time": "10:20", "action": "ARM_BUY_STOP",
+            "trigger": 10.1, "stop": 9.0,
+        })
+    with pytest.raises(ValueError, match="requires expiry_bars"):
+        recorder.log(sdir, {
+            "i": 0, "time": "10:20", "action": "ARM_BUY_STOP",
+            "trigger": 10.1, "stop": 9.0, "atr": 1.0,
+            "max_entry_gap_atr": 0.5,
+        })
+    with pytest.raises(ValueError, match="only on the revealed scanner plan bar"):
+        recorder.log(sdir, {
+            "i": 1, "time": "10:21", "action": "ARM_BUY_STOP",
+            "trigger": 10.1, "stop": 9.0, "atr": 1.0,
+            "max_entry_gap_atr": 0.5, "expiry_bars": 5,
+        })
+    with pytest.raises(ValueError, match="trigger must match"):
+        recorder.log(sdir, {
+            "i": 0, "time": "10:20", "action": "ARM_BUY_STOP",
+            "trigger": 10.2, "stop": 9.0, "atr": 1.0,
+            "max_entry_gap_atr": 0.5, "expiry_bars": 5,
+        })
+
+    recorder.log(sdir, {
+        "i": 0, "time": "10:20", "action": "ARM_BUY_STOP",
+        "trigger": 10.1, "stop": 9.0, "atr": 1.0,
+        "max_entry_gap_atr": 0.5, "expiry_bars": 5,
+    })
+
+
+def test_recorder_rejects_a_daily_stream_with_missing_indicators(tmp_path):
+    sdir = recorder.init(
+        "TEST", "2025-03-10", strategy="cup_handle", root=tmp_path,
+        now=datetime(2026, 7, 10, 10, 0, 0),
+    )
+    (sdir / "stream.jsonl").write_text("\n".join(json.dumps(row) for row in [
+        {
+            "type": "meta", "ticker": "TEST", "date": "2025-03-10",
+            "strategy": "cup_handle", "horizon": "multi_day", "bar_resolution": "1day",
+        },
+        {
+            "type": "tick", "i": 0, "date": "2025-03-10", "time": "16:00",
+            "o": 10.0, "h": 10.2, "l": 9.8, "c": 10.0, "v": 10_000,
+            "sma20": 10.0, "sma50": 10.0, "sma200": None, "atr14": 0.5,
+            "rvol": 1.0, "above_sma20": True, "above_sma50": True,
+            "above_sma200": None, "sma50_rising": True,
+        },
+    ]) + "\n")
+
+    with pytest.raises(ValueError, match="daily stream data-integrity failure.*sma200"):
+        recorder.log(sdir, {"i": 0, "time": "16:00", "action": "OBSERVE"})
+    with pytest.raises(ValueError, match="daily stream data-integrity failure.*sma200"):
+        recorder.finalize(sdir)
 
 
 def test_recorder_validates_entry_bracket_shape(tmp_path):

@@ -108,6 +108,7 @@ class ExecutionEngine:
         self.armed: Optional[dict[str, Any]] = None
         self.targets: list[dict[str, Any]] = []
         self.pyramid: Optional[dict[str, Any]] = None
+        self.order_events: list[dict[str, Any]] = []
         self.actions: list[dict[str, Any]] = []
         self.timeline: list[dict[str, Any]] = []
         self.entry_i: Optional[int] = None
@@ -506,7 +507,37 @@ class ExecutionEngine:
         # cannot be placed while long, so this only runs from a flat state.
         if self.shares == 0 and self.armed is not None and int(bar["i"]) > self.armed["placed_i"]:
             armed = self.armed
+            expiry_bars = armed.get("expiry_bars")
+            if (
+                expiry_bars is not None
+                and int(bar["i"]) > int(armed["placed_i"]) + int(expiry_bars)
+            ):
+                self.order_events.append({
+                    "i": int(bar["i"]),
+                    "action": "CANCEL_ENTRY",
+                    "reason": f"armed entry expired after {int(expiry_bars)} bar(s)",
+                })
+                self.armed = None
+                return
             if float(bar["h"]) >= armed["trigger"]:
+                max_gap_atr = armed.get("max_entry_gap_atr")
+                atr_px = armed.get("atr")
+                gap = float(bar["o"]) - float(armed["trigger"])
+                if (
+                    max_gap_atr is not None
+                    and atr_px is not None
+                    and gap > float(max_gap_atr) * float(atr_px)
+                ):
+                    self.order_events.append({
+                        "i": int(bar["i"]),
+                        "action": "CANCEL_ENTRY",
+                        "reason": (
+                            f"entry gap ${gap:.4f} exceeded "
+                            f"{float(max_gap_atr):.2f}×ATR"
+                        ),
+                    })
+                    self.armed = None
+                    return
                 price = self._buy_price(max(float(bar["o"]), armed["trigger"]))
                 self.stop = armed["stop"]
                 qty = self._entry_qty(price, self.stop, capacity, add=False)
@@ -558,10 +589,27 @@ class ExecutionEngine:
             # could make an invalid order state actionable.
             self._bracket_scales(decision)
             self._pyramid_spec(decision)
+            max_gap_atr = decision.get("max_entry_gap_atr")
+            atr_px = decision.get("atr")
+            if max_gap_atr is not None:
+                if (not isinstance(max_gap_atr, (int, float))
+                        or isinstance(max_gap_atr, bool) or float(max_gap_atr) < 0):
+                    raise ValueError("ARM_BUY_STOP max_entry_gap_atr must be non-negative")
+                if (not isinstance(atr_px, (int, float)) or isinstance(atr_px, bool)
+                        or float(atr_px) <= 0):
+                    raise ValueError("ARM_BUY_STOP gap guard requires positive atr")
+            expiry_bars = decision.get("expiry_bars")
+            if expiry_bars is not None:
+                if (not isinstance(expiry_bars, int) or isinstance(expiry_bars, bool)
+                        or expiry_bars < 1):
+                    raise ValueError("ARM_BUY_STOP expiry_bars must be a positive integer")
             self.armed = {
                 "trigger": trigger, "stop": stop, "placed_i": int(bar["i"]),
                 "bracket": decision.get("bracket"),
                 "pyramid": decision.get("pyramid"),
+                "max_entry_gap_atr": float(max_gap_atr) if max_gap_atr is not None else None,
+                "atr": float(atr_px) if atr_px is not None else None,
+                "expiry_bars": expiry_bars,
             }
             return
         if action == "ENTER_CLOSE":
@@ -729,10 +777,15 @@ class ExecutionEngine:
     def snapshot(self, current_i: Optional[int] = None) -> dict[str, Any]:
         """State exposed to the agent after resolving a revealed tick."""
         events = [a for a in self.actions if current_i is None or a["i"] == current_i]
+        order_events = [
+            event for event in self.order_events
+            if current_i is None or event["i"] == current_i
+        ]
         return {
             "execution_model": EXECUTION_MODEL,
             "i": current_i,
             "fills": events,
+            "order_events": order_events,
             "position_shares": self.shares,
             "avg_entry": round(self.avg_entry, 4) if self.shares else None,
             "stop": self.stop,

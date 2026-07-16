@@ -171,6 +171,45 @@ def test_audit_passes_clean_commands(tmp_path, monkeypatch):
     assert rows and rows[0]["n"] == 1 and rows[0]["n_void"] == 0
 
 
+def test_audit_voids_daily_indicator_integrity_before_transcript_lookup(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    d = _fake_session(tmp_path, "bad-daily")
+    session_path = d / "session.json"
+    session = json.loads(session_path.read_text())
+    session.update({"strategy": "cup_handle", "config": {
+        "horizon": "multi_day", "bar_resolution": "1day",
+    }})
+    session_path.write_text(json.dumps(session))
+    (d / "stream.jsonl").write_text("\n".join(json.dumps(row) for row in [
+        {"type": "meta", "ticker": "TK", "date": "2025-01-02",
+         "horizon": "multi_day", "bar_resolution": "1day"},
+        {"type": "tick", "i": 0, "date": "2025-01-02", "time": "16:00",
+         "sma20": 10.0, "sma50": 10.0, "sma200": None, "atr14": 1.0,
+         "rvol": 1.0, "above_sma20": True, "above_sma50": True,
+         "above_sma200": None, "sma50_rising": True},
+    ]) + "\n")
+    calls = []
+    monkeypatch.setattr(batchsim, "_resolve_batch_commands", lambda sids: calls.append(sids) or {})
+
+    assert batchsim.audit("bad-daily") == 1
+    assert calls == [[]]
+    assert "data-integrity" in json.loads(session_path.read_text())["void"]
+
+
+def test_sessions_for_batch_includes_manifest_orphans(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    tag = "partial-manifest"
+    listed = _fake_session(tmp_path, tag, sid="listed")
+    orphan = _fake_session(tmp_path, tag, sid="orphan")
+    manifest = tmp_path / "_batch" / tag / "manifest.jsonl"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({"sid": listed.name}) + "\n")
+
+    assert {p.name for p in batchsim._sessions_for_batch(tag)} == {listed.name, orphan.name}
+
+
 # --- out-of-credits: an infra failure (HTTP 402), NOT a look-ahead void ---
 
 def test_text_out_of_credits_detector():
@@ -914,6 +953,9 @@ def test_auto_observe_multi_day_lookback_logs_early_bars(tmp_path):
         records.append({
             "type": "tick", "i": i, "date": day if i != 5 else "2025-06-18",
             "time": "16:00", "o": 90, "h": 91, "l": 89, "c": 90.5, "v": 1e6,
+            "sma20": 89.5, "sma50": 88.0, "sma200": 80.0, "atr14": 1.2,
+            "rvol": 1.1, "above_sma20": True, "above_sma50": True,
+            "above_sma200": True, "sma50_rising": True,
             **({"is_setup_day": True} if i == 5 else {}),
         })
     records.append({"type": "end", "bars": 8, "close": 90.5})

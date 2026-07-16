@@ -80,6 +80,18 @@ def _get_sealed_line(path: Path, idx: int) -> Optional[str]:
     return None
 
 
+def _sealed_error_message(path: Path) -> Optional[str]:
+    """Return a replay error emitted before any sealed stream meta, if present."""
+    try:
+        first = path.read_text(encoding="utf-8").splitlines()[0]
+        record = json.loads(first)
+    except (IndexError, OSError, json.JSONDecodeError):
+        return None
+    if record.get("type") == "error":
+        return str(record.get("message") or "replay failed before producing a stream")
+    return None
+
+
 class IsolatedStreamGateway:
     """Harness-owned, one-tick gateway for a pre-sealed in-memory stream.
 
@@ -490,7 +502,8 @@ def start_isolated(
         except json.JSONDecodeError:
             continue
     if not records or records[0].get("type") != "meta":
-        raise RuntimeError("no bars sealed (provider may not serve this date)")
+        message = records[0].get("message") if records else None
+        raise RuntimeError(message or "no bars sealed (provider may not serve this date)")
     return IsolatedStreamGateway(session_dir, records).start()
 
 
@@ -601,6 +614,13 @@ def start(
         five_minute_context = True
     if skill.get("completed_five_minute_entry_required") in (True, "true", "True", "1", "yes"):
         neutral_meta = True  # v4 warrior: don't leak scanner trigger
+    # Daily swing sessions begin before their scanner reference date.  The
+    # default metadata includes scanner-derived levels, so exposing it before
+    # the causal plan bar would leak future information in manual replay.
+    horizon = str(cfg.get("horizon") or skill.get("horizon") or "").lower()
+    resolution = str(cfg.get("bar_resolution") or skill.get("bar_resolution") or "").lower()
+    if horizon in ("multi_day", "multiday", "swing") or resolution in ("1day", "daily"):
+        neutral_meta = True
 
     # generate the whole stream into the sealed (private) file
     replay.replay(
@@ -618,7 +638,11 @@ def start(
     )
     meta, ticks, end = _parse_sealed(sealed)
     if meta is None:
-        print("STATUS error no bars sealed (provider may not serve this date)", file=out)
+        message = _sealed_error_message(sealed)
+        print(
+            f"STATUS error {message or 'no bars sealed (provider may not serve this date)'}",
+            file=out,
+        )
         return 3
 
     with file_lock(_lock_path(sdir)):

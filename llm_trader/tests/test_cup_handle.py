@@ -106,6 +106,9 @@ def test_detect_synthetic_cup_breakout():
         cup_max_bars=80,
         handle_min_bars=3,
         handle_max_bars=15,
+        # The fixture's cup recovery leaves a flat SMA50; isolate the geometry
+        # and causal timing contract in this unit test.
+        require_sma50_rising=False,
         require_spy_above_sma50=False,
     )
     entries = detect_from_frame(df, "TEST", cfg)
@@ -116,6 +119,9 @@ def test_detect_synthetic_cup_breakout():
     assert e.features.get("stop_px") is not None
     assert e.features.get("target1_px") is not None
     assert e.features.get("target2_px") is not None
+    assert e.features["signal_kind"] == "prebreak_arm"
+    assert e.time_et == "16:00"
+    assert e.day < breakout_day
     assert e.features["stop_distance"] == pytest.approx(
         1.5 * e.features["atr"], rel=1e-3
     )
@@ -132,6 +138,7 @@ def test_store_strategy_uniqueness(tmp_path):
         price_min=10.0,
         avg_vol_min=500_000,
         cup_min_bars=15,
+        require_sma50_rising=False,
     )
     entries = detect_from_frame(df, "TEST", cfg)
     if not entries:
@@ -162,6 +169,82 @@ def test_store_strategy_uniqueness(tmp_path):
     store.close()
 
 
+def test_store_sync_scope_removes_stale_rows_only_after_successful_replacement(tmp_path):
+    from trading.llm_trader.models import Entry
+
+    store = EntryStore(tmp_path / "c.db")
+    old = Entry(
+        ticker="TEST", day=date(2025, 1, 2), time_et="16:00", pattern="cup_handle",
+        entry_px=10.0, bar_close=9.9, reason="old", strategy="cup_handle",
+    )
+    keep = Entry(
+        ticker="OTHER", day=date(2025, 1, 2), time_et="16:00", pattern="cup_handle",
+        entry_px=10.0, bar_close=9.9, reason="other", strategy="cup_handle",
+    )
+    store.upsert(old)
+    store.upsert(keep)
+    removed = store.sync_scope(
+        [], strategy="cup_handle", tickers=["TEST"],
+        start_day="2025-01-01", end_day="2025-01-31",
+    )
+    assert removed == 1
+    assert store.count(strategy="cup_handle") == 1
+    assert store.all_rows(strategy="cup_handle")[0]["ticker"] == "OTHER"
+    store.close()
+
+
+def test_runner_fails_closed_without_mutating_existing_entries(tmp_path, monkeypatch):
+    from trading.llm_trader.models import Entry
+    from trading.llm_trader.strategies.cup_handle import runner as cup_runner
+
+    db = tmp_path / "entries.db"
+    with EntryStore(db) as store:
+        store.upsert(Entry(
+            ticker="TEST", day=date(2025, 1, 2), time_et="16:00", pattern="cup_handle",
+            entry_px=10.0, bar_close=9.9, reason="existing", strategy="cup_handle",
+        ))
+    cfg = CupHandleConfig(
+        start=date(2025, 1, 1), end=date(2025, 1, 31), db_path=db,
+    )
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(cup_runner, "detect_ticker", broken)
+    with pytest.raises(RuntimeError, match="failed closed"):
+        cup_runner.run_scan(cfg, symbols=["TEST"])
+    with EntryStore(db) as store:
+        assert store.count(strategy="cup_handle") == 1
+
+
+def test_runner_replaces_completed_scope_and_writes_manifest(tmp_path, monkeypatch):
+    from trading.llm_trader.models import Entry
+    from trading.llm_trader.strategies.cup_handle import runner as cup_runner
+
+    db = tmp_path / "entries.db"
+    cfg = CupHandleConfig(
+        start=date(2025, 1, 1), end=date(2025, 1, 31), db_path=db,
+    )
+    with EntryStore(db) as store:
+        store.upsert(Entry(
+            ticker="TEST", day=date(2025, 1, 2), time_et="16:00", pattern="cup_handle",
+            entry_px=10.0, bar_close=9.9, reason="stale", strategy="cup_handle",
+        ))
+
+    fresh = Entry(
+        ticker="TEST", day=date(2025, 1, 3), time_et="16:00", pattern="cup_handle",
+        entry_px=11.0, bar_close=10.9, reason="fresh", strategy="cup_handle",
+    )
+    monkeypatch.setattr(cup_runner, "detect_ticker", lambda *_args, **_kwargs: [fresh])
+    stats = cup_runner.run_scan(cfg, symbols=["TEST"])
+    assert stats.entries_found == 1
+    assert stats.stale_entries_removed == 1
+    with EntryStore(db) as store:
+        rows = store.all_rows(strategy="cup_handle")
+        assert [(r["ticker"], r["date"]) for r in rows] == [("TEST", "2025-01-03")]
+    assert db.with_suffix(".last_scan.json").exists()
+
+
 def test_fade_series_no_entry():
     idx = _daily_index(300)
     closes = np.linspace(200, 50, len(idx))  # relentless downtrend
@@ -177,3 +260,39 @@ def test_fade_series_no_entry():
     )
     cfg = CupHandleConfig(start=date(2024, 1, 1), end=date(2026, 12, 31), price_min=10.0)
     assert detect_from_frame(df, "FADE", cfg) == []
+
+
+def test_confirmed_breakout_is_labelled_after_close_not_as_open_fill():
+    df, breakout_day, _ = _synthetic_cup_breakout()
+    cfg = CupHandleConfig(
+        start=date(2024, 1, 1),
+        end=date(2026, 12, 31),
+        price_min=10.0,
+        avg_vol_min=500_000,
+        cup_min_bars=15,
+        cup_max_bars=80,
+        require_sma50_rising=False,
+        signal_mode="confirmed_breakout",
+    )
+    entries = detect_from_frame(df, "TEST", cfg)
+    assert entries
+    entry = entries[0]
+    assert entry.day == breakout_day
+    assert entry.time_et == "16:00"
+    assert entry.features["signal_kind"] == "confirmed_breakout"
+    assert entry.features["breakout_close_above_trigger"] is True
+
+
+def test_regime_filter_requires_explicit_market_dates():
+    df, _, _ = _synthetic_cup_breakout()
+    cfg = CupHandleConfig(
+        start=date(2024, 1, 1),
+        end=date(2026, 12, 31),
+        price_min=10.0,
+        avg_vol_min=500_000,
+        cup_min_bars=15,
+        require_sma50_rising=False,
+        require_spy_above_sma50=True,
+    )
+    with pytest.raises(ValueError, match="SPY regime dates"):
+        detect_from_frame(df, "TEST", cfg)

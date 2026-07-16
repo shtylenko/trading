@@ -19,6 +19,10 @@ let currentChart = null;
 let currentEventSource = null;
 let pollFallbackTimer = null;
 let tickersRefreshTimer = null;   // live re-poll of the tickers table while a batch runs
+// Full /api/sessions payload for the sidebar. When a session is open we filter
+// the sidebar to the same strategy family only.
+let allSidebarSessions = [];
+let sidebarStrategy = null;  // e.g. "cup_handle" | "warrior" | null (show all)
 
 // Show exactly one main-area pane. Single helper replacing the classList +
 // style.display toggles that used to be duplicated at every call site.
@@ -72,88 +76,150 @@ const fmtFloat = (f) => (f ? (f / 1e6).toFixed(1) + "M" : "n/a");
 
 // ---------- LIST ----------
 
+function setSidebarStrategy(strategy) {
+  /** Restrict the left sidebar to one strategy family (or null = show all). */
+  const next = strategy || null;
+  if (next === sidebarStrategy) {
+    highlightCurrentSession();
+    return;
+  }
+  sidebarStrategy = next;
+  renderSidebarList();
+}
+
+function sessionsForSidebar() {
+  if (!sidebarStrategy) return allSidebarSessions;
+  return allSidebarSessions.filter(
+    (s) => (s.strategy || "warrior") === sidebarStrategy
+  );
+}
+
+function renderSidebarList() {
+  const listEl = document.getElementById("session-list");
+  if (!listEl) return;
+  listEl.style.display = "block";
+  listEl.classList.remove("hidden");
+
+  const sessions = sessionsForSidebar();
+  const total = allSidebarSessions.length;
+  const countEl = document.getElementById("session-count");
+  if (countEl) {
+    countEl.textContent = sidebarStrategy
+      ? `(${sessions.length}/${total} · ${sidebarStrategy})`
+      : `(${total})`;
+  }
+
+  // Filter chip under the Sessions header when scoped to a strategy
+  let filterBar = document.getElementById("sidebar-strategy-filter");
+  if (!filterBar) {
+    const header = document.querySelector(".sidebar-header");
+    if (header) {
+      filterBar = document.createElement("div");
+      filterBar.id = "sidebar-strategy-filter";
+      filterBar.className = "sidebar-strategy-filter muted small";
+      header.insertAdjacentElement("afterend", filterBar);
+    }
+  }
+  if (filterBar) {
+    if (sidebarStrategy) {
+      filterBar.innerHTML =
+        `Showing <b class="strat-${escapeHtml(sidebarStrategy)}">${escapeHtml(sidebarStrategy)}</b> only` +
+        ` · <a href="#" id="sidebar-show-all">show all</a>`;
+      filterBar.classList.remove("hidden");
+      const showAll = document.getElementById("sidebar-show-all");
+      if (showAll) {
+        showAll.onclick = (e) => {
+          e.preventDefault();
+          setSidebarStrategy(null);
+        };
+      }
+    } else {
+      filterBar.innerHTML = "";
+      filterBar.classList.add("hidden");
+    }
+  }
+
+  if (!sessions.length) {
+    listEl.innerHTML = sidebarStrategy
+      ? `<div class="muted" style="padding:12px">No ${escapeHtml(sidebarStrategy)} sessions.</div>`
+      : `<div class="muted" style="padding:12px">No sessions yet.</div>`;
+    return sessions;
+  }
+
+  listEl.innerHTML = sessions.map((s) => {
+    const type = s.type || "simulated";
+    const isLive = type === "live";
+    const pnlStr = s.pnl != null ? fmtMoney(s.pnl) : "—";
+    const wr = s.win_rate != null ? `${s.win_rate}%` : "—";
+    const badgeClass = isLive ? "live" : "sim";
+    const badgeLabel = isLive ? "live" : "sim";
+    const strat = s.strategy || "warrior";
+
+    const displayId = s.name && s.name !== s.id
+      ? `${escapeHtml(s.name)} (${escapeHtml(s.id)})`
+      : escapeHtml(s.id);
+    return `
+      <div class="sess-card" data-id="${escapeHtml(s.id)}" data-type="top-session"
+           data-strategy="${escapeHtml(strat)}">
+        <div class="sess-top">
+          <span class="sess-ticker">${displayId}</span>
+          <span class="badge ${badgeClass}">${badgeLabel}</span>
+          <span class="badge strategy strat-${escapeHtml(strat)}">${escapeHtml(strat)}</span>
+        </div>
+        <div class="sess-meta muted">${pnlStr} · ${s.n_tickers} tickers · ${s.n_trades} trades</div>
+        <div class="sess-summary">win ${wr}</div>
+        <div class="sess-meta muted">last ${s.last_activity || "—"}</div>
+      </div>`;
+  }).join("");
+
+  listEl.querySelectorAll(".sess-card").forEach((card) => {
+    const id = card.dataset.id;
+    const isTop = card.dataset.type === "top-session";
+    card.addEventListener("click", (e) => {
+      if (e.metaKey || e.ctrlKey) {
+        window.open(`/viewer/index.html?session=${encodeURIComponent(id)}`, "_blank");
+      } else {
+        currentSessionId = id;
+        currentTopSessionId = id;
+        // Scope sidebar to this card's strategy immediately
+        setSidebarStrategy(card.dataset.strategy || "warrior");
+        highlightCurrentSession();
+        if (isTop) {
+          loadSessionTickers(id, true);
+        } else {
+          loadSession(id, true);
+        }
+        history.replaceState(null, "", `?session=${encodeURIComponent(id)}`);
+      }
+    });
+    card.addEventListener("auxclick", (e) => {
+      if (e.button === 1) {
+        window.open(`/viewer/index.html?session=${encodeURIComponent(id)}`, "_blank");
+      }
+    });
+  });
+
+  highlightCurrentSession();
+  return sessions;
+}
+
 async function loadAndRenderList() {
   const listEl = document.getElementById("session-list");
-  listEl.style.display = 'block';
-  listEl.classList.remove('hidden');
+  listEl.style.display = "block";
+  listEl.classList.remove("hidden");
   // Do not touch main-pane visibility here (no-session / tickers / detail).
-  // Visibility of main content is managed by loadSession* and main() based on selection.
   listEl.innerHTML = `<div class="muted" style="padding:8px">Loading sessions...</div>`;
 
-  let sessions = [];
   try {
     const data = await getJSON("/api/sessions");
-    sessions = data.sessions || [];
-    console.log('Sessions from API:', sessions);
-
-    document.getElementById("session-count").textContent = `(${sessions.length})`;
-
-    if (!sessions.length) {
-      listEl.innerHTML = `<div class="muted" style="padding:12px">No sessions yet.</div>`;
-      return sessions;
-    }
-
-    listEl.innerHTML = sessions.map(s => {
-      const type = s.type || "simulated";
-      const isLive = type === "live";
-      const pnlStr = s.pnl != null ? fmtMoney(s.pnl) : "—";
-      const wr = s.win_rate != null ? `${s.win_rate}%` : "—";
-      const badgeClass = isLive ? "live" : "sim";
-      const badgeLabel = isLive ? "live" : "sim";
-      const strat = s.strategy || "warrior";
-
-      const displayId = s.name && s.name !== s.id ? `${escapeHtml(s.name)} (${escapeHtml(s.id)})` : escapeHtml(s.id);
-      return `
-        <div class="sess-card" data-id="${escapeHtml(s.id)}" data-type="top-session">
-          <div class="sess-top">
-            <span class="sess-ticker">${displayId}</span>
-            <span class="badge ${badgeClass}">${badgeLabel}</span>
-            <span class="badge strategy strat-${escapeHtml(strat)}">${escapeHtml(strat)}</span>
-          </div>
-          <div class="sess-meta muted">${pnlStr} · ${s.n_tickers} tickers · ${s.n_trades} trades</div>
-          <div class="sess-summary">win ${wr}</div>
-          <div class="sess-meta muted">last ${s.last_activity || "—"}</div>
-        </div>`;
-    }).join("");
-
-    // Bind clicks (regular = load here, meta = new tab)
-    listEl.querySelectorAll(".sess-card").forEach(card => {
-      const id = card.dataset.id;
-
-      const isTop = card.dataset.type === "top-session";
-      card.addEventListener("click", (e) => {
-        if (e.metaKey || e.ctrlKey) {
-          window.open(`/viewer/index.html?session=${encodeURIComponent(id)}`, "_blank");
-        } else {
-          currentSessionId = id;
-          currentTopSessionId = id;
-          highlightCurrentSession();
-          if (isTop) {
-            loadSessionTickers(id, true);
-          } else {
-            loadSession(id, true);
-          }
-          history.replaceState(null, "", `?session=${encodeURIComponent(id)}`);
-        }
-      });
-
-      card.addEventListener("auxclick", (e) => {
-        if (e.button === 1) {
-          window.open(`/viewer/index.html?session=${encodeURIComponent(id)}`, "_blank");
-        }
-      });
-    });
-
-    highlightCurrentSession();
+    allSidebarSessions = data.sessions || [];
+    console.log("Sessions from API:", allSidebarSessions.length, "filter=", sidebarStrategy);
+    return renderSidebarList();
   } catch (e) {
     listEl.innerHTML = `<div class="muted" style="padding:8px;color:#f88">Failed to load list: ${e}</div>`;
     console.error("Failed to load sessions list", e);
+    return [];
   }
-
-  // Extra safety: ensure the list container is visible
-  listEl.style.display = 'block';
-  listEl.classList.remove('hidden');
-  return sessions;
 }
 
 // (Batches view removed — everything is grouped under Sessions now.)
@@ -420,6 +486,10 @@ async function loadSessionTickers(sessionId, updateUrl = false) {
       return;
     }
     renderSessionTickers(v);
+    // Scope the left sidebar to this batch's strategy only.
+    if (!isBackgroundRefresh) {
+      setSidebarStrategy(v.strategy || (v.meta && v.meta.strategy) || "warrior");
+    }
     // While the batch is still producing / finalizing sessions, re-poll so tickers flip
     // running → complete live. Passes the background flag so it won't grab focus.
     if (v.is_running) {
@@ -706,16 +776,45 @@ function updateLegend(multiDay, bars) {
   }
 }
 
-function renderBlotter(actions) {
+function fmtWhen(row, multiDay) {
+  /** Display clock for blotter / timeline: date+time on multi-day, time only intraday. */
+  if (!row) return "—";
+  const time = row.time || "";
+  const date = row.date || "";
+  if (multiDay && date) {
+    const md = date.length >= 10 ? date.slice(5) : date; // YYYY-MM-DD → MM-DD
+    // Daily bars are all "16:00"; date alone is clearer than "06-20 16:00".
+    if (time === "16:00" || !time) return md;
+    return `${md} ${time}`.trim();
+  }
+  return time || date || "—";
+}
+
+function renderBlotter(actions, multiDay = false, bars = null) {
   const tb = document.querySelector("#blotter tbody");
+  const head = document.querySelector("#blotter thead tr");
+  if (head) {
+    head.innerHTML = multiDay
+      ? `<th>when</th><th>side</th><th>shares</th><th>price</th><th>realized</th><th>reason</th>`
+      : `<th>time</th><th>side</th><th>shares</th><th>price</th><th>realized</th><th>reason</th>`;
+  }
   if (!actions || !actions.length) {
     tb.innerHTML = `<tr><td colspan="6" class="muted">no fills</td></tr>`;
     return;
   }
+  // Old artifacts may lack action.date; recover from the bar at the same index.
+  const barDateByI = {};
+  (bars || []).forEach((b) => {
+    if (b && b.i != null && b.date) barDateByI[b.i] = b.date;
+  });
   tb.innerHTML = actions.map((a) => {
     const rc = a.realized_delta > 0 ? "pos" : a.realized_delta < 0 ? "neg" : "";
+    const whenRow = {
+      time: a.time,
+      date: a.date || barDateByI[a.i] || "",
+    };
     return `<tr>
-      <td>${a.time}</td>
+      <td>${escapeHtml(fmtWhen(whenRow, multiDay))}</td>
       <td class="${a.side}">${a.side.toUpperCase()}</td>
       <td>${a.shares}</td>
       <td>$${a.price}</td>
@@ -919,14 +1018,31 @@ function renderChart(bars, actions, sess, preserveView = false) {
     lvl(a.price, col("--stop"), a.action === "SCALE" ? "scale" : "exit", LightweightCharts.LineStyle.Solid);
   });
 
+  // Align fill markers to the candle's time at the same bar index when possible
+  // (actions.t can be stale on old artifacts; bars[i].t is authoritative).
+  const barTByI = {};
+  const barDateByI = {};
+  (bars || []).forEach((b) => {
+    if (b && b.i != null) {
+      if (b.t != null) barTByI[b.i] = b.t;
+      if (b.date) barDateByI[b.i] = b.date;
+    }
+  });
+  const actionTime = (a) => (a.i != null && barTByI[a.i] != null ? barTByI[a.i] : a.t);
+  const actionDate = (a) => a.date || barDateByI[a.i] || "";
+
   // markers
-  candle.setMarkers((actions || []).map((a) => ({
-    time: a.t,
-    position: a.side === "buy" ? "belowBar" : "aboveBar",
-    color: a.side === "buy" ? col("--entry") : col("--stop"),
-    shape: a.side === "buy" ? "arrowUp" : "arrowDown",
-    text: `${a.side === "buy" ? "BUY" : "SELL"} ${a.shares}@${a.price}`,
-  })));
+  candle.setMarkers((actions || []).map((a) => {
+    const d = actionDate(a);
+    const when = multiDay && d ? d.slice(5) + " " : "";
+    return {
+      time: actionTime(a),
+      position: a.side === "buy" ? "belowBar" : "aboveBar",
+      color: a.side === "buy" ? col("--entry") : col("--stop"),
+      shape: a.side === "buy" ? "arrowUp" : "arrowDown",
+      text: `${when}${a.side === "buy" ? "BUY" : "SELL"} ${a.shares}@${a.price}`,
+    };
+  }).filter((m) => m.time != null));
 
   // fill dots — a point plotted at the exact (time, price) of each fill, i.e. the
   // intersection of the entry/exit price line with the bar the fill happened on.
@@ -934,13 +1050,15 @@ function renderChart(bars, actions, sess, preserveView = false) {
     lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 5,
     color: col("--entry"), priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
   });
-  buyDots.setData((actions || []).filter((a) => a.side === "buy").map((a) => ({ time: a.t, value: a.price })));
+  buyDots.setData((actions || []).filter((a) => a.side === "buy" && actionTime(a) != null)
+    .map((a) => ({ time: actionTime(a), value: a.price })));
 
   const sellDots = chart.addLineSeries({
     lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 5,
     color: col("--stop"), priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
   });
-  sellDots.setData((actions || []).filter((a) => a.side === "sell").map((a) => ({ time: a.t, value: a.price })));
+  sellDots.setData((actions || []).filter((a) => a.side === "sell" && actionTime(a) != null)
+    .map((a) => ({ time: actionTime(a), value: a.price })));
 
   // Restore the prior zoom on a live refresh; otherwise fit the whole series.
   if (prevRange) {
@@ -988,7 +1106,7 @@ function renderChart(bars, actions, sess, preserveView = false) {
   return chart;
 }
 
-function renderTimeline(decisions, chart) {
+function renderTimeline(decisions, chart, multiDay = false) {
   const wrap = document.getElementById("timeline");
   document.getElementById("t-count").textContent = decisions && decisions.length ? `(${decisions.length} turns)` : "";
 
@@ -996,6 +1114,16 @@ function renderTimeline(decisions, chart) {
     wrap.innerHTML = `<div class="muted">no decisions logged yet</div>`;
     return;
   }
+
+  // Prefer bar timestamp by index when chart has bars (fixes old artifacts).
+  const barTByI = {};
+  const barDateByI = {};
+  ((chart && chart._bars) || []).forEach((b) => {
+    if (b && b.i != null) {
+      if (b.t != null) barTByI[b.i] = b.t;
+      if (b.date) barDateByI[b.i] = b.date;
+    }
+  });
 
   wrap.innerHTML = decisions.map((d) => {
     const pos = d.position_shares
@@ -1006,9 +1134,14 @@ function renderTimeline(decisions, chart) {
     const r = d.realized_to_date || 0;
     const rcls = r > 0 ? "pos-v" : r < 0 ? "neg-v" : "";
     const stop = d.stop != null ? ` · stop $${d.stop}` : "";
-    return `<div class="turn" data-t="${d.t || ""}" data-c="${d.close != null ? d.close : ""}" data-i="${d.i}">
+    const whenRow = {
+      time: d.time,
+      date: d.date || barDateByI[d.i] || "",
+    };
+    const tStamp = (d.i != null && barTByI[d.i] != null) ? barTByI[d.i] : d.t;
+    return `<div class="turn" data-t="${tStamp || ""}" data-c="${d.close != null ? d.close : ""}" data-i="${d.i}">
       <div class="top">
-        <span class="time">${d.time}</span>
+        <span class="time">${escapeHtml(fmtWhen(whenRow, multiDay))}</span>
         <span class="act act-${d.action}">${d.action}</span>
         ${pos}
       </div>
@@ -1019,13 +1152,12 @@ function renderTimeline(decisions, chart) {
 
   const turns = [...wrap.querySelectorAll(".turn")];
 
-  // Zoom helper: on timeline click, show ~2 hours centered on the decision time
-  // (1h before + 1h after), clamped to available bars. Near session start (e.g. 9:30
-  // with no prior data) show 2h forward from the clicked time (or dataMin).
+  // Zoom helper: intraday ~2h window; multi-day ~10 calendar days around the click.
   // Uses pre-cached sorted times from renderChart for speed and consistency.
   const ONE_HOUR = 3600;
-  const START_TOL = 120; // seconds tolerance for "near dataMin"
-  const TARGET_SPAN = 2 * ONE_HOUR;
+  const ONE_DAY = 86400;
+  const START_TOL = multiDay ? ONE_DAY : 120;
+  const TARGET_SPAN = multiDay ? 10 * ONE_DAY : 2 * ONE_HOUR;
 
   function zoomToDecision(time) {
     if (!chart || !chart.timeScale || !chart._barTimes || !time) return;
@@ -1134,10 +1266,11 @@ async function loadSession(sessionId, updateUrl = false) {
     const view = await getJSON(`/api/session/${encodeURIComponent(sessionId)}/state`);
 
     // Render everything
+    const multiDay = isMultiDaySession(view.session || {}, view.bars);
     renderHeader(view);
-    renderBlotter(view.actions || []);
+    renderBlotter(view.actions || [], multiDay, view.bars || []);
     const chart = renderChart(view.bars || [], view.actions || [], view.session);
-    renderTimeline(view.decisions || [], chart);
+    renderTimeline(view.decisions || [], chart, multiDay);
 
     if (chart) {
       currentChart = chart;
@@ -1161,6 +1294,8 @@ async function loadSession(sessionId, updateUrl = false) {
     // right card stays highlighted while viewing one of its tickers.
     const s = view.session || {};
     currentTopSessionId = s.session || s.batch || s.id || sessionId;
+    // Scope sidebar to this leaf's strategy family.
+    setSidebarStrategy(sessionStrategy(s));
     highlightCurrentSession();
 
     if (updateUrl) {
@@ -1212,13 +1347,14 @@ async function refreshCurrentSession() {
     const view = await getJSON(`/api/session/${encodeURIComponent(currentSessionId)}/state`);
 
     // Update header + pnl
+    const multiDay = isMultiDaySession(view.session || {}, view.bars);
     renderHeader(view);
 
     // Incremental-friendly updates
     const blotter = document.querySelector("#blotter tbody");
     if (blotter) {
       // Simple approach: re-render blotter (small)
-      renderBlotter(view.actions || []);
+      renderBlotter(view.actions || [], multiDay, view.bars || []);
     }
 
     // For chart + timeline we do a light full re-render of data
@@ -1227,7 +1363,7 @@ async function refreshCurrentSession() {
     if (chartContainer && view.bars && view.bars.length) {
       // preserveView=true: keep the user's zoom/scroll as new live bars stream in
       const chart = renderChart(view.bars, view.actions || [], view.session, true);
-      renderTimeline(view.decisions || [], chart);
+      renderTimeline(view.decisions || [], chart, multiDay);
     }
 
     // If the session has just finalized, tear down live updates and refresh the
@@ -1315,12 +1451,16 @@ async function main() {
   currentSessionId = sessionFromUrl;
   currentTopSessionId = sessionFromUrl;
 
-  // Render the sidebar list. We capture the returned sessions so we can reliably
-  // decide whether ?session=... refers to a top-level group (show tickers table)
-  // or a concrete leaf (go straight to detail chart). This fixes direct links
-  // and the BATCH- group ids which have no on-disk folder.
-  const topSessions = await loadAndRenderList() || [];
-  const topIds = new Set(topSessions.map(s => s.id));
+  // Load full session list first (unfiltered), then scope after we know strategy.
+  await loadAndRenderList();
+  // Prefer matching the URL session against the full list so strategy filter
+  // doesn't hide the target before we set it.
+  const topIds = new Set(allSidebarSessions.map((s) => s.id));
+  const matched = allSidebarSessions.find((s) => s.id === sessionFromUrl);
+  if (matched) {
+    setSidebarStrategy(matched.strategy || "warrior");
+  }
+  const topSessions = sessionsForSidebar();
 
   // If the selected session is a top-level card, scroll it into view on first
   // load — the sidebar sorts newest-first and can run long, so a session from
@@ -1331,8 +1471,8 @@ async function main() {
     if (selectedCard) selectedCard.scrollIntoView({ block: "nearest" });
   }
 
-  // "Sessions" header chip is now a plain link to the main viewer instance
-  // (http://127.0.0.1:8770/viewer/index.html) — no click handler needed.
+  // "Sessions" header chip is a same-origin link to /viewer/index.html
+  // (relative — works on whatever host:port the server is using).
 
   // Wire global refresh button
   const refreshList = document.getElementById("refresh-list-btn");

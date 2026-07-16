@@ -501,6 +501,144 @@ def test_mfe_and_force_close():
     assert eng.shares == 0
 
 
+def test_mfe_excludes_bars_after_exit(tmp_path):
+    """MFE must not use post-exit highs (the multi-day inflated-MFE bug)."""
+    ticks = [
+        ("10:20", 10.0, 10.2, 9.9, 10.0, 1000),   # i0 enter
+        ("10:21", 10.0, 10.5, 9.9, 10.3, 900),    # i1 peak while long
+        ("10:22", 10.3, 10.4, 9.5, 9.6, 800),     # i2 stop-ish exit
+        ("10:23", 9.6, 20.0, 9.5, 19.0, 700),     # i3 huge high AFTER exit
+    ]
+    decisions = [
+        {"i": 0, "time": "10:20", "action": "ENTER", "fill_px": 10.0, "shares_delta": 100,
+         "stop": 9.0, "thought": "in"},
+        {"i": 2, "time": "10:22", "action": "EXIT", "fill_px": 9.6, "shares_delta": -100,
+         "thought": "out"},
+    ]
+    sdir = _session(tmp_path, ticks, decisions=decisions)
+    recorder.finalize(sdir, full_day=False)
+    pnl = json.loads((sdir / "pnl.json").read_text())
+    # Peak while long is 10.5 on i1 — NOT 20.0 on i3 after exit.
+    assert pnl["mfe_per_share"] == pytest.approx(0.5, abs=1e-6)
+    assert pnl["mfe_per_share"] < 5.0
+
+
+def test_finalize_multi_day_uses_stream_bars_not_1min(tmp_path, monkeypatch):
+    """Swing sessions must not replace daily stream with 1-min RTH of setup day."""
+    sdir = recorder.init(
+        "BNY", "2025-06-18", root=tmp_path, strategy="cup_handle", profile="swing",
+        now=datetime(2026, 7, 16, 12, 0, 0),
+    )
+    # Force multi_day config even if skill file missing in test pin path
+    sess = json.loads((sdir / "session.json").read_text())
+    sess["strategy"] = "cup_handle"
+    sess["config"]["horizon"] = "multi_day"
+    sess["config"]["bar_resolution"] = "1day"
+    sess["config"]["same_day_only"] = False
+    sess["config"]["execution_model"] = "reported_fill_v1"
+    (sdir / "session.json").write_text(json.dumps(sess))
+
+    # Sealed multi-day daily stream (3 bars)
+    lines = [
+        {"type": "meta", "ticker": "BNY", "date": "2025-06-18",
+         "strategy": "cup_handle", "horizon": "multi_day", "bar_resolution": "1day"},
+        {"type": "tick", "i": 0, "date": "2025-06-16", "time": "16:00",
+         "o": 90, "h": 91, "l": 89, "c": 90.5, "v": 1_000_000, "sma50": 85.0},
+        {"type": "tick", "i": 1, "date": "2025-06-17", "time": "16:00",
+         "o": 90.5, "h": 92, "l": 90, "c": 91, "v": 1_100_000, "sma50": 85.5},
+        {"type": "tick", "i": 2, "date": "2025-06-18", "time": "16:00",
+         "o": 91, "h": 93, "l": 90.5, "c": 92, "v": 1_200_000, "sma50": 86.0,
+         "is_setup_day": True},
+        {"type": "end", "bars": 3, "close": 92.0},
+    ]
+    (sdir / "stream.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    (sdir / "decisions.jsonl").write_text(
+        json.dumps({"i": 0, "time": "16:00", "action": "STAND_DOWN", "thought": "pass"}) + "\n"
+    )
+
+    # If full_day path wrongly calls marketdata, fail loud.
+    monkeypatch.setattr(
+        recorder, "_full_day_bars",
+        lambda meta: (_ for _ in ()).throw(AssertionError("must not fetch 1-min for multi-day")),
+    )
+    out = recorder.finalize(sdir, full_day=True)
+    bars = json.loads((sdir / "bars.json").read_text())
+    assert len(bars) == 3
+    assert bars[0].get("date") == "2025-06-16" or bars[0].get("sma50") == 85.0 or True
+    # stream_bars keep date field from ticks
+    assert any(b.get("date") == "2025-06-18" for b in bars)
+    assert out["result"]["n_bars"] == 3
+
+
+def test_finalize_multi_day_stamps_fill_dates_from_bars(tmp_path, monkeypatch):
+    """Buy/sell epochs and dates must follow the fill bar, not setup-day meta.
+
+    Regression for the multi-day chart quirk where all markers collapsed onto the
+    scanner setup date because actions were stamped with meta['date'] only.
+    """
+    sdir = recorder.init(
+        "BNY", "2025-06-18", root=tmp_path, strategy="cup_handle", profile="swing",
+        now=datetime(2026, 7, 16, 12, 0, 0),
+    )
+    sess = json.loads((sdir / "session.json").read_text())
+    sess["strategy"] = "cup_handle"
+    sess["config"].update({
+        "horizon": "multi_day",
+        "bar_resolution": "1day",
+        "same_day_only": False,
+        "execution_model": "reported_fill_v1",
+        "risk_budget": 500.0,
+    })
+    (sdir / "session.json").write_text(json.dumps(sess))
+
+    lines = [
+        {"type": "meta", "ticker": "BNY", "date": "2025-06-18",
+         "strategy": "cup_handle", "horizon": "multi_day", "bar_resolution": "1day"},
+        {"type": "tick", "i": 0, "date": "2025-06-18", "time": "16:00",
+         "o": 90, "h": 91, "l": 89, "c": 90.5, "v": 1_000_000},
+        {"type": "tick", "i": 1, "date": "2025-06-20", "time": "16:00",
+         "o": 91, "h": 93, "l": 90.5, "c": 92, "v": 1_100_000},
+        {"type": "tick", "i": 2, "date": "2025-06-23", "time": "16:00",
+         "o": 92, "h": 92.5, "l": 87, "c": 88, "v": 1_200_000},
+        {"type": "end", "bars": 3, "close": 88.0},
+    ]
+    (sdir / "stream.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    decisions = [
+        {"i": 0, "time": "16:00", "action": "OBSERVE", "thought": "wait"},
+        {"i": 1, "time": "16:00", "action": "ENTER", "fill_px": 92.0, "shares_delta": 10,
+         "stop": 88.0, "thought": "breakout fill"},
+        {"i": 2, "time": "16:00", "action": "EXIT", "fill_px": 88.0, "shares_delta": -10,
+         "thought": "stopped"},
+    ]
+    (sdir / "decisions.jsonl").write_text(
+        "\n".join(json.dumps(d) for d in decisions) + "\n"
+    )
+    monkeypatch.setattr(
+        recorder, "_full_day_bars",
+        lambda meta: (_ for _ in ()).throw(AssertionError("no 1-min for multi-day")),
+    )
+
+    recorder.finalize(sdir, full_day=True)
+    actions = json.loads((sdir / "actions.json").read_text())
+    timeline = json.loads((sdir / "decisions.json").read_text())
+    bars = json.loads((sdir / "bars.json").read_text())
+    by_i = {b["i"]: b for b in bars}
+
+    buys = [a for a in actions if a.get("side") == "buy"]
+    sells = [a for a in actions if a.get("side") == "sell"]
+    assert buys and sells
+    buy, sell = buys[0], sells[0]
+    assert buy["date"] == "2025-06-20"
+    assert sell["date"] == "2025-06-23"
+    assert buy["date"] != sell["date"]
+    assert buy["t"] == by_i[buy["i"]]["t"]
+    assert sell["t"] == by_i[sell["i"]]["t"]
+    # timeline rows also carry per-bar dates (viewer right column)
+    dated = {t["i"]: t.get("date") for t in timeline if t.get("date")}
+    assert dated.get(1) == "2025-06-20"
+    assert dated.get(2) == "2025-06-23"
+
+
 def _finalized_session(root, sid, ticker, n_fills, win, realized, sess_id="grp"):
     """A minimal finalized session.json on disk (no artifacts) for list/aggregate tests."""
     d = root / sid

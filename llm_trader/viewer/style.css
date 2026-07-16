@@ -261,6 +261,19 @@ header {
 .badge.strat-warrior { color: #93c5fd; border-color: #3b82f6; }
 .badge.strat-cup_handle { color: #fcd34d; border-color: #d97706; }
 .badge.strat-mixed { color: var(--muted); border-color: var(--line); }
+
+.sidebar-strategy-filter {
+  padding: 4px 12px 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+}
+.sidebar-strategy-filter a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.sidebar-strategy-filter a:hover { text-decoration: underline; }
+.sidebar-strategy-filter b.strat-warrior { color: #93c5fd; }
+.sidebar-strategy-filter b.strat-cup_handle { color: #fcd34d; }
 .lg-stop::before { color: var(--stop); } .lg-pm::before { color: var(--pm); }
 
 #blotter-wrap {

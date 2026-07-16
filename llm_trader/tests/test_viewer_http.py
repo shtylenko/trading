@@ -56,6 +56,12 @@ def test_static_spa_is_served(server):
     assert b"strategy" in body
     assert b"isMultiDaySession" in body
     assert b"sma50" in body
+    assert b"setSidebarStrategy" in body
+    assert b"sidebarStrategy" in body
+    # multi-day blotter/timeline must receive multiDay (date in when column)
+    assert b"fmtWhen" in body
+    assert b"renderBlotter(view.actions || [], multiDay" in body
+    assert b"renderTimeline(view.decisions || [], chart, multiDay)" in body
 
 
 def test_bad_session_id_rejected(server):

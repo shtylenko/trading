@@ -1,0 +1,16 @@
+{
+  "created": "2026-07-16T12:00:00",
+  "seed": 1,
+  "n": 1,
+  "note": "Pilot: single BNY cup_handle setup (same name/date as cup-smoke-30 leaf).",
+  "setups": [
+    {
+      "ticker": "BNY",
+      "date": "2025-06-18",
+      "time_et": "09:30",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    }
+  ]
+}

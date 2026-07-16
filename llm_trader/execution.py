@@ -116,6 +116,9 @@ class ExecutionEngine:
         self.initial_risk: Optional[float] = None
         self.max_shares = 0
         self.worst_price_vs_entry = 0.0
+        # Set when the position returns to flat — bounds in-position MFE.
+        self.exit_i: Optional[int] = None
+        self.exit_reason: Optional[str] = None
         self._last_bar: Optional[dict[str, Any]] = None
 
     # ── price, liquidity, and position primitives ─────────────────────────
@@ -200,6 +203,10 @@ class ExecutionEngine:
             self.shares -= shares
             if self.shares == 0:
                 self.avg_entry = 0.0
+                # First flat after a trade bounds MFE (ignore later re-entries' open).
+                if self.exit_i is None:
+                    self.exit_i = int(bar["i"])
+                    self.exit_reason = reason
 
         self.realized += realized_delta
         self.fees += fee
@@ -229,6 +236,42 @@ class ExecutionEngine:
         adverse = float(low) - self.avg_entry
         if adverse < self.worst_price_vs_entry:
             self.worst_price_vs_entry = adverse
+
+    @staticmethod
+    def in_position_peak_high(
+        bars: list[dict[str, Any]],
+        entry_i: Optional[int],
+        exit_i: Optional[int],
+        exit_reason: Optional[str] = None,
+    ) -> Optional[float]:
+        """Peak bar high while the *first* position was open.
+
+        Includes the entry bar (you were long after fill). Excludes bars after
+        the flat exit. On a protective-stop exit bar, the high is excluded
+        under the engine's stop-first OHLC convention (same rule as
+        ``batchsim._in_position_mfe``).
+        """
+        if entry_i is None:
+            return None
+        reason = exit_reason or ""
+        protective = (
+            "protective stop" in reason
+            or "armed-entry/stop" in reason
+            or "stop-first" in reason
+        )
+        highs: list[float] = []
+        for b in bars:
+            i = int(b.get("i", -1))
+            if i < entry_i:
+                continue
+            if exit_i is not None and i > exit_i:
+                continue
+            if exit_i is not None and i == exit_i and protective:
+                continue
+            h = b.get("h")
+            if h is not None:
+                highs.append(float(h))
+        return max(highs) if highs else None
 
     @staticmethod
     def _bracket_scales(decision: dict[str, Any]) -> list[dict[str, float]]:
@@ -632,12 +675,17 @@ class ExecutionEngine:
             )
             forced = True
 
-        peak = None
-        if self.entry_i is not None:
-            highs = [float(b["h"]) for b in bars if int(b.get("i", -1)) >= self.entry_i]
-            peak = max(highs) if highs else None
-        mfe_ps = round(peak - self.entry_avg, 4) if peak is not None and self.entry_avg is not None else None
-        cap_ps = (peak - self._blended_entry()) if peak is not None and self._blended_entry() is not None else None
+        entry_ref = self.entry_avg if self.entry_avg else self._blended_entry()
+        peak = self.in_position_peak_high(
+            bars, self.entry_i, self.exit_i, self.exit_reason
+        )
+        mfe_ps = (
+            round(peak - entry_ref, 4)
+            if peak is not None and entry_ref is not None
+            else None
+        )
+        blended = self._blended_entry()
+        cap_ps = (peak - blended) if peak is not None and blended is not None else None
         mfe_dollars = cap_ps * self.max_shares if cap_ps is not None and self.max_shares else None
         actual_r = round(self.realized / self.initial_risk, 2) if self.initial_risk else None
         pnl = {
@@ -650,11 +698,12 @@ class ExecutionEngine:
             "traded": self.entry_i is not None,
             "n_fills": len(self.actions),
             "entry_index": self.entry_i,
-            "entry_avg": self._blended_entry(),
+            "exit_index": self.exit_i,
+            "entry_avg": blended,
             "entry_shares": self.entry_shares,
             "max_shares": self.max_shares or None,
             "mfe_per_share": mfe_ps,
-            "mfe_pct": round(mfe_ps / self._blended_entry() * 100, 2) if mfe_ps and self._blended_entry() else None,
+            "mfe_pct": round(mfe_ps / blended * 100, 2) if mfe_ps and blended else None,
             "mfe_capture": round(self.realized / mfe_dollars, 3) if mfe_dollars and mfe_dollars > 0 else None,
             "mae_per_share": round(-self.worst_price_vs_entry, 4) if self.worst_price_vs_entry < 0 else None,
             "mae_pct": round(-self.worst_price_vs_entry / self._blended_entry() * 100, 2)

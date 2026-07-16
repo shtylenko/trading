@@ -418,7 +418,9 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
             ticker: str, date: str, time_et: Optional[str], sdir: str,
             max_reentries: int = 1, trade_until: Optional[str] = None,
             execution_model: str = "reported_fill_v1",
-            session_from_open: bool = False) -> str:
+            session_from_open: bool = False,
+            horizon: str = "intraday",
+            bar_resolution: str = "1min") -> str:
     """The per-setup task handed to a headless hermes agent.
 
     The harness has ALREADY created the session and holds the sealed day in a private
@@ -430,10 +432,27 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
 
     Command lines are NOT indented (leading whitespace on `\\`-continued lines would be
     passed to the agent verbatim)."""
+    multi_day = (horizon or "").lower() in ("multi_day", "multiday", "swing") or (
+        bar_resolution or ""
+    ).lower() in ("1day", "daily")
     # The early-stop rule (condition b) is set by the run's §C re-entry BUDGET
     # (max_reentries) and an optional cutoff time (trade_until). Budget 1 + no cutoff
     # reproduces the classic single-re-entry behaviour exactly.
-    if session_from_open:
+    if multi_day:
+        # Daily bars all print time "16:00" — NEVER use clock-of-day cutoffs here.
+        # Agent must walk plan lookback → setup day → hold window until STATUS end
+        # (or a terminal STAND_DOWN after the plan is fully resolved).
+        done_rule = (
+            "This is a MULTI-DAY swing run (one bar = one trading day; time is usually 16:00). "
+            "Do NOT stop because the clock says after 11:00 — that rule is for intraday only. "
+            "While flat in the PLAN phase, KEEP revealing bars until you have either: "
+            "(1) armed/entered and later flattened with no further plan, "
+            "(2) logged STAND_DOWN after invalidating the setup, or "
+            "(3) `step next` prints STATUS end (end of sealed lookback+hold window). "
+            "You must at least reach the scanner setup date before standing down for "
+            "'no setup' — early abort mid-lookback is a failed run."
+        )
+    elif session_from_open:
         done_rule = (
             "This is a from-open discovery run. While flat, keep revealing bars through 11:00 ET; "
             "a valid completed 5-minute entry may still form. After 11:00 ET, if flat with no "
@@ -992,6 +1011,8 @@ def run(
     five_minute_context = str(skill_meta.get("five_minute_context")).lower() == "true"
     if five_minute_context and not session_from_open:
         raise ValueError("five_minute_context requires session_from_open: true")
+    horizon = skill_meta.get("horizon") or strat.horizon.kind
+    bar_resolution = skill_meta.get("bar_resolution") or strat.horizon.bar_resolution
     skill_text = skill_path.read_text(encoding="utf-8")
     current_runner_contract = runner_contract()
     testset_hash = _file_hash(testset)
@@ -1059,6 +1080,8 @@ def run(
                 "dry_run": dry_run,
                 "session_from_open": session_from_open,
                 "five_minute_context": five_minute_context,
+                "horizon": horizon,
+                "bar_resolution": bar_resolution,
                 "strategy": strategy_id,
                 "profile": strat.risk.profile,
                 "db": str(strategy_db),
@@ -1078,7 +1101,9 @@ def run(
                                   w["date"], w.get("time_et"), sdir="<PRE-SEALED-SDIR>",
                                   max_reentries=w["max_reentries"], trade_until=w["trade_until"],
                                   execution_model=execution_model,
-                                  session_from_open=w["session_from_open"])
+                                  session_from_open=w["session_from_open"],
+                                  horizon=w.get("horizon") or "intraday",
+                                  bar_resolution=w.get("bar_resolution") or "1min")
         print(json.dumps([_run_one(w) for w in work], indent=2))
         return tag
 
@@ -1096,7 +1121,9 @@ def run(
                                   w["date"], w.get("time_et"), w["sdir"],
                                   max_reentries=w["max_reentries"], trade_until=w["trade_until"],
                                   execution_model=execution_model,
-                                  session_from_open=w["session_from_open"])
+                                  session_from_open=w["session_from_open"],
+                                  horizon=w.get("horizon") or "intraday",
+                                  bar_resolution=w.get("bar_resolution") or "1min")
             ready.append(w)
         except Exception as e:  # noqa: BLE001 — one bad setup shouldn't sink the batch
             print(f"  [preseal-err] {w['item']}: {e}", file=sys.stderr)

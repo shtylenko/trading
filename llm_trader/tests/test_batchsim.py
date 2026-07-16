@@ -714,10 +714,24 @@ def test_prompt_uses_resolve_and_intents_for_deterministic_skill():
 def test_from_open_prompt_hides_scanner_time_and_prevents_flat_early_stop():
     p = batchsim._prompt("4.0.0", "SKILL-TEXT", "tag", "SESSION-ID",
                          "BQ", "2026-01-01", "10:35", "/tmp/session",
-                         execution_model="deterministic_ohlc_v1", session_from_open=True)
+                         execution_model="deterministic_ohlc_v1", session_from_open=True,
+                         horizon="intraday", bar_resolution="1min")
     assert "ticker=BQ  date=2026-01-01" in p
     assert "time=10:35" not in p
     assert "keep revealing bars through 11:00 ET" in p
+
+
+def test_multi_day_prompt_does_not_use_intraday_1100_stop():
+    p = batchsim._prompt(
+        "0.1.0", "SKILL-TEXT", "tag", "SESSION-ID",
+        "BNY", "2025-06-18", "09:30", "/tmp/session",
+        execution_model="deterministic_ohlc_v1", session_from_open=True,
+        horizon="multi_day", bar_resolution="1day",
+    )
+    assert "MULTI-DAY swing run" in p
+    assert "Do NOT stop because the clock says after 11:00" in p
+    assert "scanner setup date" in p
+    assert "keep revealing bars through 11:00 ET" not in p
 
 
 def test_prompt_reentry_budget_and_cutoff():

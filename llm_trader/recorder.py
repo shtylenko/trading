@@ -90,6 +90,34 @@ def _setup_from_meta(meta: Optional[dict]) -> dict:
         return {}
     return {k: meta.get(k) for k in _SETUP_META_KEYS if meta.get(k) is not None}
 
+
+def _is_multi_day_session(session: dict, meta: Optional[dict] = None) -> bool:
+    """True when the sealed stream is multi-day daily (not a same-day 1-min tape)."""
+    meta = meta or {}
+    cfg = session.get("config") or {}
+    skill = session.get("skill") or {}
+    horizon = (
+        cfg.get("horizon")
+        or skill.get("horizon")
+        or meta.get("horizon")
+        or ""
+    )
+    bar_res = (
+        cfg.get("bar_resolution")
+        or skill.get("bar_resolution")
+        or meta.get("bar_resolution")
+        or ""
+    )
+    strategy = _strategy_of(session) or meta.get("strategy") or ""
+    if str(horizon).lower() in ("multi_day", "multiday", "swing"):
+        return True
+    if str(bar_res).lower() in ("1day", "daily"):
+        return True
+    if strategy and strategy not in ("warrior", "mixed"):
+        # Non-warrior families default to multi-day chart handling.
+        return str(cfg.get("same_day_only", True)).lower() in ("0", "false", "no")
+    return False
+
 # default account profile knobs (mirrors skill / strategy family sizing)
 PROFILE_RISK = {"small": 40.0, "main": 1350.0, "swing": 500.0}
 PROFILE_BUYING_POWER = {"small": 12_000.0, "main": 100_000.0, "swing": 50_000.0}
@@ -134,6 +162,9 @@ class PositionEngine:
         self.max_shares: int = 0
         # most negative (close - avg_entry) while in position; used for MAE per share
         self.worst_price_vs_entry: float = 0.0
+        # bar index / reason when first returned to flat — bounds in-position MFE
+        self.exit_i: Optional[int] = None
+        self.exit_reason: Optional[str] = None
 
     def _validate_action(
         self, i: int, action: str, has_fill: bool, dq: Optional[int]
@@ -203,6 +234,9 @@ class PositionEngine:
                 self.shares -= qty
                 if self.shares == 0:
                     self.avg_entry = 0.0
+                    if self.exit_i is None:
+                        self.exit_i = i
+                        self.exit_reason = action  # ENTER/SCALE/EXIT label
 
             side = "buy" if dq > 0 else "sell"
             action_row = {
@@ -280,16 +314,22 @@ class PositionEngine:
         }
         self.shares = 0
         self.avg_entry = 0.0
+        if self.exit_i is None and last_bar is not None:
+            self.exit_i = last_bar.get("i")
+            self.exit_reason = "auto-flat at session end (position left open)"
         return forced
 
     def peak_high_since_entry(self, bars: list[dict]) -> Optional[float]:
-        """Highest bar high from the entry bar onward (None if never entered / no
-        bars). Single source for both MFE (vs first fill) and capture (vs blended
-        cost) so ``_run_engine`` doesn't scan the bars for the max high twice."""
-        if self.entry_i is None:
-            return None
-        highs = [b["h"] for b in bars if b.get("i", -1) >= self.entry_i]
-        return max(highs) if highs else None
+        """Highest bar high while the first position was open (in-position MFE).
+
+        Delegates to :meth:`execution.ExecutionEngine.in_position_peak_high` so
+        legacy reported-fill and deterministic paths share one definition.
+        """
+        from .execution import ExecutionEngine
+
+        return ExecutionEngine.in_position_peak_high(
+            bars, self.entry_i, self.exit_i, self.exit_reason
+        )
 
     def mfe_per_share(self, bars: list[dict]) -> Optional[float]:
         peak = self.peak_high_since_entry(bars)
@@ -847,9 +887,31 @@ def _full_day_bars(meta: dict) -> Optional[list[dict]]:
     return bars
 
 
+def _bar_by_i(bars: list[dict]) -> dict:
+    return {int(b["i"]): b for b in bars if b.get("i") is not None}
+
+
+def _stamp_bar_clock(row: dict, bar: Optional[dict], meta_date: str) -> None:
+    """Attach date + epoch ``t`` from the bar this row belongs to (multi-day safe).
+
+    Historically we stamped every fill with ``meta["date"]`` + HH:MM, which collapses
+    all multi-day markers onto the setup day. Prefer the bar's own ``date``/``t``.
+    """
+    hhmm = row.get("time") or (bar or {}).get("time") or "16:00"
+    bar_date = (bar or {}).get("date") or meta_date
+    row["date"] = bar_date
+    if bar and bar.get("t") is not None:
+        row["t"] = bar["t"]
+    elif hhmm:
+        row["t"] = _epoch_et(bar_date, hhmm if len(str(hhmm)) == 5 else "16:00")
+    else:
+        row["t"] = None
+
+
 def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
     """Average-cost position/P&L walk using PositionEngine. Returns (actions, timeline, pnl)."""
     date_str = meta["date"]
+    by_i = _bar_by_i(bars)
     close_by_i = {b["i"]: b["c"] for b in bars}
     low_by_i = {b["i"]: b.get("l") for b in bars}
 
@@ -866,17 +928,18 @@ def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
         stop = d.get("stop")
         close = close_by_i.get(i)
         low = low_by_i.get(i)
+        bar = by_i.get(i) if i is not None else None
 
         action_row, timeline_row = engine.step(i, hhmm, action, fill, dq, stop, close, low)
 
-        # fill epoch times (kept out of engine for pure time math)
+        # fill epoch times from the *bar's* calendar date (not setup-day meta only)
         if action_row is not None:
-            action_row["t"] = _epoch_et(date_str, hhmm) if hhmm else None
+            _stamp_bar_clock(action_row, bar, date_str)
             action_row["reason"] = d.get("note") or d.get("thought", "")[:140]
             actions.append(action_row)
 
         if timeline_row is not None:
-            timeline_row["t"] = _epoch_et(date_str, hhmm) if hhmm else None
+            _stamp_bar_clock(timeline_row, bar, date_str)
             timeline_row["thought"] = d.get("thought", "")
             timeline_row["note"] = d.get("note")
             timeline.append(timeline_row)
@@ -888,8 +951,7 @@ def _run_engine(meta, bars, decisions, risk_budget, end, force_close=True):
     end_close = (end or {}).get("close") if end else None
     forced = engine.force_close_if_needed(last, end_close) if force_close else None
     if forced is not None:
-        if forced["time"]:
-            forced["t"] = _epoch_et(date_str, forced["time"])
+        _stamp_bar_clock(forced, last, date_str)
         actions.append(forced)
 
     # one scan of the bars for the peak high since entry, reused for both metrics.
@@ -972,10 +1034,14 @@ def _run_session_engine(
         end_close=(end or {}).get("close"),
         force_close=force_close,
     )
+    by_i = _bar_by_i(bars)
+    meta_date = meta.get("date") or ""
     for row in actions:
-        row["t"] = _epoch_et(meta["date"], row["time"]) if row.get("time") else None
+        bar = by_i.get(int(row["i"])) if row.get("i") is not None else None
+        _stamp_bar_clock(row, bar, meta_date)
     for row in timeline:
-        row["t"] = _epoch_et(meta["date"], row["time"]) if row.get("time") else None
+        bar = by_i.get(int(row["i"])) if row.get("i") is not None else None
+        _stamp_bar_clock(row, bar, meta_date)
     return actions, timeline, pnl
 
 
@@ -1036,13 +1102,23 @@ def _journal(session, meta, pnl, actions, timeline) -> str:
     L.append("")
     L.append("## Blotter")
     for a in actions:
-        L.append(f"- {a['time']}  {a['side'].upper():4}  {a['shares']:>5} @ ${a['price']}"
+        when = a.get("date") or a.get("time") or ""
+        if a.get("date") and a.get("time") and a.get("time") != "16:00":
+            when = f"{a['date']} {a['time']}"
+        elif a.get("date"):
+            when = a["date"]
+        L.append(f"- {when}  {a['side'].upper():4}  {a['shares']:>5} @ ${a['price']}"
                  f"   (Δreal ${a['realized_delta']})  — {a['reason']}")
     L.append("")
     L.append("## Decision timeline")
     for t in timeline:
         pos = f"[{t['position_shares']}sh @ {t['avg_entry']}]" if t["position_shares"] else "[flat]"
-        L.append(f"- **{t['time']}** `{t['action']}` {pos} uPnL ${t['unrealized']} — {t['thought']}")
+        when = t.get("date") or t.get("time") or ""
+        if t.get("date") and t.get("time") and t.get("time") != "16:00":
+            when = f"{t['date']} {t['time']}"
+        elif t.get("date"):
+            when = t["date"]
+        L.append(f"- **{when}** `{t['action']}` {pos} uPnL ${t['unrealized']} — {t['thought']}")
     L.append("")
     return "\n".join(L)
 
@@ -1067,12 +1143,17 @@ def finalize(session_dir: str | Path, full_day: bool = True) -> dict:
         if meta is None:
             raise ValueError(f"{sdir}/stream.jsonl has no meta line — was replay --out-file pointed here?")
         decisions = _read_jsonl(sdir / "decisions.jsonl")
-        # chart bars = the whole RTH day for context when the run is legitimately done
-        # (`full_day=True`, the skill/CLI path). When force-finalizing a *live* session
-        # (the viewer button, `full_day=False`) we clamp to the revealed ticks so the
-        # saved artifact never shows price action past where trading stopped.
+        # Chart bars: multi-day / daily streams already *are* the full sealed
+        # context — never replace them with a 1-min RTH fetch of the setup date
+        # (that made swing sessions look like day-trades and n_bars≈390).
+        # Intraday: full_day=True expands to whole RTH for context; full_day=False
+        # (live viewer finalize) clamps to revealed ticks only.
         stream_bars = _build_bars(meta, ticks)
-        bars = (_full_day_bars(meta) or stream_bars) if full_day else stream_bars
+        multi_day = _is_multi_day_session(session, meta)
+        if multi_day or not full_day:
+            bars = stream_bars
+        else:
+            bars = _full_day_bars(meta) or stream_bars
         actions, timeline, pnl = _run_session_engine(
             session, meta, stream_bars, decisions, end, force_close=True
         )

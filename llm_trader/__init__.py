@@ -1,16 +1,22 @@
-"""trading.llm_trader — Warrior Trading momentum *entry scanner* + replay/sim tooling.
+"""trading.llm_trader — multi-strategy entry scanner + sealed replay/sim tooling.
 
-See README.md, SPEC.md, and SIMULATION_VIEWER_SPEC.md.
+Default family is Warrior (Ross Cameron) momentum. Cup-and-handle swing and
+future families register under ``strategies/``. See README.md, MULTI_STRATEGY.md,
+SPEC.md, and SIMULATION_VIEWER_SPEC.md.
 """
 
 from .config import ScanConfig
 from .indicators import (
+    atr,
     enrich_1min_for_replay,
+    enrich_daily_for_replay,
     normalize_to_et,
     prepare_detection_frame,
     session_vwap,
+    sma,
 )
-from .patterns import Entry, detect_entry, detect_from_frame
+from .models import Entry
+from .patterns import detect_entry, detect_from_frame
 
 __all__ = [
     "ScanConfig",
@@ -24,6 +30,9 @@ __all__ = [
     "normalize_to_et",
     "prepare_detection_frame",
     "enrich_1min_for_replay",
+    "enrich_daily_for_replay",
+    "sma",
+    "atr",
 ]
 
 

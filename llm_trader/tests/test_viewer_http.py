@@ -52,6 +52,10 @@ def test_private_underscore_paths_are_404(server):
 def test_static_spa_is_served(server):
     status, body = _get(server, "/viewer/app.js")
     assert status == 200 and b"renderChart" in body
+    # multi-strategy UI hooks must ship with the SPA
+    assert b"strategy" in body
+    assert b"isMultiDaySession" in body
+    assert b"sma50" in body
 
 
 def test_bad_session_id_rejected(server):

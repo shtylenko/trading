@@ -3,6 +3,8 @@
   --muted: #7d8aa0; --green: #26a69a; --red: #ef5350; --accent: #5b9dff;
   --vwap: #f5c542; --ema: #b06cff; --stop: var(--red); --entry: var(--green); --pm: #4a90d9;
   --ema2: var(--accent);
+  --sma20: #7dd3fc; --sma50: #c084fc; --sma200: #fbbf24;
+  --plan: #94a3b8; --t1: #34d399; --t2: #60a5fa;
 }
 * { box-sizing: border-box; }
 html, body {
@@ -246,6 +248,19 @@ header {
 .lg-c::before { color: var(--green); } .lg-vwap::before { color: var(--vwap); }
 .lg-ema::before { color: var(--ema); } .lg-entry::before { color: var(--entry); }
 .lg-ema2::before { color: var(--ema2); } .lg-macd::before { color: var(--green); }
+.lg-sma20::before { color: var(--sma20); } .lg-sma50::before { color: var(--sma50); }
+.lg-sma200::before { color: var(--sma200); } .lg-atr::before { color: var(--muted); }
+.lg-plan::before { color: var(--plan); } .lg-stop::before { color: var(--stop); }
+
+.badge.strategy {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  margin-left: 0;
+}
+.badge.strat-warrior { color: #93c5fd; border-color: #3b82f6; }
+.badge.strat-cup_handle { color: #fcd34d; border-color: #d97706; }
+.badge.strat-mixed { color: var(--muted); border-color: var(--line); }
 .lg-stop::before { color: var(--stop); } .lg-pm::before { color: var(--pm); }
 
 #blotter-wrap {

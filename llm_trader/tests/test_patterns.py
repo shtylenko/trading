@@ -107,7 +107,9 @@ def test_store_is_idempotent(tmp_path):
     assert store.count() == 1
 
     rows_out = store.all_rows()
-    assert rows_out[0]["setup_id"] == setup_id("TEST", date(2025, 3, 10), "acd_orb")
+    assert rows_out[0]["setup_id"] == setup_id(
+        "TEST", date(2025, 3, 10), "acd_orb", strategy="warrior"
+    )
     store.close()
 
 

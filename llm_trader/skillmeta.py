@@ -9,11 +9,12 @@ skill that drove it, so profitability can be attributed per version
 - **content hash** — an automatic sha256 of the file bytes, the source of truth
   for "did the rules actually change".
 
-All versions — the currently-accepted one and every past candidate — live as
-sibling files in ``skills/trade_skills/``. There is no separate editable "live"
-file that duplicates whichever version happens to be current: the small
-committed registry (``skills/skill_versions.json``) just records a ``base``
-pointer (which version an unpinned run uses) plus each version's content hash.
+All versions for a family live as sibling files in that family's
+``strategies/<id>/skills/trade_skills/``. There is no separate editable "live"
+file: the small committed registry (``skills/skill_versions.json`` next to
+``trade_skills/``) records a ``base`` pointer plus each version's content hash.
+
+Default paths below point at the **warrior** family (historical default).
 
 **Files are sealed (chmod read-only) the moment they're registered.** This is
 what keeps the registry a source of truth: editing a version's rules in place,
@@ -23,8 +24,8 @@ separate archive copy exists to revert from — the version file *is* the only
 copy). So the workflow for a new candidate is always an explicit copy-forward,
 never an in-place edit:
 
-    python3 -m trading.llm_trader.batchsim new-version --from 2.4.1 --to 2.9.0
-    # edit skills/trade_skills/2.9.0.md freely (unsealed until first run)
+    python3 -m trading.llm_trader.batchsim new-version --strategy warrior --from 2.4.1 --to 2.9.0
+    # edit strategies/warrior/skills/trade_skills/2.9.0.md freely (unsealed until first run)
     python3 -m trading.llm_trader.batchsim run --version 2.9.0 ...
     python3 -m trading.llm_trader.batchsim promote --version 2.9.0   # once accepted
 
@@ -47,9 +48,11 @@ from typing import Optional
 
 from .fsutils import atomic_write_bytes, atomic_write_json, file_lock
 
-_SKILLS_DIR = Path(__file__).parent / "skills"
-DEFAULT_TRADE_SKILLS_DIR = _SKILLS_DIR / "trade_skills"
-DEFAULT_REGISTRY_PATH = _SKILLS_DIR / "skill_versions.json"
+# Default = warrior family (symmetric layout under strategies/<id>/skills/).
+_WARRIOR_SKILLS_DIR = Path(__file__).parent / "strategies" / "warrior" / "skills"
+DEFAULT_TRADE_SKILLS_DIR = _WARRIOR_SKILLS_DIR / "trade_skills"
+DEFAULT_REGISTRY_PATH = _WARRIOR_SKILLS_DIR / "skill_versions.json"
+_SKILLS_DIR = _WARRIOR_SKILLS_DIR  # alias used by older helpers
 
 # how many hex chars of the sha256 we keep as the short content hash
 _HASH_LEN = 8
@@ -122,6 +125,12 @@ def read_skill_meta(path: str | Path) -> dict:
         "session_from_open": fm.get("session_from_open"),
         "five_minute_context": fm.get("five_minute_context"),
         "completed_five_minute_entry_required": fm.get("completed_five_minute_entry_required"),
+        # Multi-strategy / multi-horizon contracts
+        "strategy": fm.get("strategy"),
+        "horizon": fm.get("horizon"),  # intraday | multi_day
+        "bar_resolution": fm.get("bar_resolution"),  # 1min | 1day
+        "same_day_only": fm.get("same_day_only"),
+        "max_hold_bars": fm.get("max_hold_bars"),
         "content_hash": f"sha256:{digest}",
         # store a repo-relative-ish path for readability, falling back to name
         "path": _rel_path(p),

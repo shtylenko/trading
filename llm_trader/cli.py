@@ -1,11 +1,10 @@
-"""CLI argument parsing for the entry scanner.
+"""CLI argument parsing for the multi-strategy entry scanner.
 
     python -m trading.llm_trader.runner \\
         --start 2025-01-01 --end 2026-06-30 --profile small
 
-    # quick pipeline smoke test on a slice / explicit tickers
-    python -m trading.llm_trader.runner --max-symbols 50
-    python -m trading.llm_trader.runner --symbols AAOI TLRY GME
+    python -m trading.llm_trader.runner --strategy cup_handle --max-symbols 100
+    python -m trading.llm_trader.runner --strategy cup_handle --symbols JPM AAPL
 """
 
 from __future__ import annotations
@@ -15,28 +14,49 @@ from datetime import date
 from pathlib import Path
 
 from .config import DATA_DIR, ScanConfig
+from .strategies import default_strategy_id, list_strategies
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="llm_trader",
-        description="Warrior Trading momentum entry scanner (entries only, no P&L).",
+        description="Multi-strategy entry scanner (warrior default; cup_handle swing, …).",
+    )
+    p.add_argument(
+        "--strategy",
+        default=default_strategy_id(),
+        choices=list_strategies(),
+        help=f"Strategy family (default: {default_strategy_id()}).",
     )
     p.add_argument("--config", help="YAML config file (CLI flags override).")
-    p.add_argument("--start", help="YYYY-MM-DD (default 2025-01-01).")
-    p.add_argument("--end", help="YYYY-MM-DD (default 2026-06-30).")
-    p.add_argument("--profile", choices=["small", "main"], help="Account profile.")
-    p.add_argument("--gap-min", type=float, help="Min gap %% (default 5).")
-    p.add_argument("--rvol-min", type=float, help="Min relative volume (default 2).")
-    p.add_argument("--float-max", type=float,
-                   help="Max float shares (default 20e6; pass 0 to disable).")
+    p.add_argument("--start", help="YYYY-MM-DD.")
+    p.add_argument("--end", help="YYYY-MM-DD.")
+    p.add_argument("--profile", choices=["small", "main"], help="Account profile (warrior).")
+    p.add_argument("--gap-min", type=float, help="Min gap %% (warrior; default 5).")
+    p.add_argument("--rvol-min", type=float, help="Min relative volume (warrior; default 2).")
+    p.add_argument(
+        "--float-max",
+        type=float,
+        help="Max float shares (warrior; default 20e6; pass 0 to disable).",
+    )
     p.add_argument("--price-min", type=float)
     p.add_argument("--price-max", type=float)
-    p.add_argument("--db", help="Output SQLite path (default data/entries.db).")
-    p.add_argument("--max-symbols", type=int,
-                   help="Scan only the first N symbols (pipeline test).")
-    p.add_argument("--symbols", nargs="+",
-                   help="Scan only these tickers (skips universe fetch).")
+    p.add_argument("--db", help="Output SQLite path.")
+    p.add_argument(
+        "--max-symbols",
+        type=int,
+        help="Scan only the first N symbols (pipeline test).",
+    )
+    p.add_argument(
+        "--symbols",
+        nargs="+",
+        help="Scan only these tickers (skips universe fetch).",
+    )
+    p.add_argument(
+        "--list-strategies",
+        action="store_true",
+        help="Print registered strategy families and exit.",
+    )
     return p
 
 
@@ -45,6 +65,7 @@ def _date(s: str):
 
 
 def config_from_args(args: argparse.Namespace) -> ScanConfig:
+    """Warrior ScanConfig from CLI (used when --strategy warrior)."""
     cfg = ScanConfig.from_yaml(args.config) if args.config else ScanConfig()
     if args.start:
         cfg.start = _date(args.start)
@@ -53,7 +74,6 @@ def config_from_args(args: argparse.Namespace) -> ScanConfig:
     if args.profile:
         cfg.account_profile = args.profile
     cfg.apply_profile()
-    # explicit band overrides applied after profile so they win
     if args.price_min is not None:
         cfg.price_min = args.price_min
     if args.price_max is not None:

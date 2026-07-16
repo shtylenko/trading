@@ -44,7 +44,7 @@ def test_screen_filters_gap_rvol_price(tmp_path):
         ("2025-03-11", 5.1, 5.2, 5.0, 5.05, 300_000),
     ])
 
-    with patch("trading.llm_trader.screen.fetch_bars", return_value=frame):
+    with patch("trading.llm_trader.strategies.warrior.screen.fetch_bars", return_value=frame):
         cands = screen_ticker("GAP", cfg)
         assert len(cands) == 1
         c = cands[0]
@@ -55,18 +55,19 @@ def test_screen_filters_gap_rvol_price(tmp_path):
 
 def test_runner_smoke_with_mocks(tmp_path):
     """End-to-end smoke of run_scan using heavy mocks (no real API calls)."""
-    from trading.llm_trader.runner import run_scan
     from trading.llm_trader.config import ScanConfig
+    from trading.llm_trader.strategies.warrior.runner import run_scan
 
     db = tmp_path / "test.db"
     cfg = ScanConfig(start=date(2025, 3, 10), end=date(2025, 3, 10), db_path=db)
 
     fake_syms = ["TEST1", "TEST2"]
+    mod = "trading.llm_trader.strategies.warrior.runner"
 
-    with patch("trading.llm_trader.runner.fetch_symbols", return_value=fake_syms), \
-         patch("trading.llm_trader.runner.screen_ticker") as mock_screen, \
-         patch("trading.llm_trader.runner.FloatCache") as MockFloat, \
-         patch("trading.llm_trader.runner.detect_entry") as mock_detect:
+    with patch(f"{mod}.fetch_symbols", return_value=fake_syms), \
+         patch(f"{mod}.screen_ticker") as mock_screen, \
+         patch(f"{mod}.FloatCache") as MockFloat, \
+         patch(f"{mod}.detect_entry") as mock_detect:
 
         # screen returns a candidate for first ticker only
         mock_screen.side_effect = lambda s, c: [GapCandidate(s, date(2025, 3, 10), 5.0, 4.0, 25.0, 5.0, 600000, 800000)] if s == "TEST1" else []

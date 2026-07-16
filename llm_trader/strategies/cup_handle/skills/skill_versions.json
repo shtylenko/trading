@@ -1,0 +1,10 @@
+{
+  "base": "0.1.0",
+  "versions": {
+    "0.1.0": {
+      "content_hash": null,
+      "first_seen": "2026-07-15T00:00:00",
+      "note": "Initial cup-and-handle plan-first swing skill. Hash filled on first resolve_version / run."
+    }
+  }
+}

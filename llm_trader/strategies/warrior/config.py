@@ -13,7 +13,9 @@ from typing import Optional
 
 import yaml
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
+# Package data root (llm_trader/data/), shared caches + warrior entries.db.
+# Not strategies/warrior/data — keep historical path for warrior entries.
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
 
 def _as_date(value) -> date:

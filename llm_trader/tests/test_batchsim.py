@@ -499,7 +499,9 @@ def test_resume_recovers_config_from_batch_json(tmp_path, monkeypatch):
     # skill file for the recovered version must exist for run() to load it
     dummy_skill = tmp_path / "dummy_skill.md"
     dummy_skill.write_text("---\nname: x\nversion: 9.9.9\n---\nbody\n")
-    monkeypatch.setattr(batchsim, "_archived_skill", lambda v: dummy_skill)
+    monkeypatch.setattr(
+        batchsim, "_archived_skill", lambda v, strategy_id="warrior": dummy_skill
+    )
     dummy_hash = skillmeta.read_skill_meta(dummy_skill)["content_hash"]
     batchsim._write_batch_meta(
         tag,

@@ -4,15 +4,19 @@ from __future__ import annotations
 
 from datetime import date
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from trading.llm_trader.config import ScanConfig
 from trading.llm_trader.indicators import (
+    atr,
     enrich_1min_for_replay,
+    enrich_daily_for_replay,
     normalize_to_et,
     prepare_detection_frame,
     session_vwap,
+    sma,
 )
 from trading.llm_trader.patterns import detect_from_frame
 from trading.llm_trader.screen import GapCandidate
@@ -133,3 +137,30 @@ def test_config_vol_avg_window_affects_detection():
     cfg_loose = ScanConfig(vol_expansion_mult=1.0, vol_avg_window=5)
     e_loose = detect_from_frame(df, cand, cfg_loose, None)
     assert e_loose is not None  # should pass loose gate
+
+
+def test_sma_and_atr_basic():
+    close = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    s = sma(close, 3)
+    assert pd.isna(s.iloc[1])
+    assert s.iloc[2] == pytest.approx(2.0)
+    assert s.iloc[5] == pytest.approx(5.0)
+
+    idx = pd.bdate_range("2025-01-02", periods=30)
+    df = pd.DataFrame(
+        {
+            "open": np.linspace(10, 20, 30),
+            "high": np.linspace(10.5, 20.5, 30),
+            "low": np.linspace(9.5, 19.5, 30),
+            "close": np.linspace(10, 20, 30),
+            "volume": np.full(30, 1_000_000.0),
+        },
+        index=idx,
+    )
+    a = atr(df, 14)
+    assert a.notna().sum() >= 10
+    assert (a.dropna() > 0).all()
+
+    enriched = enrich_daily_for_replay(df)
+    for col in ("sma20", "sma50", "sma200", "atr14", "above_sma20", "rvol"):
+        assert col in enriched.columns

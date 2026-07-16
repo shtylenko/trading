@@ -60,10 +60,39 @@ SIM_ROOT = DATA_DIR.parent / "simulations"
 # The skill registry + experiment log. Used to classify each session's rule-set
 # version as the accepted base, a pending candidate, or a rejected experiment so
 # the viewer can tint its row.
-SKILLS_DIR = DATA_DIR.parent / "skills"
+# Warrior skill tree (default family). Other families use strategies/<id>/skills/.
+SKILLS_DIR = DATA_DIR.parent / "strategies" / "warrior" / "skills"
 
-# default account profile knobs (mirrors the skill's small-account sizing)
-PROFILE_RISK = {"small": 40.0, "main": 1350.0}
+# Fields copied from stream meta → session.setup on finalize / live view.
+_SETUP_META_KEYS = (
+    "entry_time", "entry_px", "anchor_px", "gap_pct", "rvol", "float_shares",
+    "prior_close", "prior_high", "prior_low", "pm_high", "pm_low",
+    "session_end", "reason",
+    # multi-strategy / swing plan levels
+    "strategy", "pattern", "horizon", "bar_resolution",
+    "stop_px", "target1_px", "target2_px", "atr", "handle_high",
+    "cup_depth_px", "cup_depth_pct",
+)
+
+
+def _strategy_of(session: dict) -> str:
+    """Best-effort strategy id from a session.json dict."""
+    return (
+        session.get("strategy")
+        or (session.get("config") or {}).get("strategy")
+        or (session.get("skill") or {}).get("strategy")
+        or "warrior"
+    )
+
+
+def _setup_from_meta(meta: Optional[dict]) -> dict:
+    if not meta:
+        return {}
+    return {k: meta.get(k) for k in _SETUP_META_KEYS if meta.get(k) is not None}
+
+# default account profile knobs (mirrors skill / strategy family sizing)
+PROFILE_RISK = {"small": 40.0, "main": 1350.0, "swing": 500.0}
+PROFILE_BUYING_POWER = {"small": 12_000.0, "main": 100_000.0, "swing": 50_000.0}
 LEGACY_EXECUTION_MODEL = "reported_fill_v1"
 
 # a running session idle longer than this (no file writes) is treated as stale
@@ -315,6 +344,7 @@ def init(
     batch: Optional[str] = None,
     session: Optional[str] = None,
     runner_contract: Optional[dict] = None,
+    strategy: Optional[str] = None,
     root: Path = SIM_ROOT,
     now: Optional[datetime] = None,
 ) -> Path:
@@ -334,7 +364,12 @@ def init(
     Batch harnesses may also stamp an immutable ``runner_contract`` describing the
     prompt and execution harness that drove this leaf; ordinary/manual sessions do
     not need one.
+
+    **Multi-strategy.** Pass ``strategy`` (e.g. ``cup_handle``) to use that family's
+    skill registry, risk defaults, and horizon flags. Default is ``warrior``.
     """
+    from .strategies import get_strategy
+
     now = now or datetime.now()
     # A short random suffix makes the id collision-proof: under batch parallelism two
     # agents trading the same ticker can `init` in the same wall-clock second, and a
@@ -343,7 +378,30 @@ def init(
     sdir = Path(root) / sid
     sdir.mkdir(parents=True, exist_ok=False)
 
-    skill_path = skill or skillmeta.base_skill_path()
+    strategy_id = (strategy or "warrior").strip().lower().replace("-", "_")
+    try:
+        strat = get_strategy(strategy_id)
+    except KeyError:
+        strat = get_strategy("warrior")
+        strategy_id = "warrior"
+
+    # Profile / risk defaults from family when caller uses family profile name.
+    if profile == "swing" or strategy_id != "warrior":
+        default_profile = strat.risk.profile
+        if profile == "small" and strategy_id != "warrior":
+            profile = default_profile
+    default_risk = PROFILE_RISK.get(profile, strat.risk.risk_budget)
+    default_bp = PROFILE_BUYING_POWER.get(profile, strat.risk.buying_power)
+
+    if skill is not None:
+        skill_path = Path(skill)
+        registry_path = None  # colocated registry for ad-hoc skills
+    else:
+        skill_path = skillmeta.base_skill_path(
+            strat.registry_path(), strat.trade_skills_dir()
+        )
+        registry_path = strat.registry_path()
+
     note = None
     if pin_version is not None:
         # backtest: stamp the pinned version read-only — no resolve/bump/archive.
@@ -353,43 +411,74 @@ def init(
         except FileNotFoundError:
             m = {}
             content_hash = None
-        skill_meta = {"name": "trade-simulator", "version": pin_version,
-                      "content_hash": content_hash, "path": str(skill_path),
-                      "execution_model": m.get("execution_model"),
-                      "entry_bracket_required": m.get("entry_bracket_required"),
-                      "entry_pyramid_required": m.get("entry_pyramid_required"),
-                      "session_from_open": m.get("session_from_open"),
-                      "five_minute_context": m.get("five_minute_context"),
-                      "completed_five_minute_entry_required": m.get("completed_five_minute_entry_required")}
+        skill_meta = {
+            "name": m.get("name") or "trade-simulator",
+            "version": pin_version,
+            "content_hash": content_hash,
+            "path": str(skill_path),
+            "execution_model": m.get("execution_model"),
+            "entry_bracket_required": m.get("entry_bracket_required"),
+            "entry_pyramid_required": m.get("entry_pyramid_required"),
+            "session_from_open": m.get("session_from_open"),
+            "five_minute_context": m.get("five_minute_context"),
+            "completed_five_minute_entry_required": m.get(
+                "completed_five_minute_entry_required"
+            ),
+            "strategy": m.get("strategy") or strategy_id,
+            "horizon": m.get("horizon"),
+            "bar_resolution": m.get("bar_resolution"),
+            "same_day_only": m.get("same_day_only"),
+            "max_hold_bars": m.get("max_hold_bars"),
+        }
     else:
         try:
-            # A caller-supplied `skill` override (tests, ad-hoc runs) gets its own
-            # colocated registry (resolve_version infers it next to the file) so it
-            # never touches the real project's registry; the standard no-override
-            # path always targets the real one explicitly.
-            registry_path = None if skill is not None else skillmeta.DEFAULT_REGISTRY_PATH
             skill_meta, note = skillmeta.resolve_version(skill_path, registry_path)
         except FileNotFoundError:
-            skill_meta = {"name": None, "version": None, "content_hash": None,
-                          "path": str(skill_path)}
+            skill_meta = {
+                "name": None,
+                "version": None,
+                "content_hash": None,
+                "path": str(skill_path),
+            }
             note = f"skill file not found at {skill_path} — run recorded as unversioned."
     if note:
         print(f"• {note}", file=sys.stderr)
 
-    resolved_risk_budget = risk_budget if risk_budget is not None else PROFILE_RISK.get(
-        profile, PROFILE_RISK["small"]
+    resolved_risk_budget = (
+        risk_budget if risk_budget is not None else default_risk
     )
+    resolved_bp = buying_power if buying_power is not None else default_bp
     execution_model = skill_meta.get("execution_model") or LEGACY_EXECUTION_MODEL
+
+    # Horizon flags: skill frontmatter wins, else strategy defaults.
+    def _boolish(v, default):
+        if v is None:
+            return default
+        if isinstance(v, bool):
+            return v
+        return str(v).strip().lower() in ("1", "true", "yes")
+
+    same_day_only = _boolish(
+        skill_meta.get("same_day_only"), strat.horizon.same_day_only
+    )
+    max_hold_raw = skill_meta.get("max_hold_bars")
+    if max_hold_raw is None or max_hold_raw == "":
+        max_hold_bars = strat.horizon.max_hold_bars
+    else:
+        max_hold_bars = int(max_hold_raw)
+
     config = {
         "seed": seed,
         "profile": profile,
         "delay": delay,
         "risk_budget": resolved_risk_budget,
-        "buying_power": buying_power,
-        # Existing skills have no frontmatter execution contract and continue
-        # to replay their historical reported fills.  v3+ explicitly opts into
-        # deterministic OHLC execution.
+        "buying_power": resolved_bp,
         "execution_model": execution_model,
+        "strategy": strategy_id,
+        "same_day_only": same_day_only,
+        "max_hold_bars": max_hold_bars,
+        "horizon": skill_meta.get("horizon") or strat.horizon.kind,
+        "bar_resolution": skill_meta.get("bar_resolution") or strat.horizon.bar_resolution,
     }
     if execution_model == EXECUTION_MODEL:
         # Freeze every cost/liquidity assumption at session creation.  Replaying
@@ -406,6 +495,7 @@ def init(
         "status": "running",
         "ticker": ticker.upper(),
         "historical_date": date,
+        "strategy": strategy_id,
         "real_run_ts": now.isoformat(timespec="seconds"),
         "skill": skill_meta,
         "batch": batch,   # legacy
@@ -681,9 +771,13 @@ def _build_bars(meta: dict, ticks: list[dict]) -> list[dict]:
     date = meta["date"]
     bars = []
     for tk in ticks:
+        bar_date = tk.get("date") or date
+        hhmm = tk.get("time") or "16:00"
+        # daily ticks use time="16:00" + date=YYYY-MM-DD
         bars.append({
-            "t": _epoch_et(date, tk["time"]),
-            "time": tk["time"],
+            "t": _epoch_et(bar_date, hhmm if len(hhmm) == 5 else "16:00"),
+            "time": hhmm,
+            "date": bar_date,
             "i": tk["i"],
             "o": tk["o"], "h": tk["h"], "l": tk["l"], "c": tk["c"],
             "v": tk["v"],
@@ -696,6 +790,10 @@ def _build_bars(meta: dict, ticks: list[dict]) -> list[dict]:
             "session_high": tk.get("session_high"),
             "new_high": tk.get("new_high"),
             "rvol_bar": tk.get("rvol_bar"),
+            "sma20": tk.get("sma20"),
+            "sma50": tk.get("sma50"),
+            "sma200": tk.get("sma200"),
+            "atr14": tk.get("atr14"),
         })
     return bars
 
@@ -990,13 +1088,11 @@ def finalize(session_dir: str | Path, full_day: bool = True) -> dict:
         # session.json last so "complete" only appears after all artifacts exist.
         session["status"] = "complete"
         session["finalized_ts"] = datetime.now().isoformat(timespec="seconds")
-        session["setup"] = {
-            k: meta.get(k) for k in (
-                "entry_time", "entry_px", "anchor_px", "gap_pct", "rvol", "float_shares",
-                "prior_close", "prior_high", "prior_low", "pm_high", "pm_low",
-                "session_end", "reason",
-            )
-        }
+        session["setup"] = _setup_from_meta(meta)
+        # Ensure strategy is stamped even if meta omitted it.
+        session.setdefault("strategy", _strategy_of(session))
+        if session.get("setup") is not None and "strategy" not in session["setup"]:
+            session["setup"]["strategy"] = session["strategy"]
         session["result"] = {
             "traded": pnl["traded"], "realized_pnl": pnl["realized_pnl"],
             "r_multiple": pnl["r_multiple"], "win": pnl["win"],
@@ -1164,6 +1260,11 @@ def get_session_view(session_dir: str | Path) -> dict:
     # Merge some live info into the returned session dict for convenience
     live_session = dict(session)
     live_session.setdefault("status", "running")
+    live_session.setdefault("strategy", _strategy_of(session))
+    # Setup chips (gap / ATR / targets) come from stream meta until finalize
+    # writes them permanently into session.json.
+    if not live_session.get("setup") and meta:
+        live_session["setup"] = _setup_from_meta(meta)
 
     return {
         "session": live_session,
@@ -1274,6 +1375,7 @@ def _session_entry(d: Path, s: dict) -> dict:
         and (time.time() - newest_mtime) > _STALE_AFTER_S
     )
 
+    cfg = s.get("config") or {}
     entry = {
         "id": s.get("id") or d.name,
         "ticker": s.get("ticker"),
@@ -1288,6 +1390,9 @@ def _session_entry(d: Path, s: dict) -> dict:
         # batch attribution (null for ad-hoc sessions) so the UI can group / filter
         "batch": s.get("batch"),
         "skill_version": (s.get("skill") or {}).get("version"),
+        "strategy": _strategy_of(s),
+        "horizon": cfg.get("horizon") or (s.get("skill") or {}).get("horizon"),
+        "bar_resolution": cfg.get("bar_resolution") or (s.get("skill") or {}).get("bar_resolution"),
         "void": s.get("void"),
         "out_of_credits": s.get("out_of_credits"),
         "timed_out": s.get("timed_out"),
@@ -1304,7 +1409,16 @@ def _session_entry(d: Path, s: dict) -> dict:
     return entry
 
 
-def _version_status_map() -> dict[str, str]:
+def _skills_dir_for(strategy_id: str = "warrior") -> Path:
+    """Skill tree root for a family (CHANGELOG + skill_versions.json)."""
+    try:
+        from .strategies import get_strategy
+        return get_strategy(strategy_id or "warrior").skills_dir()
+    except Exception:
+        return SKILLS_DIR
+
+
+def _version_status_map(strategy_id: str = "warrior") -> dict[str, str]:
     """Map each skill version → a highlight bucket for the sessions table:
 
         "base"       accepted baseline lineage (registry `base`, PROMOTE'd, kept) → green
@@ -1312,13 +1426,13 @@ def _version_status_map() -> dict[str, str]:
         "rejected"   failed / superseded experiment (REJECT)                      → red
 
     Versions with no clear signal (e.g. pre-methodology) are omitted (no tint).
-    Sources: `skills/skill_versions.json` (the declared base) and the per-experiment
-    `**Decision:**` lines in `skills/CHANGELOG.md`; the Decision line is authoritative,
-    the section header is the fallback.
+    Scoped to one strategy family's skills dir so warrior and cup_handle never
+    share a tint map.
     """
+    skills_dir = _skills_dir_for(strategy_id)
     out: dict[str, str] = {}
     try:
-        text = (SKILLS_DIR / "CHANGELOG.md").read_text()
+        text = (skills_dir / "CHANGELOG.md").read_text()
     except OSError:
         text = ""
     # Each experiment is a "### <versions> — <title> …" section. Split on the header
@@ -1350,7 +1464,7 @@ def _version_status_map() -> dict[str, str]:
                 out.setdefault(v, bucket)  # newest section (listed first) wins
     # The registry's declared base is authoritative — it is always green.
     try:
-        reg = json.loads((SKILLS_DIR / "skill_versions.json").read_text())
+        reg = json.loads((skills_dir / "skill_versions.json").read_text())
         if reg.get("base"):
             out[reg["base"]] = "base"
     except (OSError, ValueError):
@@ -1360,7 +1474,7 @@ def _version_status_map() -> dict[str, str]:
 
 def list_sessions() -> list[dict]:
     """Return top-level sessions (live or simulated batches). New primary grouping."""
-    vstatus = _version_status_map()
+    vstatus_cache: dict[str, dict[str, str]] = {}
     groups: dict[str, list] = defaultdict(list)
     for d, s in iter_sessions():
         if _is_archived(s):
@@ -1376,6 +1490,7 @@ def list_sessions() -> list[dict]:
         n_fills = 0    # blotter fills across those sessions
         n_wins = 0
         tickers = set()
+        strategies: set[str] = set()
         last_activity = None
         name = None
         version = None
@@ -1383,6 +1498,7 @@ def list_sessions() -> list[dict]:
         for d, ss in items:
             res = ss.get("result") or {}
             tickers.add(ss.get("ticker"))
+            strategies.add(_strategy_of(ss))
             # "complete" = finalized AND ran; an out-of-credits or timed-out run
             # finalized as an empty stub but never ran, so it does not count as progress.
             if ss.get("status") == "complete" and not _is_infra_fail(ss):
@@ -1406,6 +1522,11 @@ def list_sessions() -> list[dict]:
         # batch.json (keyed by the human tag = `name`) carries the hermes model
         # and the pinned skill version. Fall back to the leaf skill version.
         bmeta = _batch_meta(name) if name else {}
+        strategy = (
+            bmeta.get("strategy")
+            or (next(iter(strategies)) if len(strategies) == 1 else None)
+            or ("mixed" if len(strategies) > 1 else "warrior")
+        )
         # Ongoing vs completed. Prefer the batch's own status flag (batchsim writes
         # "running" at start, "complete" at finish); otherwise infer from the leaves:
         # still running if any leaf hasn't finalized or fewer leaves exist than planned.
@@ -1426,12 +1547,18 @@ def list_sessions() -> list[dict]:
         # JSON.parse for the whole response — send null instead.
         if isinstance(pf, float) and (pf != pf or pf in (float("inf"), float("-inf"))):
             pf = None
+        ver = version or bmeta.get("version")
+        # Version tint from that family's CHANGELOG/registry — never cross-family.
+        strat_for_tint = strategy if strategy != "mixed" else "warrior"
+        if strat_for_tint not in vstatus_cache:
+            vstatus_cache[strat_for_tint] = _version_status_map(strat_for_tint)
         out.append({
             "id": sid,
             "name": name or sid,
             "type": sess_type,
-            "version": version or bmeta.get("version"),
-            "version_status": vstatus.get(version or bmeta.get("version")),
+            "strategy": strategy,
+            "version": ver,
+            "version_status": vstatus_cache[strat_for_tint].get(ver) if ver else None,
             "model": bmeta.get("model"),
             "pnl": round(total_pnl, 2),
             "n_tickers": len(tickers),
@@ -1741,11 +1868,13 @@ def get_top_session_view(sess_id: str) -> dict:
     members = []
     batch_tag = None
     modes = set()
+    strategies: set[str] = set()
     for d, s in _iter_session_members(sess_id):
         if _is_archived(s):
             continue  # archived leaves are hidden from the tickers view too
         entry = _session_entry(d, s)
         members.append(entry)
+        strategies.add(entry.get("strategy") or "warrior")
         if not batch_tag:
             batch_tag = s.get("batch")
         modes.add(s.get("mode", "simulated"))
@@ -1838,6 +1967,11 @@ def get_top_session_view(sess_id: str) -> dict:
     meta = (_batch_meta(batch_tag) if batch_tag else None) or _batch_meta(sess_id) or {}
     name = meta.get("tag") or meta.get("name") or batch_tag or sess_id
     sess_type = "live" if "live" in modes else "simulated"
+    strategy = (
+        meta.get("strategy")
+        or (next(iter(strategies)) if len(strategies) == 1 else None)
+        or ("mixed" if len(strategies) > 1 else "warrior")
+    )
 
     batch_metrics = _compute_batch_metrics(members) if members else {}
     # is the whole top-level session still in progress? drives the viewer's live refresh.
@@ -1849,6 +1983,7 @@ def get_top_session_view(sess_id: str) -> dict:
         "name": name,
         "meta": meta,
         "type": sess_type,
+        "strategy": strategy,
         "tickers": ticker_list,
         "sessions": members,
         "metrics": batch_metrics,
@@ -2280,12 +2415,15 @@ def build_parser() -> argparse.ArgumentParser:
     pi.add_argument("--ticker", required=True)
     pi.add_argument("--date", required=True, help="historical trade date YYYY-MM-DD")
     pi.add_argument("--seed", type=int)
-    pi.add_argument("--profile", default="small")
+    pi.add_argument("--profile", default="small",
+                    help="account profile: small | main | swing")
+    pi.add_argument("--strategy", default="warrior",
+                    help="strategy family (warrior, cup_handle, …)")
     pi.add_argument("--delay", type=float)
     pi.add_argument("--risk-budget", type=float)
     pi.add_argument("--buying-power", type=float)
     pi.add_argument("--skill", help="path to the driving skill .md "
-                    "(default: the current base version in skills/trade_skills/)")
+                    "(default: the current base version for the strategy family)")
     pi.add_argument("--mode", default="simulated", choices=["simulated", "live"],
                     help="simulated paper run (default) or a real-time live session")
     pi.add_argument("--pin-version", help="backtest: stamp this exact version "
@@ -2333,7 +2471,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         sdir = init(args.ticker, args.date, seed=args.seed, profile=args.profile,
                     delay=args.delay, risk_budget=args.risk_budget,
                     buying_power=args.buying_power, skill=args.skill, mode=args.mode,
-                    pin_version=args.pin_version, batch=args.batch, session=args.session)
+                    pin_version=args.pin_version, batch=args.batch, session=args.session,
+                    strategy=getattr(args, "strategy", None) or "warrior")
         print(str(sdir))
     elif args.cmd == "log":
         log(args.session, json.loads(args.record))

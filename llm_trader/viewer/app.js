@@ -100,6 +100,7 @@ async function loadAndRenderList() {
       const wr = s.win_rate != null ? `${s.win_rate}%` : "—";
       const badgeClass = isLive ? "live" : "sim";
       const badgeLabel = isLive ? "live" : "sim";
+      const strat = s.strategy || "warrior";
 
       const displayId = s.name && s.name !== s.id ? `${escapeHtml(s.name)} (${escapeHtml(s.id)})` : escapeHtml(s.id);
       return `
@@ -107,6 +108,7 @@ async function loadAndRenderList() {
           <div class="sess-top">
             <span class="sess-ticker">${displayId}</span>
             <span class="badge ${badgeClass}">${badgeLabel}</span>
+            <span class="badge strategy strat-${escapeHtml(strat)}">${escapeHtml(strat)}</span>
           </div>
           <div class="sess-meta muted">${pnlStr} · ${s.n_tickers} tickers · ${s.n_trades} trades</div>
           <div class="sess-summary">win ${wr}</div>
@@ -163,6 +165,7 @@ async function loadAndRenderList() {
 const TABLE_COLS = [
   { key: "name",          label: "Session",       num: false },
   { key: "type",          label: "Type",          num: false },
+  { key: "strategy",      label: "Strategy",      num: false },
   { key: "status",        label: "Status",        num: false },
   { key: "version",       label: "Version",       num: false },
   { key: "model",         label: "Model",         num: false },
@@ -203,9 +206,10 @@ let allSessions = [];
 // Dropdown filters shown above the session table. `norm` maps a session row to the
 // value the dropdown filters on (and shows as its option label); nulls collapse to "—".
 const TABLE_FILTERS = [
-  { key: "type",    label: "Type",    norm: (s) => s.type || "simulated" },
-  { key: "version", label: "Version", norm: (s) => s.version || "—" },
-  { key: "model",   label: "Model",   norm: (s) => s.model || "—" },
+  { key: "strategy", label: "Strategy", norm: (s) => s.strategy || "warrior" },
+  { key: "type",     label: "Type",     norm: (s) => s.type || "simulated" },
+  { key: "version",  label: "Version",  norm: (s) => s.version || "—" },
+  { key: "model",    label: "Model",    norm: (s) => s.model || "—" },
 ];
 
 // Distinct filter values present across all sessions, sorted for a stable dropdown.
@@ -263,9 +267,11 @@ function sessionRowHtml(s) {
     : `<span class="badge complete">done</span>`) + ooc + tout;
   // Row tint by rule-set lifecycle: base=green, candidate=blue, rejected=red.
   const vrowCls = s.version_status ? ` vrow-${s.version_status}` : "";
+  const strat = s.strategy || "warrior";
   return `<tr class="srow${vrowCls}" data-id="${escapeHtml(s.id)}">
       <td>${display}</td>
       <td><span class="badge ${isLive ? "live" : "sim"}">${isLive ? "live" : "sim"}</span></td>
+      <td><span class="badge strategy strat-${escapeHtml(strat)}">${escapeHtml(strat)}</span></td>
       <td>${statusCell}</td>
       <td>${s.version ? escapeHtml(s.version) : "—"}</td>
       <td>${s.model ? escapeHtml(s.model) : "—"}</td>
@@ -436,11 +442,13 @@ function renderSessionTickers(v) {
   const meta = v.meta || {};
   const type = v.type || "simulated";
 
+  const strat = v.strategy || meta.strategy || "warrior";
   let html = `
     <div class="bd-head">
       <span class="small-btn bd-back" id="bd-back">← back to sessions</span>
       <h2>${escapeHtml(v.name || v.id)}</h2>
       <span class="badge ${type === "live" ? "live" : "sim"}">${type}</span>
+      <span class="badge strategy strat-${escapeHtml(strat)}">${escapeHtml(strat)}</span>
       <button class="small-btn bd-archive" id="bd-archive" title="Archive this session — hides it from the sessions list and sidebar">Archive</button>
     </div>
     <div class="bd-meta">${meta.model ? `model ${escapeHtml(meta.model)}` : ""} ${meta.version ? `v${escapeHtml(meta.version)}` : ""}</div>`;
@@ -541,10 +549,36 @@ function renderSessionTickers(v) {
 
 // ---------- DETAIL RENDER ----------
 
+function sessionStrategy(sess) {
+  return (
+    sess.strategy
+    || (sess.config && sess.config.strategy)
+    || (sess.skill && sess.skill.strategy)
+    || (sess.setup && sess.setup.strategy)
+    || "warrior"
+  );
+}
+
+function isMultiDaySession(sess, bars) {
+  const strat = sessionStrategy(sess);
+  if (strat && strat !== "warrior") return true;
+  const hz = (sess.config && sess.config.horizon) || (sess.skill && sess.skill.horizon);
+  if (hz === "multi_day") return true;
+  const res = (sess.config && sess.config.bar_resolution) || (sess.skill && sess.skill.bar_resolution);
+  if (res === "1day" || res === "daily") return true;
+  // Infer from bar payload (SMA present, no VWAP)
+  if (bars && bars.length && bars.some((b) => b.sma50 != null) && !bars.some((b) => b.vwap != null)) {
+    return true;
+  }
+  return false;
+}
+
 function renderHeader(view) {
   const sess = view.session || {};
   const s = sess.setup || {};
   const pnl = view.pnl || {};
+  const strat = sessionStrategy(sess);
+  const multiDay = isMultiDaySession(sess, view.bars);
 
   document.getElementById("h-ticker").textContent = sess.ticker || "—";
   document.getElementById("h-date").textContent =
@@ -584,19 +618,44 @@ function renderHeader(view) {
     badge.classList.add("flat");
   }
 
-  document.getElementById("h-chips").innerHTML =
-    chip("gap", s.gap_pct != null ? `+${s.gap_pct}%` : null) +
-    chip("RVOL", s.rvol != null ? `${s.rvol}×` : null) +
-    chip("float", s.float_shares != null ? fmtFloat(s.float_shares) : null) +
-    chip("anchor(5m)", s.anchor_px != null ? `$${s.anchor_px}` : null) +
-    chip("entry", pnl && pnl.entry_avg ? `$${pnl.entry_avg}` : null) +
-    chip("MFE", pnl && pnl.mfe_pct != null ? `+${pnl.mfe_pct}%` : null) +
-    chip("MAE", pnl && pnl.mae_pct != null ? `-${pnl.mae_pct}%` : null);
+  // Strategy-aware chips
+  let chips = chip("strategy", strat);
+  if (multiDay) {
+    chips +=
+      chip("pattern", s.pattern || null) +
+      chip("handle", s.handle_high != null ? `$${s.handle_high}` : null) +
+      chip("ATR", s.atr != null ? `$${s.atr}` : null) +
+      chip("stop", s.stop_px != null ? `$${s.stop_px}` : null) +
+      chip("T1", s.target1_px != null ? `$${s.target1_px}` : null) +
+      chip("T2", s.target2_px != null ? `$${s.target2_px}` : null) +
+      chip("cup depth", s.cup_depth_pct != null ? `${s.cup_depth_pct}%` : null) +
+      chip("entry", pnl && pnl.entry_avg ? `$${pnl.entry_avg}` : (s.entry_px != null ? `$${s.entry_px}` : null)) +
+      chip("MFE", pnl && pnl.mfe_pct != null ? `+${pnl.mfe_pct}%` : null) +
+      chip("MAE", pnl && pnl.mae_pct != null ? `-${pnl.mae_pct}%` : null);
+  } else {
+    chips +=
+      chip("gap", s.gap_pct != null ? `+${s.gap_pct}%` : null) +
+      chip("RVOL", s.rvol != null ? `${s.rvol}×` : null) +
+      chip("float", s.float_shares != null ? fmtFloat(s.float_shares) : null) +
+      chip("anchor(5m)", s.anchor_px != null ? `$${s.anchor_px}` : null) +
+      chip("entry", pnl && pnl.entry_avg ? `$${pnl.entry_avg}` : null) +
+      chip("MFE", pnl && pnl.mfe_pct != null ? `+${pnl.mfe_pct}%` : null) +
+      chip("MAE", pnl && pnl.mae_pct != null ? `-${pnl.mae_pct}%` : null);
+  }
+  document.getElementById("h-chips").innerHTML = chips;
 
-  document.getElementById("h-levels").innerHTML =
-    chip("prior close", s.prior_close) + chip("prior high", s.prior_high) +
-    chip("prior low", s.prior_low) + chip("pm high", s.pm_high) +
-    chip("pm low", s.pm_low);
+  if (multiDay) {
+    document.getElementById("h-levels").innerHTML =
+      chip("entry plan", s.entry_px) +
+      chip("stop plan", s.stop_px) +
+      chip("T1 plan", s.target1_px) +
+      chip("T2 plan", s.target2_px);
+  } else {
+    document.getElementById("h-levels").innerHTML =
+      chip("prior close", s.prior_close) + chip("prior high", s.prior_high) +
+      chip("prior low", s.prior_low) + chip("pm high", s.pm_high) +
+      chip("pm low", s.pm_low);
+  }
 
   document.getElementById("h-reason").textContent = s.reason || "";
 
@@ -612,6 +671,38 @@ function renderHeader(view) {
   const finBtn = document.getElementById("finalize-btn");
   if (finBtn) {
     finBtn.style.display = view.is_live ? "" : "none";
+  }
+
+  // Legend adapts to bar family
+  updateLegend(multiDay, view.bars);
+}
+
+function updateLegend(multiDay, bars) {
+  const el = document.getElementById("legend");
+  if (!el) return;
+  const has = (k) => bars && bars.some((b) => b[k] != null);
+  if (multiDay) {
+    el.innerHTML = [
+      `<span class="lg lg-c">candles</span>`,
+      has("sma20") ? `<span class="lg lg-sma20">SMA20</span>` : "",
+      has("sma50") ? `<span class="lg lg-sma50">SMA50</span>` : "",
+      has("sma200") ? `<span class="lg lg-sma200">SMA200</span>` : "",
+      has("atr14") ? `<span class="lg lg-atr">ATR</span>` : "",
+      `<span class="lg lg-entry">entry</span>`,
+      `<span class="lg lg-stop">exit / stop</span>`,
+      `<span class="lg lg-plan">plan levels</span>`,
+    ].filter(Boolean).join(" ");
+  } else {
+    el.innerHTML = [
+      `<span class="lg lg-c">candles</span>`,
+      has("vwap") ? `<span class="lg lg-vwap">VWAP</span>` : "",
+      has("ema9") ? `<span class="lg lg-ema">EMA9</span>` : "",
+      has("ema20") ? `<span class="lg lg-ema2">EMA20</span>` : "",
+      has("macd_hist") ? `<span class="lg lg-macd">MACD hist</span>` : "",
+      `<span class="lg lg-entry">entry</span>`,
+      `<span class="lg lg-stop">exit</span>`,
+      `<span class="lg lg-pm">pm/levels</span>`,
+    ].filter(Boolean).join(" ");
   }
 }
 
@@ -738,38 +829,28 @@ function renderChart(bars, actions, sess, preserveView = false) {
   });
 
   let vwapSeries = null, emaSeries = null, ema20Series = null, macdSeries = null;
-  // Overlays (VWAP/EMAs) belong on the main price scale (right)
-  const vwapData = bars.filter((b) => b.vwap != null).map((b) => ({ time: b.t, value: b.vwap }));
-  if (vwapData.length) {
-    vwapSeries = chart.addLineSeries({
-      color: col("--vwap"),
-      lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    vwapSeries.setData(vwapData);
-  }
+  let sma20Series = null, sma50Series = null, sma200Series = null;
+  const multiDay = isMultiDaySession(sess || {}, bars);
 
-  const emaData = bars.filter((b) => b.ema9 != null).map((b) => ({ time: b.t, value: b.ema9 }));
-  if (emaData.length) {
-    emaSeries = chart.addLineSeries({
-      color: col("--ema"),
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
+  const addLine = (key, color, width = 1) => {
+    const data = bars.filter((b) => b[key] != null).map((b) => ({ time: b.t, value: b[key] }));
+    if (!data.length) return null;
+    const series = chart.addLineSeries({
+      color, lineWidth: width, priceLineVisible: false, lastValueVisible: false,
     });
-    emaSeries.setData(emaData);
-  }
+    series.setData(data);
+    return series;
+  };
 
-  const ema20Data = bars.filter((b) => b.ema20 != null).map((b) => ({ time: b.t, value: b.ema20 }));
-  if (ema20Data.length) {
-    ema20Series = chart.addLineSeries({
-      color: col("--ema2"),
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    ema20Series.setData(ema20Data);
+  if (multiDay) {
+    sma20Series = addLine("sma20", col("--sma20") || "#7dd3fc", 1);
+    sma50Series = addLine("sma50", col("--sma50") || "#c084fc", 1);
+    sma200Series = addLine("sma200", col("--sma200") || "#fbbf24", 2);
+  } else {
+    // Overlays (VWAP/EMAs) belong on the main price scale (right)
+    vwapSeries = addLine("vwap", col("--vwap"), 2);
+    emaSeries = addLine("ema9", col("--ema"), 1);
+    ema20Series = addLine("ema20", col("--ema2"), 1);
   }
 
   // Volume subchart (bottom pane)
@@ -786,22 +867,24 @@ function renderChart(bars, actions, sess, preserveView = false) {
     visible: false,
   });
 
-  // MACD histogram subchart (middle pane, above volume)
-  const macdData = bars.filter((b) => b.macd_hist != null).map((b) => ({
-    time: b.t, value: b.macd_hist,
-    color: (b.macd_hist >= 0) ? "rgba(38,166,154,.65)" : "rgba(239,83,80,.65)",
-  }));
-  if (macdData.length) {
-    macdSeries = chart.addHistogramSeries({
-      priceScaleId: "macd",
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    macdSeries.setData(macdData);
-    chart.priceScale("macd").applyOptions({
-      scaleMargins: { top: 0.75, bottom: 0.10 },
-      visible: false,
-    });
+  // MACD histogram subchart (middle pane, above volume) — day-trade only
+  if (!multiDay) {
+    const macdData = bars.filter((b) => b.macd_hist != null).map((b) => ({
+      time: b.t, value: b.macd_hist,
+      color: (b.macd_hist >= 0) ? "rgba(38,166,154,.65)" : "rgba(239,83,80,.65)",
+    }));
+    if (macdData.length) {
+      macdSeries = chart.addHistogramSeries({
+        priceScaleId: "macd",
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      macdSeries.setData(macdData);
+      chart.priceScale("macd").applyOptions({
+        scaleMargins: { top: 0.75, bottom: 0.10 },
+        visible: false,
+      });
+    }
   }
 
   // levels from setup
@@ -812,9 +895,17 @@ function renderChart(bars, actions, sess, preserveView = false) {
       lineStyle: style ?? LightweightCharts.LineStyle.Dashed, axisLabelVisible: true,
     });
 
-  lvl(setup.pm_high, col("--pm"), "pm high");
-  lvl(setup.pm_low, col("--pm"), "pm low", LightweightCharts.LineStyle.Dotted);
-  lvl(setup.prior_close, col("--muted"), "prior close", LightweightCharts.LineStyle.Dotted);
+  if (multiDay) {
+    // Plan bracket: entry / stop / dual targets
+    lvl(setup.entry_px || setup.handle_high, col("--plan") || "#94a3b8", "handle/entry", LightweightCharts.LineStyle.Dashed);
+    lvl(setup.stop_px, col("--stop"), "plan stop", LightweightCharts.LineStyle.Dashed);
+    lvl(setup.target1_px, col("--t1") || "#34d399", "T1", LightweightCharts.LineStyle.Dotted);
+    lvl(setup.target2_px, col("--t2") || "#60a5fa", "T2", LightweightCharts.LineStyle.Dotted);
+  } else {
+    lvl(setup.pm_high, col("--pm"), "pm high");
+    lvl(setup.pm_low, col("--pm"), "pm low", LightweightCharts.LineStyle.Dotted);
+    lvl(setup.prior_close, col("--muted"), "prior close", LightweightCharts.LineStyle.Dotted);
+  }
 
   const entry = (actions || []).find((a) => a.side === "buy");
   if (entry) lvl(entry.price, col("--entry"), "entry", LightweightCharts.LineStyle.Solid);
@@ -871,6 +962,7 @@ function renderChart(bars, actions, sess, preserveView = false) {
   chart._series = {
     candle: candle, vwap: vwapSeries, ema: emaSeries,
     ema20: ema20Series, vol: vol, macd: macdSeries,
+    sma20: sma20Series, sma50: sma50Series, sma200: sma200Series,
     buyDots: buyDots, sellDots: sellDots,
   };
 

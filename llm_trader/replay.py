@@ -69,11 +69,17 @@ class Setup:
     rvol: Optional[float]
     float_shares: Optional[float]
     reason: str
+    strategy: str = "warrior"
+    pattern: str = "acd_orb"
+    features: Optional[dict] = None
 
     @property
     def entry_time(self) -> dtime:
-        h, m = (int(x) for x in self.time_et.split(":"))
-        return dtime(h, m)
+        try:
+            h, m = (int(x) for x in self.time_et.split(":"))
+            return dtime(h, m)
+        except (ValueError, AttributeError):
+            return RTH_OPEN
 
 
 # ───────────────────────────── setup selection ──────────────────────────────
@@ -94,14 +100,15 @@ def pick_setup(
     after: dtime = RTH_OPEN,
     seed: Optional[int] = None,
     at_time: Optional[str] = None,
+    strategy: Optional[str] = None,
+    skip_time_filter: bool = False,
 ) -> Setup:
     """Choose a setup row, defaulting to a random RTH (after-09:30) entry.
 
-    Filters: optional ``ticker`` / ``day`` exact match, and ``time_et >= after``
-    (so premarket breakouts are excluded by default). ``at_time`` ("HH:MM") pins an
-    *exact* setup — the batch harness passes it so the agent trades the same row the
-    holdout snapshotted, not an unseeded pick among same-day setups. Raises if nothing
-    matches.
+    Filters: optional ``ticker`` / ``day`` / ``strategy`` exact match, and
+    ``time_et >= after`` (so premarket breakouts are excluded by default for
+    warrior). ``at_time`` ("HH:MM") pins an *exact* setup. Multi-day strategies
+    should pass ``skip_time_filter=True`` (daily entries use a nominal time).
     """
     with sqlite3.connect(str(db_path)) as conn:
         conn.row_factory = sqlite3.Row
@@ -116,20 +123,34 @@ def pick_setup(
         if at_time:
             sql += " AND time_et = ?"
             params.append(at_time)
+        # strategy column may be missing on very old DBs — try/except
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(entries)").fetchall()}
+        if strategy and "strategy" in cols:
+            sql += " AND strategy = ?"
+            params.append(strategy)
         rows = conn.execute(sql, params).fetchall()
 
-    rows = [r for r in rows if _hhmm_after(r["time_et"], after)]
+    if not skip_time_filter:
+        rows = [r for r in rows if _hhmm_after(r["time_et"], after)]
     if not rows:
         raise SystemExit(
             "No matching setup found (after "
             f"{after.strftime('%H:%M')} ET"
             + (f", ticker={ticker}" if ticker else "")
             + (f", date={day}" if day else "")
+            + (f", strategy={strategy}" if strategy else "")
             + ")."
         )
 
     rng = random.Random(seed)
     r = rng.choice(rows)
+    keys = r.keys()
+    features = None
+    if "features_json" in keys and r["features_json"]:
+        try:
+            features = json.loads(r["features_json"])
+        except (TypeError, json.JSONDecodeError):
+            features = None
     return Setup(
         ticker=r["ticker"],
         day=datetime.strptime(r["date"], "%Y-%m-%d").date(),
@@ -139,6 +160,9 @@ def pick_setup(
         rvol=r["rvol"],
         float_shares=r["float_shares"],
         reason=r["reason"],
+        strategy=r["strategy"] if "strategy" in keys and r["strategy"] else "warrior",
+        pattern=r["pattern"] if "pattern" in keys else "acd_orb",
+        features=features,
     )
 
 
@@ -244,18 +268,36 @@ def replay(
     fmt: str = "human",
     out: TextIO = sys.stdout,
     out_file: Optional[str | Path] = None,
+    bar_resolution: Optional[str] = None,
+    max_hold_bars: Optional[int] = None,
+    plan_lookback_bars: int = 40,
 ) -> int:
-    """Stream the day's 1-minute bars from the entry (or open) to the close.
+    """Stream bars for a setup (1-minute same-day, or daily multi-day).
 
-    ``fmt='human'`` prints an aligned table; ``fmt='jsonl'`` emits a ``meta``
-    line, a ``tick`` line per minute, then an ``end`` line. With ``out_file`` set,
-    every line is also appended there (so a backgrounded run can be polled).
-    Returns the number of bars streamed. Indicators are computed over the full
-    RTH session so they match a chart; only bars from the start point are shown.
-    ``neutral_meta`` hides the scanner's historical trigger fields. When
-    ``five_minute_context`` is set, each fifth revealed minute carries one completed,
-    clock-aligned 5-minute candle built only from revealed minutes.
+    ``bar_resolution`` defaults from ``setup.strategy`` (``1day`` for cup_handle,
+    else ``1min``). Daily mode streams enriched daily OHLCV for plan lookback +
+    hold window — see :func:`replay_daily`.
     """
+    resolution = bar_resolution
+    if resolution is None:
+        resolution = "1day" if setup.strategy and setup.strategy != "warrior" else "1min"
+        # cup_handle and any multi_day family use daily
+        if setup.strategy == "cup_handle":
+            resolution = "1day"
+
+    if resolution in ("1day", "daily"):
+        return replay_daily(
+            setup,
+            neutral_meta=neutral_meta,
+            delay=delay,
+            force=force,
+            fmt=fmt,
+            out=out,
+            out_file=out_file,
+            max_hold_bars=max_hold_bars,
+            plan_lookback_bars=plan_lookback_bars,
+        )
+
     if fmt == "jsonl":
         ext_df = fetch_minute_bars(setup.ticker, setup.day, force=force, session="extended")
         df = ext_df[(ext_df.index.time >= RTH_OPEN) & (ext_df.index.time < RTH_CLOSE)]
@@ -293,6 +335,196 @@ def replay(
                 neutral_meta=neutral_meta, five_minute_context=five_minute_context,
             )
         return _stream_human(setup, df, start_t, anchor, streams, delay)
+    finally:
+        if fh is not None:
+            fh.close()
+
+
+def fetch_daily_bars(
+    ticker: str,
+    start_day: date,
+    end_day: date,
+    *,
+    force: bool = False,
+) -> pd.DataFrame:
+    """Fetch daily OHLCV for ``ticker`` covering ``[start_day, end_day]`` (ET)."""
+    start = datetime.combine(start_day, datetime.min.time(), tzinfo=timezone.utc) - timedelta(days=5)
+    end = datetime.combine(end_day, datetime.max.time(), tzinfo=timezone.utc) + timedelta(days=5)
+    df = fetch_bars(ticker, "1day", start=start, end=end, adjustment="raw", force=force)
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = df.sort_index()
+    if df.index.tz is None:
+        # daily often tz-naive; treat as ET calendar dates
+        pass
+    else:
+        df = df.tz_convert("America/New_York")
+    return df
+
+
+def replay_daily(
+    setup: Setup,
+    *,
+    neutral_meta: bool = False,
+    delay: float = 0.0,
+    force: bool = False,
+    fmt: str = "jsonl",
+    out: TextIO = sys.stdout,
+    out_file: Optional[str | Path] = None,
+    max_hold_bars: Optional[int] = None,
+    plan_lookback_bars: int = 40,
+) -> int:
+    """Stream daily bars for a multi-day swing setup (plan lookback + hold).
+
+    Bars before ``setup.day`` give the agent chart structure to build a plan;
+    bars from ``setup.day`` onward resolve the buy-stop / targets / stop.
+    ``max_hold_bars`` defaults to 40 trading days after the setup day.
+    """
+    from .indicators import enrich_daily_for_replay
+
+    hold = max_hold_bars if max_hold_bars is not None else 40
+    # Warmup for SMAs + lookback window before the setup day
+    warmup_cal = 280
+    start_fetch = setup.day - timedelta(days=warmup_cal)
+    end_fetch = setup.day + timedelta(days=int(hold * 2.2) + 10)
+    raw = fetch_daily_bars(setup.ticker, start_fetch, end_fetch, force=force)
+
+    streams: list[TextIO] = [out]
+    fh: Optional[TextIO] = None
+    if out_file is not None:
+        out_file = Path(out_file)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(out_file, "w", encoding="utf-8")
+        streams.append(fh)
+
+    try:
+        if raw.empty:
+            msg = f"No daily bars for {setup.ticker} around {setup.day}"
+            if fmt == "jsonl":
+                _emit(json.dumps({"type": "error", "message": msg}), streams)
+            else:
+                for s in streams:
+                    print(msg, file=s)
+            return 0
+
+        df = enrich_daily_for_replay(raw)
+        # index to dates
+        def _d(ts) -> date:
+            return ts.date() if hasattr(ts, "date") else pd.Timestamp(ts).date()
+
+        dates = [_d(ts) for ts in df.index]
+        # find setup day index (or first session on/after)
+        setup_i = None
+        for i, d in enumerate(dates):
+            if d >= setup.day:
+                setup_i = i
+                break
+        if setup_i is None:
+            msg = f"Setup day {setup.day} not in daily frame for {setup.ticker}"
+            if fmt == "jsonl":
+                _emit(json.dumps({"type": "error", "message": msg}), streams)
+            else:
+                for s in streams:
+                    print(msg, file=s)
+            return 0
+
+        stream_start = max(0, setup_i - plan_lookback_bars)
+        stream_end = min(len(df) - 1, setup_i + hold)
+        window = df.iloc[stream_start : stream_end + 1]
+        win_dates = dates[stream_start : stream_end + 1]
+
+        feats = setup.features or {}
+        anchor = setup.entry_px
+        meta = {
+            "type": "meta",
+            "ticker": setup.ticker,
+            "date": setup.day.isoformat(),
+            "strategy": setup.strategy,
+            "pattern": setup.pattern,
+            "horizon": "multi_day",
+            "bar_resolution": "1day",
+            "plan_lookback_bars": plan_lookback_bars,
+            "max_hold_bars": hold,
+            "entry_time": setup.time_et,
+            "session_end": win_dates[-1].isoformat() if win_dates else setup.day.isoformat(),
+        }
+        if not neutral_meta:
+            meta.update({
+                "entry_px": setup.entry_px,
+                "anchor_px": setup.entry_px,
+                "gap_pct": setup.gap_pct,
+                "rvol": setup.rvol,
+                "float_shares": setup.float_shares,
+                "reason": setup.reason,
+                "stop_px": feats.get("stop_px"),
+                "target1_px": feats.get("target1_px"),
+                "target2_px": feats.get("target2_px"),
+                "atr": feats.get("atr"),
+                "handle_high": feats.get("handle_high"),
+                "cup_depth_px": feats.get("cup_depth_px"),
+            })
+        else:
+            # Watchlist-only context (no planned levels leak)
+            meta.update({
+                "reason": "scanner-selected multi-day setup (levels not disclosed)",
+            })
+
+        if fmt != "jsonl":
+            for s in streams:
+                print(f"{setup.ticker} multi-day daily replay {win_dates[0]} → {win_dates[-1]}", file=s)
+                print(setup.reason, file=s)
+
+        _emit(json.dumps(meta), streams) if fmt == "jsonl" else None
+
+        n = 0
+        for (ts, row), d in zip(window.iterrows(), win_dates):
+            close = float(row["close"])
+            tick = {
+                "type": "tick",
+                "i": n,
+                "date": d.isoformat(),
+                "time": "16:00",  # daily bar close marker for chart axis
+                "o": round(float(row["open"]), 4),
+                "h": round(float(row["high"]), 4),
+                "l": round(float(row["low"]), 4),
+                "c": round(close, 4),
+                "v": int(row["volume"]),
+                "sma20": round(float(row["sma20"]), 4) if pd.notna(row.get("sma20")) else None,
+                "sma50": round(float(row["sma50"]), 4) if pd.notna(row.get("sma50")) else None,
+                "sma200": round(float(row["sma200"]), 4) if pd.notna(row.get("sma200")) else None,
+                "atr14": round(float(row["atr14"]), 4) if pd.notna(row.get("atr14")) else None,
+                "rvol": round(float(row["rvol"]), 2) if pd.notna(row.get("rvol")) else None,
+                "above_sma20": bool(row["above_sma20"]) if pd.notna(row.get("above_sma20")) else None,
+                "above_sma50": bool(row["above_sma50"]) if pd.notna(row.get("above_sma50")) else None,
+                "above_sma200": bool(row["above_sma200"]) if pd.notna(row.get("above_sma200")) else None,
+                "sma50_rising": bool(row["sma50_rising"]) if pd.notna(row.get("sma50_rising")) else None,
+                "is_setup_day": d == setup.day,
+            }
+            if not neutral_meta and anchor:
+                tick["vs_anchor_pct"] = round((close - anchor) / anchor * 100.0, 3)
+            if fmt == "jsonl":
+                _emit(json.dumps(tick), streams)
+            else:
+                for s in streams:
+                    print(
+                        f"  {d}  o={tick['o']} h={tick['h']} l={tick['l']} c={tick['c']} "
+                        f"atr={tick['atr14']} sma50={tick['sma50']}",
+                        file=s,
+                    )
+            n += 1
+            if delay > 0:
+                time.sleep(delay)
+
+        last = float(window["close"].iloc[-1])
+        end = {
+            "type": "end",
+            "bars": n,
+            "close": round(last, 4),
+            "session_end": win_dates[-1].isoformat() if win_dates else None,
+        }
+        if fmt == "jsonl":
+            _emit(json.dumps(end), streams)
+        return n
     finally:
         if fh is not None:
             fh.close()
@@ -515,17 +747,19 @@ def _parse_hhmm(s: str) -> dtime:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m trading.llm_trader.replay",
-        description="Replay one recorded setup's day minute-by-minute.",
+        description="Replay one recorded setup (1-min day-trade or multi-day daily).",
     )
     p.add_argument("--db", default=str(DATA_DIR / "entries.db"),
                    help="entries SQLite DB (default: package data/entries.db)")
+    p.add_argument("--strategy", default=None,
+                   help="filter setups by strategy family (warrior, cup_handle, …)")
     p.add_argument("--ticker", help="restrict the random pick to this ticker")
     p.add_argument("--date", help="restrict the pick to this date (YYYY-MM-DD)")
     p.add_argument("--after", default="09:30",
                    help="only pick setups entering at/after this ET time (default 09:30)")
     p.add_argument("--seed", type=int, help="seed the random pick (reproducible)")
     p.add_argument("--from-open", action="store_true",
-                   help="stream from 09:30 instead of from the entry time")
+                   help="stream from 09:30 instead of from the entry time (1min only)")
     p.add_argument("--neutral-meta", action="store_true",
                    help="hide the scanner's historical trigger/RVOL/reason from JSONL output")
     p.add_argument("--five-minute-context", action="store_true",
@@ -539,17 +773,33 @@ def build_parser() -> argparse.ArgumentParser:
                    help="also append each output line to this file (poll target)")
     p.add_argument("--force", action="store_true",
                    help="force a fresh provider fetch (bypass cache)")
+    p.add_argument("--bar-resolution", choices=("1min", "1day"), default=None,
+                   help="force bar resolution (default: inferred from strategy)")
+    p.add_argument("--max-hold-bars", type=int, default=None,
+                   help="multi-day: trading days after setup day (default 40)")
     return p
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    strategy = args.strategy
+    skip_time = strategy is not None and strategy != "warrior"
+    # default db per strategy when caller didn't override and strategy is set
+    db = args.db
+    if strategy and strategy != "warrior" and args.db == str(DATA_DIR / "entries.db"):
+        try:
+            from .strategies import get_strategy
+            db = str(get_strategy(strategy).default_db_path())
+        except KeyError:
+            pass
     setup = pick_setup(
-        args.db,
+        db,
         ticker=args.ticker,
         day=_parse_date(args.date),
         after=_parse_hhmm(args.after),
         seed=args.seed,
+        strategy=strategy,
+        skip_time_filter=skip_time,
     )
     replay(
         setup,
@@ -560,6 +810,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         force=args.force,
         fmt=args.format,
         out_file=args.out_file,
+        bar_resolution=args.bar_resolution,
+        max_hold_bars=args.max_hold_bars,
     )
     return 0
 

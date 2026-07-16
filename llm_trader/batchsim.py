@@ -325,13 +325,22 @@ def load_testset(path: Path) -> list[dict]:
 # ───────────────────────────── run ──────────────────────────────────────────
 
 
-def _archived_skill(version: str) -> Path:
-    p = skillmeta.skill_path_for(version)
+def _strategy_paths(strategy_id: str = "warrior"):
+    """Return (registry_path, trade_skills_dir, default_entries_db) for a family."""
+    from .strategies import get_strategy
+
+    s = get_strategy(strategy_id or "warrior")
+    return s.registry_path(), s.trade_skills_dir(), s.default_db_path(), s
+
+
+def _archived_skill(version: str, strategy_id: str = "warrior") -> Path:
+    _, trade_skills_dir, _, _ = _strategy_paths(strategy_id)
+    p = skillmeta.skill_path_for(version, trade_skills_dir)
     if not p.exists():
         raise FileNotFoundError(
             f"no skill file for version {version} at {p}. Create one with "
-            "`batchsim new-version --from <existing> --to "
-            f"{version}` (check skills/trade_skills/ for what exists)."
+            f"`batchsim new-version --strategy {strategy_id} --from <existing> --to "
+            f"{version}`."
         )
     return p
 
@@ -572,11 +581,14 @@ def _preseal(work: dict, skill_path: Path, version: str, session_id: str) -> tup
     exits, immediately before harness-side finalization and promotion into ``SIM_ROOT``.
     """
     staging_root = Path(tempfile.mkdtemp(prefix="llm-trader-agent-session-"))
+    strategy_id = work.get("strategy") or "warrior"
+    profile = work.get("profile") or ("swing" if strategy_id != "warrior" else "small")
     try:
         sdir = recorder.init(
-            work["ticker"], work["date"], profile="small", skill=skill_path,
+            work["ticker"], work["date"], profile=profile, skill=skill_path,
             pin_version=version, batch=work["tag"], session=session_id,
             runner_contract=work["runner_contract"],
+            strategy=strategy_id,
             root=staging_root,
         )
         gateway = step.start_isolated(
@@ -584,6 +596,8 @@ def _preseal(work: dict, skill_path: Path, version: str, session_id: str) -> tup
             from_open=work.get("session_from_open", False),
             neutral_meta=work.get("session_from_open", False),
             five_minute_context=work.get("five_minute_context", False),
+            db=work.get("db") or ENTRIES_DB,
+            strategy=strategy_id,
         )
         return sdir, gateway
     except Exception:
@@ -811,9 +825,12 @@ def run(
     retries: int = _DEFAULT_RETRIES, max_reentries: int = 1,
     trade_until: Optional[str] = None,
     resume: bool = False, dry_run: bool = False, session: Optional[str] = None,
+    strategy: str = "warrior",
 ) -> str:
     """Run the batch: spawn agents for every (setup × repeat), then audit + report."""
     resume_meta: dict = {}
+    strategy_id = (strategy or "warrior").strip().lower().replace("-", "_")
+    registry_path, trade_skills_dir, strategy_db, strat = _strategy_paths(strategy_id)
     # ── Resolve the batch identity FIRST (before touching skill/testset) so a --resume
     # can recover the batch's recorded config. A batch is keyed internally by its `tag`
     # (manifest/logs/batch.json) and displayed under its top-level `session` id
@@ -873,12 +890,15 @@ def run(
     # the audit was voiding. An explicit --version still runs that pinned, immutable
     # version file (also inlined; the harness reads it, never the agent).
     if version:
-        skill_path = _archived_skill(version)
+        skill_path = _archived_skill(version, strategy_id)
     else:
-        skill_path = skillmeta.base_skill_path()
+        skill_path = skillmeta.base_skill_path(registry_path, trade_skills_dir)
         version = skillmeta.read_skill_meta(skill_path).get("version")
-        print(f"no --version provided; using base skill {skill_path.name} (v{version})",
-              file=sys.stderr)
+        print(
+            f"no --version provided; using {strategy_id} base skill "
+            f"{skill_path.name} (v{version})",
+            file=sys.stderr,
+        )
     # A real pinned batch is the first use of many candidate files.  Register and
     # seal it *before* any preseal/agent work so every leaf is bound to immutable
     # bytes.  `recorder.init(..., pin_version=...)` intentionally stays read-only,
@@ -886,7 +906,7 @@ def run(
     # A dry-run remains inspect-only and leaves a candidate writable.
     if not dry_run:
         registered_meta, _ = skillmeta.resolve_version(
-            skill_path, skillmeta.DEFAULT_REGISTRY_PATH
+            skill_path, registry_path
         )
         if registered_meta.get("version") != version:
             raise ValueError(
@@ -966,6 +986,9 @@ def run(
                 "dry_run": dry_run,
                 "session_from_open": session_from_open,
                 "five_minute_context": five_minute_context,
+                "strategy": strategy_id,
+                "profile": strat.risk.profile,
+                "db": str(strategy_db),
             })
 
     reentry_desc = (f"reentry-budget {max_reentries}" if max_reentries > 0 else "reentry OFF") + \
@@ -1016,6 +1039,7 @@ def run(
         tag, version=version, model=model, testset=str(testset),
         testset_hash=testset_hash, skill_hash=skill_meta.get("content_hash"),
         runner_contract=current_runner_contract,
+        strategy=strategy_id,
         planned=len(setups) * repeats, repeats=repeats,
         reentry=(max_reentries > 0),  # kept for back-compat display / compare guardrail
         max_reentries=max_reentries, trade_until=trade_until,
@@ -2140,7 +2164,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     "max-diversity set with no repeated tickers.")
 
     pr = sub.add_parser("run", help="spawn agents for one version/batch")
-    pr.add_argument("--version", help="skill version to pin (from skills/trade_skills/); "
+    pr.add_argument("--strategy", default="warrior",
+                    help="strategy family (warrior, cup_handle, …); selects skill tree + DB")
+    pr.add_argument("--version", help="skill version to pin (from that family's trade_skills/); "
                     "defaults to the current base version. On --resume, recovered from "
                     "the batch if omitted.")
     pr.add_argument("--model", help="hermes model id (the local executor). Required for a "
@@ -2203,15 +2229,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pd.add_argument("--format", choices=["table", "json"], default="table")
 
     pn = sub.add_parser("new-version", help="fork a new, unsealed candidate skill file")
+    pn.add_argument("--strategy", default="warrior",
+                    help="strategy family whose skill tree to fork")
     pn.add_argument("--from", dest="from_version", required=True,
                     help="existing (sealed) version to copy from")
     pn.add_argument("--to", dest="to_version", default=None,
                     help="new version name (default: next free patch after --from)")
 
     pp = sub.add_parser("promote", help="point unpinned runs at an already-run version")
+    pp.add_argument("--strategy", default="warrior",
+                    help="strategy family whose base pointer to move")
     pp.add_argument("--version", required=True)
 
-    sub.add_parser("current", help="print the current base version")
+    pc_cur = sub.add_parser("current", help="print the current base version")
+    pc_cur.add_argument("--strategy", default="warrior")
     return p
 
 
@@ -2236,7 +2267,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             max_reentries=0 if args.no_reentry else args.max_reentries,
             trade_until=args.trade_until,
             resume=args.resume, dry_run=args.dry_run,
-            session=args.session)
+            session=args.session,
+            strategy=getattr(args, "strategy", None) or "warrior")
     elif args.cmd == "audit":
         n = audit(args.tag)
         print(f"voided {n} session(s) in batch {args.tag}")
@@ -2271,14 +2303,19 @@ def main(argv: Optional[list[str]] = None) -> int:
         else:
             _print_diagnostics(result)
     elif args.cmd == "new-version":
-        dest = skillmeta.new_version(args.from_version, args.to_version)
+        reg, tdir, _, _ = _strategy_paths(getattr(args, "strategy", None) or "warrior")
+        dest = skillmeta.new_version(
+            args.from_version, args.to_version, trade_skills_dir=tdir
+        )
         print(f"forked {args.from_version} → {dest} (unsealed — edit freely, "
               f"not registered until first run)")
     elif args.cmd == "promote":
-        skillmeta.set_base(args.version)
+        reg, _, _, _ = _strategy_paths(getattr(args, "strategy", None) or "warrior")
+        skillmeta.set_base(args.version, registry_path=reg)
         print(f"base version → {args.version} (unpinned runs now use this)")
     elif args.cmd == "current":
-        print(skillmeta.base_version() or "(no base version set)")
+        reg, _, _, _ = _strategy_paths(getattr(args, "strategy", None) or "warrior")
+        print(skillmeta.base_version(reg) or "(no base version set)")
     return 0
 
 

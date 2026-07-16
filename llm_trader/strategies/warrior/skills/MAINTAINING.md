@@ -3,7 +3,7 @@
 > **This file is for whoever *edits* the skill, not for the agent *executing* a
 > trade.** If you are running a simulation, ignore this — versioning is fully
 > automatic and requires nothing from you. Go find your version under
-> `skills/trade_skills/`.
+> `strategies/warrior/skills/trade_skills/`.
 
 > ## ⚠ Improving performance ≠ versioning
 >
@@ -19,7 +19,7 @@
 ## There is no "live" skill file
 
 Every version — the currently-accepted one and every past/rejected candidate — is
-its own file in `skills/trade_skills/<version>.md`. `skills/skill_versions.json`
+its own file in `strategies/warrior/skills/trade_skills/<version>.md`. `strategies/warrior/skills/skill_versions.json`
 tracks each version's content hash plus a `base` pointer: whichever version an
 unpinned run (`recorder init` without `--pin-version`, or `batchsim run` without
 `--version`) currently uses. Check it any time:
@@ -61,7 +61,7 @@ yourself unless you also rename the file to match.
 
 **Any modification to a skill's rules (examples, hygiene instructions, command
 blocks, or explanatory text the agent will read or be told to follow) requires a
-new version file — never edit a file already under `skills/trade_skills/` in
+new version file — never edit a file already under `strategies/warrior/skills/trade_skills/` in
 place.** If you try, the filesystem will refuse the write; that error means fork
 with `new-version` first, not "find a way around the permission."
 

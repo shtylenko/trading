@@ -13,7 +13,6 @@ Source: ``fetch_bars(..., "5min", session="extended", adjustment="raw")``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
@@ -21,24 +20,11 @@ import pandas as pd
 
 from trading.marketdata import fetch_bars
 
+from trading.llm_trader.indicators import prepare_detection_frame, session_vwap
+from trading.llm_trader.models import Entry
+
 from .config import ScanConfig
-from .indicators import prepare_detection_frame, session_vwap
 from .screen import GapCandidate
-
-
-@dataclass
-class Entry:
-    ticker: str
-    day: date
-    time_et: str           # "HH:MM"
-    pattern: str           # "acd_orb"
-    entry_px: float        # breakout (consolidation-high) level
-    bar_close: float
-    gap_pct: float
-    rvol: float
-    float_shares: Optional[float]
-    bar_vol_mult: Optional[float]    # breakout-bar volume vs trailing avg
-    reason: str
 
 
 def _fmt_float(f: Optional[float]) -> str:
@@ -151,6 +137,7 @@ def detect_from_frame(
             float_shares=float_shares,
             bar_vol_mult=round(vol_mult, 2) if vol_mult is not None else None,
             reason=reason,
+            strategy="warrior",
         )
 
     return None

@@ -384,6 +384,37 @@ def test_list_sessions_newest_first(tmp_path, monkeypatch):
     # grouped list_sessions items describe aggregates (no per-leaf 'status'/'ticker' here)
     assert all(e.get("n_tickers") == 1 for e in lst)
     assert all("pnl" in e and "type" in e for e in lst)
+    assert all(e.get("strategy") == "warrior" for e in lst)
+
+
+def test_list_sessions_includes_strategy(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    from trading.llm_trader.strategies import get_strategy
+    skill = get_strategy("cup_handle").trade_skills_dir() / "0.1.0.md"
+    recorder.init(
+        "JPM", "2025-06-01", strategy="cup_handle", profile="swing",
+        skill=str(skill), pin_version="0.1.0",
+        root=tmp_path, now=datetime(2026, 7, 16, 12, 0, 0),
+    )
+    recorder.init(
+        "AAA", "2025-03-10", strategy="warrior",
+        root=tmp_path, now=datetime(2026, 7, 16, 11, 0, 0),
+    )
+    by_strat = {e["strategy"] for e in recorder.list_sessions()}
+    assert "cup_handle" in by_strat
+    assert "warrior" in by_strat
+
+
+def test_setup_from_meta_includes_swing_plan_fields():
+    setup = recorder._setup_from_meta({
+        "gap_pct": 8.0, "stop_px": 100.0, "target1_px": 110.0,
+        "target2_px": 120.0, "atr": 2.5, "handle_high": 105.0,
+        "strategy": "cup_handle", "reason": "cup breakout",
+    })
+    assert setup["stop_px"] == 100.0
+    assert setup["target1_px"] == 110.0
+    assert setup["strategy"] == "cup_handle"
+    assert "gap_pct" in setup
 
 
 def test_stand_down_no_trade(tmp_path):

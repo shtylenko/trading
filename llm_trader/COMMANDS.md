@@ -1,6 +1,6 @@
 
 # `python3 -m trading.llm_trader.batchsim current` prints the base version, currently 3.0.0
-Read and follow /Users/shtylenko/Projects/trading/llm_trader/skills/trade_skills/3.0.0.md
+Read and follow /Users/shtylenko/Projects/trading/llm_trader/strategies/warrior/skills/trade_skills/3.0.0.md
 
 
 python3 -m trading.llm_trader.viewer

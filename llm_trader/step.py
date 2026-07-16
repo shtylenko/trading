@@ -387,6 +387,9 @@ def start_isolated(
     five_minute_context: bool = False,
     db: str | Path = DEFAULT_DB,
     at_time: Optional[str] = None,
+    strategy: Optional[str] = None,
+    bar_resolution: Optional[str] = None,
+    max_hold_bars: Optional[int] = None,
 ) -> IsolatedStreamGateway:
     """Pre-seal a batch stream in harness memory and return its one-tick gateway.
 
@@ -397,16 +400,63 @@ def start_isolated(
     """
     from . import replay  # heavy (pandas/marketdata); harness only
 
+    # Prefer strategy stamped on session.json (recorder.init --strategy …).
+    session_meta: dict = {}
+    sj = Path(session_dir) / "session.json"
+    if sj.exists():
+        try:
+            session_meta = json.loads(sj.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            session_meta = {}
+    strategy_id = (
+        strategy
+        or session_meta.get("strategy")
+        or (session_meta.get("config") or {}).get("strategy")
+        or "warrior"
+    )
+    cfg = session_meta.get("config") or {}
+    bar_resolution = bar_resolution or cfg.get("bar_resolution")
+    max_hold = max_hold_bars if max_hold_bars is not None else cfg.get("max_hold_bars")
+    if max_hold is not None:
+        try:
+            max_hold = int(max_hold)
+        except (TypeError, ValueError):
+            max_hold = None
+
+    db_path = Path(db)
+    if strategy_id != "warrior" and db_path == DEFAULT_DB:
+        try:
+            from .strategies import get_strategy
+            db_path = get_strategy(strategy_id).default_db_path()
+        except KeyError:
+            pass
+
     day = datetime.strptime(date, "%Y-%m-%d").date() if date else None
     h, m = (int(x) for x in after.split(":"))
     from datetime import time as dtime
     setup = replay.pick_setup(
-        db, ticker=ticker, day=day, after=dtime(h, m), seed=seed, at_time=at_time
+        db_path,
+        ticker=ticker,
+        day=day,
+        after=dtime(h, m),
+        seed=seed,
+        at_time=at_time,
+        strategy=strategy_id if strategy_id != "warrior" else None,
+        skip_time_filter=strategy_id != "warrior",
     )
     captured = io.StringIO()
-    replay.replay(setup, from_open=from_open, neutral_meta=neutral_meta,
-                  five_minute_context=five_minute_context, delay=0, force=False,
-                  fmt="jsonl", out=captured)
+    replay.replay(
+        setup,
+        from_open=from_open,
+        neutral_meta=neutral_meta,
+        five_minute_context=five_minute_context,
+        delay=0,
+        force=False,
+        fmt="jsonl",
+        out=captured,
+        bar_resolution=bar_resolution,
+        max_hold_bars=max_hold,
+    )
     records = []
     for line in captured.getvalue().splitlines():
         try:
@@ -431,9 +481,14 @@ def start(
     db: str | Path = DEFAULT_DB,
     force: bool = False,
     at_time: Optional[str] = None,
+    strategy: Optional[str] = None,
     out: TextIO = sys.stdout,
 ) -> int:
-    """Seal the full day's stream privately, reveal only the meta line, cursor=0."""
+    """Seal the full stream privately, reveal only the meta line, cursor=0.
+
+    Strategy is read from ``session.json`` when present (set by ``recorder init
+    --strategy``), else from the ``strategy`` argument / setup row.
+    """
     from . import replay  # heavy (pandas/marketdata); only `start` needs it
 
     sdir, sealed, stream, state = _paths(session_dir)
@@ -462,16 +517,79 @@ def start(
                   "`step start`; continue with `step next`.", file=out)
             return 0
 
+    session_meta: dict = {}
+    session_json = sdir / "session.json"
+    if session_json.exists():
+        try:
+            session_meta = json.loads(session_json.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            session_meta = {}
+
+    strategy_id = (
+        strategy
+        or session_meta.get("strategy")
+        or (session_meta.get("config") or {}).get("strategy")
+        or "warrior"
+    )
+    cfg = session_meta.get("config") or {}
+    bar_resolution = cfg.get("bar_resolution")
+    max_hold = cfg.get("max_hold_bars")
+    if max_hold is not None:
+        try:
+            max_hold = int(max_hold)
+        except (TypeError, ValueError):
+            max_hold = None
+
+    # Default DB per strategy when caller left the warrior default.
+    db_path = Path(db)
+    if strategy_id != "warrior" and db_path == DEFAULT_DB:
+        try:
+            from .strategies import get_strategy
+            db_path = get_strategy(strategy_id).default_db_path()
+        except KeyError:
+            pass
+
     day = datetime.strptime(date, "%Y-%m-%d").date() if date else None
+    if day is None and session_meta.get("historical_date"):
+        day = datetime.strptime(session_meta["historical_date"], "%Y-%m-%d").date()
+    ticker = ticker or session_meta.get("ticker")
     h, m = (int(x) for x in after.split(":"))
     from datetime import time as dtime
-    setup = replay.pick_setup(db, ticker=ticker, day=day, after=dtime(h, m),
-                              seed=seed, at_time=at_time)
+    skip_time = strategy_id != "warrior"
+    setup = replay.pick_setup(
+        db_path,
+        ticker=ticker,
+        day=day,
+        after=dtime(h, m),
+        seed=seed,
+        at_time=at_time,
+        strategy=strategy_id if strategy_id != "warrior" else None,
+        skip_time_filter=skip_time,
+    )
 
-    # generate the whole day, instantly, into the sealed (private) file
-    replay.replay(setup, from_open=from_open, neutral_meta=neutral_meta,
-                  five_minute_context=five_minute_context, delay=0, force=force,
-                  fmt="jsonl", out=io.StringIO(), out_file=str(sealed))
+    # Skill frontmatter may request neutral meta / 5m context / from-open
+    skill = session_meta.get("skill") or {}
+    if skill.get("session_from_open") in (True, "true", "True", "1", "yes"):
+        from_open = True
+    if skill.get("five_minute_context") in (True, "true", "True", "1", "yes"):
+        five_minute_context = True
+    if skill.get("completed_five_minute_entry_required") in (True, "true", "True", "1", "yes"):
+        neutral_meta = True  # v4 warrior: don't leak scanner trigger
+
+    # generate the whole stream into the sealed (private) file
+    replay.replay(
+        setup,
+        from_open=from_open,
+        neutral_meta=neutral_meta,
+        five_minute_context=five_minute_context,
+        delay=0,
+        force=force,
+        fmt="jsonl",
+        out=io.StringIO(),
+        out_file=str(sealed),
+        bar_resolution=bar_resolution,
+        max_hold_bars=max_hold,
+    )
     meta, ticks, end = _parse_sealed(sealed)
     if meta is None:
         print("STATUS error no bars sealed (provider may not serve this date)", file=out)

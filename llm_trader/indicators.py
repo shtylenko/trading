@@ -134,3 +134,59 @@ def prepare_detection_frame(
     day_df = day_df.assign(vwap=session_vwap(day_df))
     day_df = add_volume_average(day_df, window=vol_avg_window, out_col="vol_avg")
     return day_df
+
+
+def sma(series: pd.Series, window: int) -> pd.Series:
+    """Simple moving average (min_periods=window — undefined until fully warm)."""
+    return series.rolling(window, min_periods=window).mean()
+
+
+def atr(
+    df: pd.DataFrame,
+    period: int = 14,
+    *,
+    high_col: str = "high",
+    low_col: str = "low",
+    close_col: str = "close",
+) -> pd.Series:
+    """Average True Range (Wilder-style smoothing via EWM alpha=1/period).
+
+    True range = max(high-low, |high-prev_close|, |low-prev_close|).
+    Uses ``ewm(alpha=1/period, adjust=False)`` which matches Wilder's recursive
+    ATR closely enough for stop placement. Pure and look-ahead-safe (uses only
+    past closes via shift).
+    """
+    high = df[high_col].astype(float)
+    low = df[low_col].astype(float)
+    close = df[close_col].astype(float)
+    prev_close = close.shift(1)
+    tr = pd.concat(
+        [
+            (high - low).abs(),
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    return tr.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
+
+
+def enrich_daily_for_replay(df: pd.DataFrame) -> pd.DataFrame:
+    """Enrich a daily OHLCV frame for multi-day swing replay.
+
+    Adds SMA20/50/200, ATR(14), and simple volume averages used by cup-handle
+    and other swing families. No look-ahead: rolling/EWM only.
+    """
+    out = df.copy()
+    out["sma20"] = sma(out["close"], 20)
+    out["sma50"] = sma(out["close"], 50)
+    out["sma200"] = sma(out["close"], 200)
+    out["atr14"] = atr(out, 14)
+    out["vol_avg20"] = out["volume"].shift(1).rolling(20, min_periods=5).mean()
+    out["rvol"] = out["volume"] / out["vol_avg20"]
+    # rising 50 SMA: current > value 20 bars ago
+    out["sma50_rising"] = out["sma50"] > out["sma50"].shift(20)
+    out["above_sma20"] = out["close"] > out["sma20"]
+    out["above_sma50"] = out["close"] > out["sma50"]
+    out["above_sma200"] = out["close"] > out["sma200"]
+    return out

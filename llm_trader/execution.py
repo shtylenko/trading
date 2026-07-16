@@ -33,26 +33,47 @@ class ExecutionConfig:
     commission_per_share: float = 0.005
     max_participation_rate: float = 0.10
     tick_size: float = 0.01
+    # Multi-horizon: day-trade families force flat at session end; swing does not.
+    same_day_only: bool = True
+    max_hold_bars: Optional[int] = None
 
     @classmethod
     def from_session_config(cls, config: dict[str, Any]) -> "ExecutionConfig":
         execution = config.get("execution", {}) or {}
         profile = config.get("profile", "small")
-        # The old skill documents $12k of small-account buying power.  Keep the
-        # main profile deliberately explicit rather than silently unlimited.
-        default_bp = 12_000.0 if profile == "small" else 100_000.0
+        # Profile defaults (overridable by risk_budget / buying_power / execution.*).
+        if profile == "swing":
+            default_bp = 50_000.0
+            default_risk = 500.0
+        elif profile == "main":
+            default_bp = 100_000.0
+            default_risk = 1350.0
+        else:
+            default_bp = 12_000.0
+            default_risk = 40.0
+        same_day = execution.get("same_day_only", config.get("same_day_only", True))
+        if isinstance(same_day, str):
+            same_day = same_day.strip().lower() in ("1", "true", "yes")
+        max_hold = execution.get("max_hold_bars", config.get("max_hold_bars"))
+        if max_hold is not None and max_hold != "":
+            max_hold = int(max_hold)
+        else:
+            max_hold = None
         return cls(
-            risk_budget=float(config.get("risk_budget") or 40.0),
+            risk_budget=float(config.get("risk_budget") or default_risk),
             buying_power=float(config.get("buying_power") or default_bp),
             entry_slippage_bps=float(execution.get("entry_slippage_bps", 10.0)),
             exit_slippage_bps=float(execution.get("exit_slippage_bps", 10.0)),
             commission_per_share=float(execution.get("commission_per_share", 0.005)),
             max_participation_rate=float(execution.get("max_participation_rate", 0.10)),
             tick_size=float(execution.get("tick_size", 0.01)),
+            same_day_only=bool(same_day),
+            max_hold_bars=max_hold,
         )
 
-    def to_dict(self) -> dict[str, float]:
-        return asdict(self)
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        return d
 
 
 INTENT_ACTIONS = {

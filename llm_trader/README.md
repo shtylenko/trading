@@ -1,11 +1,13 @@
 # llm_trader
 
-A **momentum entry scanner** encoding Ross Cameron's (Warrior Trading) day-trading
-setup from `library/analyst_warrior_trading_strategy.md`. It replays historical
-market data and emits the *entries* the strategy would have taken — gap-up,
-low-float, high-RVOL small caps breaking out in the morning — as a deduplicated
-list (`ticker · date · time · one-sentence reason`) for **manual replay on
-TradingView**. There is **no exit / P&L / win-rate simulation** — see `SPEC.md`.
+Multi-strategy **entry scanner + sealed LLM paper-trading lab**.
+
+| Strategy | What it finds | Horizon | Skill |
+|---|---|---|---|
+| **`warrior`** (default) | Ross Cameron gap-up / low-float / ACD-ORB | same-day 1m | `strategies/warrior/skills/` |
+| **`cup_handle`** | Davidson-style cup-and-handle swing | multi-day daily | `strategies/cup_handle/skills/` |
+
+Architecture: [`MULTI_STRATEGY.md`](MULTI_STRATEGY.md). Warrior scanner details: [`SPEC.md`](SPEC.md). Cup-handle: [`strategies/cup_handle/SPEC.md`](strategies/cup_handle/SPEC.md).
 
 ## Run
 
@@ -15,10 +17,17 @@ repo-root `.env` loaded (Finnhub key + marketdata provider keys):
 ```bash
 set -a && . trading/.env && set +a
 
-# full default scan (2025-01-01 → 2026-06-30, small-account profile, float < 20M)
+# list families
+python3 -m trading.llm_trader.runner --list-strategies
+
+# warrior (default): full scan
 python3 -m trading.llm_trader.runner
 
-# pipeline smoke test on a slice or explicit names
+# cup-and-handle swing scan
+python3 -m trading.llm_trader.runner --strategy cup_handle --max-symbols 100
+python3 -m trading.llm_trader.runner --strategy cup_handle --symbols JPM AAPL MSFT
+
+# pipeline smoke test on a slice or explicit names (warrior)
 python3 -m trading.llm_trader.runner --max-symbols 100
 python3 -m trading.llm_trader.runner --symbols AAOI ACVA ADEA --float-max 0
 
@@ -27,16 +36,26 @@ python3 -m trading.llm_trader.runner --start 2025-01-01 --end 2025-12-31 --profi
 ```
 
 Outputs (gitignored, under `data/`):
-- `entries.db` — SQLite, table `entries`, **unique on `(ticker, date, pattern)`** (idempotent upsert; re-running never duplicates).
-- `entries.txt` — human-readable dump.
-- `entries.csv` — columns: `ticker,date,time_et,pattern,entry_px,bar_close,gap_pct,rvol,float_shares,bar_vol_mult,reason`.
+- **Warrior:** `entries.db` — unique on `(strategy, ticker, date, pattern)`.
+- **Cup-handle:** `cup_handle/entries.db` — same schema + `features_json` (ATR, T1/T2, …).
+- Matching `.txt` / `.csv` dumps beside each DB.
 
-## Pipeline
+## Pipelines
 
-`A0` symbol universe (Finnhub) → `A1` daily gap screen (raw daily: gap>5%, $2–20,
-avgvol>500K, RVOL>2) → `A2` float gate (yfinance, <20M) → `B` intraday ACD/ORB
-breakout (5-min, 07:00–12:00 ET, consolidation→new-high, volume expansion, above
-VWAP) → idempotent SQLite + text/CSV.
+**Warrior:** `A0` universe → `A1` gap screen → `A2` float gate → `B` ACD/ORB 5-min → store.
+
+**Cup-handle:** universe → daily SMA/ATR + cup/handle geometry → breakout day with
+ATR stop + dual targets in `features` → store.
+
+### Paper-trade cup-handle
+
+```bash
+SDIR=$(python3 -m trading.llm_trader.recorder init \
+  --ticker JPM --date 2025-06-01 --strategy cup_handle --profile swing)
+python3 -m trading.llm_trader.step start --session "$SDIR"
+# then step next / resolve / log per skills under strategies/cup_handle/skills/
+python3 -m trading.llm_trader.recorder finalize --session "$SDIR"
+```
 
 ## Known limitations (read before trusting a full run)
 
@@ -75,10 +94,12 @@ python3 -m trading.llm_trader.step start --session "$SDIR" --seed 7
 python3 -m trading.llm_trader.step next  --session "$SDIR"   # the "ping"
 ```
 
-The **`skills/trade_skills/<version>.md`** skill (whichever is currently the `base`
-— see `skills/MAINTAINING.md`) drives an LLM agent through a paced live session: it
-`init`s a session folder, streams the tape, makes entry/management/exit decisions
-bar by bar (logging each turn's reasoning), and `finalize`s the artifacts.
+The **warrior** skill at `strategies/warrior/skills/trade_skills/<version>.md`
+(whichever is currently the `base` — see that family's `MAINTAINING.md`) drives an
+LLM agent through a paced live session: it `init`s a session folder, streams the
+tape, makes entry/management/exit decisions bar by bar (logging each turn's
+reasoning), and `finalize`s the artifacts. Cup-and-handle uses the same layout
+under `strategies/cup_handle/skills/`.
 
 ```bash
 # session lifecycle (normally driven by the skill)
@@ -97,15 +118,19 @@ python3 -m trading.llm_trader.viewer
 ```
 
 Each run records which **version** drove it. There's no separate "live" file to
-duplicate — every version, current or past, is its own immutable file under
-`skills/trade_skills/<version>.md`, sealed (chmod read-only) the moment it's first
-registered. `skills/skill_versions.json` tracks each version's content hash plus a
-`base` pointer (which version an unpinned run uses). To try a rule change: fork one
-(`batchsim new-version --from <X> --to <Y>`), edit the writable copy, test it
-(`batchsim run --version <Y> ...`), and only promote it (`batchsim promote --version
-<Y>`) once it clears the gate — see `skills/MAINTAINING.md`. `recorder report
---by-version` attributes win rate / P&L / avg-R to each version so you can tell
-whether a rule change helped.
+duplicate — every version is its own immutable file under
+`strategies/<family>/skills/trade_skills/<version>.md`, sealed (chmod read-only)
+on first registration. That family's `skill_versions.json` tracks content hashes
+plus a `base` pointer. To try a rule change:
+
+```bash
+python3 -m trading.llm_trader.batchsim new-version --strategy warrior --from 4.0.0 --to 4.1.0
+# edit strategies/warrior/skills/trade_skills/4.1.0.md
+python3 -m trading.llm_trader.batchsim run --strategy warrior --version 4.1.0 ...
+python3 -m trading.llm_trader.batchsim promote --strategy warrior --version 4.1.0
+```
+
+See `strategies/warrior/skills/MAINTAINING.md` (and the cup_handle sibling).
 
 Each session is a self-contained folder under `simulations/{TS}-{TICKER}/`
 (`bars.json`, `actions.json`, `decisions.json`, `pnl.json`, `session.json`,
@@ -129,7 +154,7 @@ python3 -m trading.llm_trader.batchsim run \
 # --dry-run prints the per-setup hermes commands without spawning anything
 ```
 
-`run` pins `skills/trade_skills/<version>.md` (via
+`run` pins `strategies/<family>/skills/trade_skills/<version>.md` (via
 `recorder init --pin-version … --batch …`, which stamps read-only — no version bump),
 spawns a headless agent per setup, then runs a **post-hoc `audit`**. hermes assigns
 each `-z` run its own opaque session id (it can't be named or forced), so the audit

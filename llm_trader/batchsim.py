@@ -58,7 +58,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import recorder, skillmeta, step
-from .execution import EXECUTION_MODEL
+from .execution import EXECUTION_MODEL, ExecutionConfig, ExecutionEngine
 from .config import DATA_DIR
 from .fsutils import atomic_write_json
 
@@ -576,7 +576,8 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
             session_from_open: bool = False,
             horizon: str = "intraday",
             bar_resolution: str = "1min",
-            auto_lookback: Optional[dict] = None) -> str:
+            auto_lookback: Optional[dict] = None,
+            engine_owned_targets: bool = False) -> str:
     """The per-setup task handed to a headless hermes agent.
 
     The harness has ALREADY created the session and holds the sealed day in a private
@@ -593,6 +594,7 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
     ).lower() in ("1day", "daily")
     skill_for_agent = _skill_text_for_batch_agent(skill_text)
     auto_lb = auto_lookback or {}
+    position_actions = "SCALE_LIMIT / " if not engine_owned_targets else ""
     # The early-stop rule (condition b) is set by the run's §C re-entry BUDGET
     # (max_reentries) and an optional cutoff time (trade_until). Budget 1 + no cutoff
     # reproduces the classic single-re-entry behaviour exactly.
@@ -613,7 +615,10 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
             + "NEVER stop merely because you are flat: a live ARM_BUY_STOP / pending buy-stop "
             "means you are NOT done — keep `step next` + `resolve` + log every bar until "
             "the order fills, you CANCEL_ENTRY, or the stream ends. "
-            "While IN a position, keep going every bar (SCALE_LIMIT / SET_STOP / OBSERVE / "
+            "While IN a position, keep going every bar ("
+            + position_actions
+            + "SET_STOP / "
+            + "OBSERVE / "
             "EXIT as the skill requires) until `resolve` shows flat. "
             "You may stop ONLY when ALL of these are true: "
             "(1) no open position, AND "
@@ -656,6 +661,9 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
             f"gate; each re-entry must stand on its own merits). Only stop once {stop_when}."
         )
     if execution_model == EXECUTION_MODEL:
+        actions = "OBSERVE|ENTER_CLOSE|ARM_BUY_STOP|CANCEL_ENTRY|SET_STOP|ADD_CLOSE|EXIT_CLOSE|STAND_DOWN"
+        if not engine_owned_targets:
+            actions = actions.replace("|SET_STOP", "|SET_STOP|SCALE_LIMIT")
         loop_commands = f'''1. Reveal the next bar:
 python3 -m trading.llm_trader.step next --session "{sdir}"
 
@@ -663,7 +671,7 @@ python3 -m trading.llm_trader.step next --session "{sdir}"
 python3 -m trading.llm_trader.recorder resolve --session "{sdir}" --i <i>
 
 3. Log ONE intent for the revealed bar. Never send a fill price or share count:
-python3 -m trading.llm_trader.recorder log --session "{sdir}" --record '{{"i":<i>,"time":"<HH:MM>","thought":"...","action":"OBSERVE|ENTER_CLOSE|ARM_BUY_STOP|CANCEL_ENTRY|SET_STOP|SCALE_LIMIT|ADD_CLOSE|EXIT_CLOSE|STAND_DOWN","note":"..."}}'
+python3 -m trading.llm_trader.recorder log --session "{sdir}" --record '{{"i":<i>,"time":"<HH:MM>","thought":"...","action":"{actions}","note":"..."}}'
 
 Repeat 1→2→3.'''
     else:
@@ -1393,6 +1401,9 @@ def run(
     execution_model = skill_meta.get("execution_model") or "reported_fill_v1"
     session_from_open = str(skill_meta.get("session_from_open")).lower() == "true"
     five_minute_context = str(skill_meta.get("five_minute_context")).lower() == "true"
+    engine_owned_targets = str(
+        skill_meta.get("scanner_plan_targets_engine_owned")
+    ).strip().lower() in {"1", "true", "yes"}
     if five_minute_context and not session_from_open:
         raise ValueError("five_minute_context requires session_from_open: true")
     horizon = skill_meta.get("horizon") or strat.horizon.kind
@@ -1470,6 +1481,7 @@ def run(
                 "dry_run": dry_run,
                 "session_from_open": session_from_open,
                 "five_minute_context": five_minute_context,
+                "engine_owned_targets": engine_owned_targets,
                 "horizon": horizon,
                 "bar_resolution": bar_resolution,
                 "strategy": strategy_id,
@@ -1496,7 +1508,8 @@ def run(
                                   session_from_open=w["session_from_open"],
                                   horizon=w.get("horizon") or "intraday",
                                   bar_resolution=w.get("bar_resolution") or "1min",
-                                  auto_lookback=w.get("auto_lookback"))
+                                  auto_lookback=w.get("auto_lookback"),
+                                  engine_owned_targets=w.get("engine_owned_targets", False))
         print(json.dumps([_run_one(w) for w in work], indent=2))
         return tag
 
@@ -1517,7 +1530,8 @@ def run(
                                   session_from_open=w["session_from_open"],
                                   horizon=w.get("horizon") or "intraday",
                                   bar_resolution=w.get("bar_resolution") or "1min",
-                                  auto_lookback=w.get("auto_lookback"))
+                                  auto_lookback=w.get("auto_lookback"),
+                                  engine_owned_targets=w.get("engine_owned_targets", False))
             ready.append(w)
         except Exception as e:  # noqa: BLE001 — one bad setup shouldn't sink the batch
             print(f"  [preseal-err] {w['item']}: {e}", file=sys.stderr)
@@ -1998,6 +2012,32 @@ def _agent_abandoned_stream(sdir: Path) -> Optional[str]:
     if last_action == "STAND_DOWN":
         return None
 
+    # Deterministic sessions have an authoritative state machine.  Replay only
+    # through the final revealed/logged bar; using the raw ARM history alone
+    # incorrectly flagged a completed CANCEL_ENTRY or engine gap-cancel as an
+    # abandoned live order.
+    session = recorder._load_json(sdir / "session.json", {}) or {}
+    if session.get("config", {}).get("execution_model") == EXECUTION_MODEL:
+        try:
+            meta, ticks, _end = recorder._parse_stream(sdir / "stream.jsonl")
+            if meta is not None and ticks:
+                bars = recorder._build_bars(meta, ticks)
+                engine = ExecutionEngine(ExecutionConfig.from_session_config(session.get("config", {})))
+                engine.run(bars, raw, through_i=last_i, force_close=False)
+                snap = engine.snapshot(last_i)
+                if snap.get("position_shares"):
+                    return (
+                        f"{_AGENT_ABANDONED_LABEL}: last decision i={last_i} while position "
+                        f"was still open"
+                    )
+                if snap.get("armed_entry"):
+                    return (
+                        f"{_AGENT_ABANDONED_LABEL}: last decision i={last_i} with live arm"
+                    )
+                return None
+        except Exception:  # fall through to the legacy artifact heuristic below
+            pass
+
     actions_used = {str(d.get("action") or "") for d in raw}
     if not (actions_used & _LIVE_PLAN_ACTIONS):
         return None  # pure OBSERVE walk / no plan engaged — not this failure mode
@@ -2109,10 +2149,16 @@ def audit(tag: str) -> int:
         if session.get("status") == "complete" and _has_no_decision_log(d):
             _stamp_no_decision_log(d)
         session = recorder._load_json(d / "session.json", {}) or {}
-        if session.get("status") == "complete" and not session.get("agent_abandoned"):
+        if session.get("status") == "complete":
             abandoned = _agent_abandoned_stream(d)
             if abandoned:
-                _stamp_agent_abandoned(d, abandoned)
+                if session.get("agent_abandoned") != abandoned:
+                    _stamp_agent_abandoned(d, abandoned)
+            elif session.pop("agent_abandoned", None) is not None:
+                # A newer deterministic replay can prove that a prior ARM was
+                # cancelled (manually or by the gap/expiry guard). Clear the old
+                # heuristic stamp so valid no-trade outcomes are scored normally.
+                atomic_write_json(d / "session.json", session, indent=2)
 
     sessions = [d for d in all_dirs
                 if (recorder._load_json(d / "session.json", {}) or {}).get("status") == "complete"]
@@ -2123,7 +2169,7 @@ def audit(tag: str) -> int:
     integrity_invalid: set[Path] = set()
     for d in sessions:
         session = recorder._load_json(d / "session.json", {}) or {}
-        integrity_errors = recorder.stream_integrity_errors(d, session)
+        integrity_errors = recorder.batch_integrity_errors(d, session)
         if not integrity_errors:
             continue
         integrity_invalid.add(d)

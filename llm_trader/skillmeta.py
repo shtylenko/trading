@@ -126,6 +126,7 @@ def read_skill_meta(path: str | Path) -> dict:
         "armed_entry_gap_guard_required": fm.get("armed_entry_gap_guard_required"),
         "armed_entry_expiry_required": fm.get("armed_entry_expiry_required"),
         "arm_on_scanner_plan_required": fm.get("arm_on_scanner_plan_required"),
+        "scanner_plan_targets_engine_owned": fm.get("scanner_plan_targets_engine_owned"),
         # Optional market-data contract. A major version can begin at the open,
         # hide the scanner's already-known trigger, and receive completed 5-minute
         # candles without changing historical replay contracts.

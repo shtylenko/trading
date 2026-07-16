@@ -218,6 +218,67 @@ def stream_integrity_errors(session_dir: str | Path, session: Optional[dict] = N
         + _causal_plan_integrity_errors(session, meta, ticks)
     )
 
+
+def _legacy_causal_target_errors(session_dir: Path, session: dict) -> list[str]:
+    """Audit old causal runs whose target ladder was still agent-authored.
+
+    Version 0.5 promised an exact half-at-T1/remainder-at-T2 plan but did not yet
+    enforce it in the engine.  Preserve that historical contract at audit time so
+    a duplicated or mis-sized LLM scale can never become profitability evidence.
+    Newer skills stamp ``scanner_plan_targets_engine_owned`` and need no such
+    reconstruction because recorder/engine enforce it during the run.
+    """
+    skill = session.get("skill") or {}
+    required = skill.get("arm_on_scanner_plan_required")
+    engine_owned = skill.get("scanner_plan_targets_engine_owned")
+    if not (required is True or str(required).strip().lower() in {"1", "true", "yes"}):
+        return []
+    if engine_owned is True or str(engine_owned).strip().lower() in {"1", "true", "yes"}:
+        return []
+    meta, ticks, _end = _parse_stream(session_dir / "stream.jsonl")
+    if meta is None:
+        return []
+    plan_tick = next((tick for tick in ticks if tick.get("is_setup_day")), None)
+    plan = plan_tick.get("scanner_plan") if isinstance(plan_tick, dict) else None
+    if not isinstance(plan, dict):
+        return []  # stream_integrity_errors reports this primary input failure
+    actions = _load_json(session_dir / "actions.json", []) or []
+    if not any(action.get("side") == "buy" for action in actions if isinstance(action, dict)):
+        return []  # never entered: no target ladder could have changed the outcome
+    decisions = _read_jsonl(session_dir / "decisions.jsonl")
+    scales = [d for d in decisions if d.get("action") == "SCALE_LIMIT"]
+    target1, target2 = plan.get("target1"), plan.get("target2")
+    if any(not isinstance(v, (int, float)) or isinstance(v, bool)
+           or not math.isfinite(float(v)) for v in (target1, target2)):
+        return []  # causal stream verifier reports the missing plan values
+
+    def _matches(decision: dict, target: float, fraction: float) -> bool:
+        actual_target, actual_fraction = decision.get("target"), decision.get("fraction")
+        return (
+            isinstance(actual_target, (int, float)) and not isinstance(actual_target, bool)
+            and isinstance(actual_fraction, (int, float)) and not isinstance(actual_fraction, bool)
+            and math.isclose(float(actual_target), float(target), rel_tol=0.0, abs_tol=1e-8)
+            and math.isclose(float(actual_fraction), fraction, rel_tol=0.0, abs_tol=1e-8)
+        )
+
+    t1 = [d for d in scales if _matches(d, float(target1), 0.5)]
+    t2 = [d for d in scales if _matches(d, float(target2), 1.0)]
+    errors: list[str] = []
+    if len(t1) != 1:
+        errors.append("legacy causal target ladder requires exactly one 50% target1 scale")
+    if len(t2) != 1:
+        errors.append("legacy causal target ladder requires exactly one 100% remainder target2 scale")
+    if len(scales) != len(t1) + len(t2):
+        errors.append("legacy causal target ladder contains duplicate or non-scanner scale orders")
+    return errors
+
+
+def batch_integrity_errors(session_dir: str | Path, session: Optional[dict] = None) -> list[str]:
+    """All input and execution-contract checks for a finalized batch leaf."""
+    sdir = Path(session_dir)
+    session = session or _load_json(sdir / "session.json", {}) or {}
+    return stream_integrity_errors(sdir, session) + _legacy_causal_target_errors(sdir, session)
+
 # default account profile knobs (mirrors skill / strategy family sizing)
 PROFILE_RISK = {"small": 40.0, "main": 1350.0, "swing": 500.0}
 PROFILE_BUYING_POWER = {"small": 12_000.0, "main": 100_000.0, "swing": 50_000.0}
@@ -563,6 +624,7 @@ def init(
             "armed_entry_gap_guard_required": m.get("armed_entry_gap_guard_required"),
             "armed_entry_expiry_required": m.get("armed_entry_expiry_required"),
             "arm_on_scanner_plan_required": m.get("arm_on_scanner_plan_required"),
+            "scanner_plan_targets_engine_owned": m.get("scanner_plan_targets_engine_owned"),
             "session_from_open": m.get("session_from_open"),
             "five_minute_context": m.get("five_minute_context"),
             "completed_five_minute_entry_required": m.get(
@@ -899,6 +961,10 @@ def log(session_dir: str | Path, record: dict) -> None:
         require_scanner_plan_arm = (
             scanner_plan_contract is True or str(scanner_plan_contract).lower() == "true"
         )
+        engine_target_contract = session.get("skill", {}).get("scanner_plan_targets_engine_owned")
+        require_engine_owned_targets = (
+            engine_target_contract is True or str(engine_target_contract).lower() == "true"
+        )
         bar5_contract = session.get("skill", {}).get("completed_five_minute_entry_required")
         require_completed_bar5_entry = bar5_contract is True or str(bar5_contract).lower() == "true"
         _validate_decision_record(
@@ -909,6 +975,10 @@ def log(session_dir: str | Path, record: dict) -> None:
             require_armed_entry_gap_guard=require_armed_entry_gap_guard,
             require_armed_entry_expiry=require_armed_entry_expiry,
         )
+        if require_engine_owned_targets and record.get("action") == "SCALE_LIMIT":
+            raise ValueError(
+                "this skill's scanner targets are engine-owned; SCALE_LIMIT is not permitted"
+            )
 
         # Intent sessions must be bound to an already-revealed tick.  This
         # makes timestamps an executable constraint, not an agent convention.
@@ -965,6 +1035,26 @@ def log(session_dir: str | Path, record: dict) -> None:
                         raise ValueError(
                             f"ARM_BUY_STOP {decision_key} must match the revealed scanner plan"
                         )
+                if require_engine_owned_targets:
+                    target1, target2 = plan.get("target1"), plan.get("target2")
+                    if any(not isinstance(v, (int, float)) or isinstance(v, bool)
+                           or not math.isfinite(float(v)) for v in (target1, target2)):
+                        raise ValueError("scanner plan is missing finite target1/target2 values")
+                    # If an agent supplies levels, they must agree; then overwrite
+                    # them with scanner values so the persisted execution input is
+                    # not agent-controlled.
+                    for field, expected in (("target1", target1), ("target2", target2)):
+                        actual = record.get(field)
+                        if actual is not None and (
+                            not isinstance(actual, (int, float))
+                            or not math.isclose(float(actual), float(expected), rel_tol=0.0, abs_tol=1e-8)
+                        ):
+                            raise ValueError(
+                                f"ARM_BUY_STOP {field} must match the revealed scanner plan"
+                            )
+                    record["engine_targets"] = {
+                        "target1": float(target1), "target2": float(target2),
+                    }
             if require_completed_bar5_entry:
                 if record.get("action") in {"ARM_BUY_STOP", "ADD_CLOSE"}:
                     raise ValueError("4.0 entry contract permits only completed-5-minute ENTER_CLOSE entries")

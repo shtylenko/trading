@@ -186,6 +186,66 @@ def test_armed_entry_bracket_waits_until_the_bar_after_its_fill():
     ]
 
 
+def test_armed_scanner_targets_are_fixed_from_the_actual_entry_fill():
+    engine = ExecutionEngine(_config())
+    actions, _, _ = engine.run(
+        [
+            _bar(0, 9.5, 9.8, 9.3, 9.6),
+            _bar(1, 9.8, 10.2, 9.7, 10.0),  # entry; targets are not eligible yet
+            _bar(2, 10.2, 11.2, 10.1, 11.0),  # T1
+            _bar(3, 11.0, 12.2, 10.8, 12.0),  # T2 remainder
+        ],
+        [{
+            "i": 0, "time": "10:20", "action": "ARM_BUY_STOP", "trigger": 10.0,
+            "stop": 9.0, "engine_targets": {"target1": 11.0, "target2": 12.0},
+        }],
+        force_close=False,
+    )
+    assert [(a["action"], a["i"], a["price"], a["shares"]) for a in actions] == [
+        ("ENTER", 1, 10.0, 100), ("SCALE", 2, 11.0, 50), ("SCALE", 3, 12.0, 50),
+    ]
+    assert engine.stop == 10.0
+    assert engine.order_events == [{
+        "i": 2,
+        "action": "SET_STOP",
+        "reason": "engine moved stop to breakeven after scanner target1",
+    }]
+
+
+def test_engine_rejects_an_agent_scale_when_scanner_targets_are_active():
+    engine = ExecutionEngine(_config())
+    with pytest.raises(ValueError, match="engine-owned scanner targets"):
+        engine.run(
+            [_bar(0, 9.5, 9.8, 9.3, 9.6), _bar(1, 9.8, 10.2, 9.7, 10.0)],
+            [
+                {"i": 0, "time": "10:20", "action": "ARM_BUY_STOP", "trigger": 10.0,
+                 "stop": 9.0, "engine_targets": {"target1": 11.0, "target2": 12.0}},
+                {"i": 1, "time": "10:21", "action": "SCALE_LIMIT", "target": 11.0,
+                 "fraction": 0.5},
+            ],
+            force_close=False,
+        )
+
+
+def test_scanner_target_already_reached_by_entry_gap_cancels_without_filling():
+    engine = ExecutionEngine(_config())
+    actions, _, pnl = engine.run(
+        [_bar(0, 9.5, 9.8, 9.3, 9.6), _bar(1, 10.2, 10.4, 10.1, 10.3)],
+        [{
+            "i": 0, "time": "10:20", "action": "ARM_BUY_STOP", "trigger": 10.0,
+            "stop": 9.0, "engine_targets": {"target1": 10.1, "target2": 11.0},
+        }],
+        force_close=False,
+    )
+    assert actions == []
+    assert pnl["traded"] is False
+    assert engine.order_events == [{
+        "i": 1,
+        "action": "CANCEL_ENTRY",
+        "reason": "entry price reached scanner target1 before fill",
+    }]
+
+
 def test_engine_pyramid_uses_starter_then_adds_only_after_strength_with_risk_cap():
     engine = ExecutionEngine(_config())
     bars = [
@@ -346,6 +406,41 @@ def test_recorder_enforces_causal_daily_arm_contract(tmp_path):
     })
 
 
+def test_recorder_locks_scanner_targets_and_rejects_agent_scales(tmp_path):
+    sdir = recorder.init("TEST", "2025-03-10", root=tmp_path, now=datetime(2026, 7, 10, 10, 0, 0))
+    session_path = sdir / "session.json"
+    session = json.loads(session_path.read_text())
+    session["config"]["execution_model"] = EXECUTION_MODEL
+    session["skill"].update({
+        "arm_on_scanner_plan_required": True,
+        "scanner_plan_targets_engine_owned": True,
+        "armed_entry_gap_guard_required": True,
+        "armed_entry_expiry_required": True,
+    })
+    session_path.write_text(json.dumps(session))
+    _stream(sdir / "stream.jsonl")
+    stream = [json.loads(line) for line in (sdir / "stream.jsonl").read_text().splitlines()]
+    stream[1]["is_setup_day"] = True
+    stream[1]["scanner_plan"] = {
+        "signal_as_of": "2025-03-10", "trigger": 10.1, "stop": 9.0,
+        "target1": 11.0, "target2": 12.0, "atr": 1.0,
+        "cup_depth_px": 2.0, "max_entry_gap_atr": 0.5, "arm_expiry_bars": 5,
+    }
+    (sdir / "stream.jsonl").write_text("\n".join(json.dumps(row) for row in stream) + "\n")
+
+    recorder.log(sdir, {
+        "i": 0, "time": "10:20", "action": "ARM_BUY_STOP", "trigger": 10.1,
+        "stop": 9.0, "atr": 1.0, "max_entry_gap_atr": 0.5, "expiry_bars": 5,
+    })
+    decision = json.loads((sdir / "decisions.jsonl").read_text())
+    assert decision["engine_targets"] == {"target1": 11.0, "target2": 12.0}
+    with pytest.raises(ValueError, match="scanner targets are engine-owned"):
+        recorder.log(sdir, {
+            "i": 1, "time": "10:21", "action": "SCALE_LIMIT", "target": 11.0,
+            "fraction": 0.5,
+        })
+
+
 def test_recorder_allows_causal_lookback_before_setup_but_not_through_it(tmp_path):
     sdir = recorder.init(
         "TEST", "2025-03-11", strategy="cup_handle", root=tmp_path,
@@ -484,7 +579,7 @@ def test_init_freezes_deterministic_execution_assumptions(tmp_path):
     skill.write_text(
         "---\nname: trade-simulator\nversion: 3.0.0\n"
         "execution_model: deterministic_ohlc_v1\nentry_bracket_required: true\n"
-        "entry_pyramid_required: true\n---\n# candidate\n"
+        "entry_pyramid_required: true\nscanner_plan_targets_engine_owned: true\n---\n# candidate\n"
     )
     runner_contract = {"harness_version": "test", "prompt_hash": "sha256:p"}
     sdir = recorder.init("TEST", "2025-03-10", root=tmp_path, skill=skill,
@@ -501,6 +596,7 @@ def test_init_freezes_deterministic_execution_assumptions(tmp_path):
     assert session["runner_contract"]["prompt_hash"] == "sha256:p"
     assert session["skill"]["entry_bracket_required"] == "true"
     assert session["skill"]["entry_pyramid_required"] == "true"
+    assert session["skill"]["scanner_plan_targets_engine_owned"] == "true"
 
 
 def _attribution_stream(path):

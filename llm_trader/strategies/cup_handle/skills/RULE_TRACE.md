@@ -2,7 +2,7 @@
 
 | rule id | skill location | type | note | since |
 |---|---|---|---|---|
-| plan.uptrend_sma_stack | ENTRY checklist §1 | operationalization | close > SMA20/50; SMA200 preferred if present, soft-skip if null; SMA50 rising | 0.1.0 / 0.2.0 soft-200 |
+| plan.uptrend_sma_stack | ENTRY checklist §1 | operationalization | close > SMA20/50/200; SMA50 rising; all required daily indicators must be available | 0.1.0 / 0.5.0 strict |
 | plan.cup_geometry | ENTRY checklist §2 | operationalization | depth 12–35%, multi-bar trough, lips within 5% | 0.1.0 |
 | plan.handle_tight | ENTRY checklist §3 | operationalization | short shallow handle under lip (~3–15 sessions preferred), light volume | 0.1.0 / 0.2.0 |
 | plan.room_to_run | ENTRY checklist §4 | operationalization | no stacked supply just above handle high | 0.1.0 |
@@ -20,3 +20,6 @@
 | entry.no_daily_same_close | 0.5 timing | execution contract | no `ENTER_CLOSE` on a fully observed daily bar | 0.5.0 |
 | risk.gap_guard | 0.5 setup action | execution contract | cancel an arm when next open is more than configured ATR gap above trigger | 0.5.0 |
 | risk.arm_expiry | 0.5 setup action | execution contract | cancel an unfilled arm after its configured number of later daily bars | 0.5.0 |
+| target.engine_owned_scanner_ladder | 0.6 management | execution contract | seal scanner T1/T2 at arm; engine sells fixed half at T1 and exact remainder at T2 | 0.6.0 |
+| risk.auto_breakeven_after_t1 | 0.6 management | execution contract | after a complete engine T1 fill, raise the stop to actual average entry; agent may only tighten further | 0.6.0 |
+| audit.replay_terminal_state | batch audit | process | classify cancelled/expired/gap-rejected arms from deterministic state, not a raw intent heuristic | 0.6.0 |

@@ -284,6 +284,46 @@ def test_audit_voids_causal_session_missing_scanner_plan(tmp_path, monkeypatch):
     assert "causal scanner_plan is missing" in json.loads(session_path.read_text())["void"]
 
 
+def test_audit_voids_legacy_causal_run_with_wrong_target_ladder(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    d = _fake_session(tmp_path, "bad-targets")
+    session_path = d / "session.json"
+    session = json.loads(session_path.read_text())
+    session.update({
+        "strategy": "cup_handle",
+        "config": {"horizon": "multi_day", "bar_resolution": "1day", "execution_model": "deterministic_ohlc_v1"},
+        "skill": {"arm_on_scanner_plan_required": "true"},
+    })
+    session_path.write_text(json.dumps(session))
+    daily = {
+        "sma20": 10.0, "sma50": 10.0, "sma200": 10.0, "atr14": 1.0,
+        "rvol": 1.0, "above_sma20": True, "above_sma50": True,
+        "above_sma200": True, "sma50_rising": True,
+    }
+    plan = {"signal_as_of": "2025-01-02", "trigger": 10.0, "stop": 9.0,
+            "target1": 11.0, "target2": 12.0, "atr": 1.0, "cup_depth_px": 2.0,
+            "arm_expiry_bars": 5, "max_entry_gap_atr": 0.5}
+    (d / "stream.jsonl").write_text("\n".join(json.dumps(row) for row in [
+        {"type": "meta", "ticker": "TK", "date": "2025-01-02", "horizon": "multi_day", "bar_resolution": "1day"},
+        {"type": "tick", "i": 0, "date": "2025-01-02", "time": "16:00", "is_setup_day": True, "scanner_plan": plan, **daily},
+        {"type": "tick", "i": 1, "date": "2025-01-03", "time": "16:00", "o": 10.0, "h": 10.5, "l": 9.9, "c": 10.2, "v": 1_000, **daily},
+    ]) + "\n")
+    (d / "decisions.jsonl").write_text("\n".join(json.dumps(row) for row in [
+        {"i": 0, "time": "16:00", "action": "ARM_BUY_STOP", "trigger": 10.0, "stop": 9.0,
+         "atr": 1.0, "max_entry_gap_atr": 0.5, "expiry_bars": 5},
+        {"i": 1, "time": "16:00", "action": "SCALE_LIMIT", "target": 11.0, "fraction": 0.5},
+        {"i": 2, "time": "16:00", "action": "SCALE_LIMIT", "target": 12.0, "fraction": 0.5},
+    ]) + "\n")
+    (d / "actions.json").write_text(json.dumps([{"i": 1, "side": "buy", "shares": 100}]))
+    calls = []
+    monkeypatch.setattr(batchsim, "_resolve_batch_commands", lambda sids: calls.append(sids) or {})
+
+    assert batchsim.audit("bad-targets") == 1
+    assert calls == []
+    assert "100% remainder target2" in json.loads(session_path.read_text())["void"]
+
+
 def test_sessions_for_batch_includes_manifest_orphans(tmp_path, monkeypatch):
     monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
     monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
@@ -427,6 +467,47 @@ def test_agent_abandoned_armed_run_is_infra_failure_and_rerunnable(tmp_path, mon
     assert view["metrics"]["n_agent_abandoned"] == 1
     assert view["metrics"]["n_planned"] == 0
     assert view["tickers"][0]["status"] == "agent_abandoned"
+
+
+def test_agent_abandoned_uses_deterministic_state_after_cancel_or_gap_guard(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    daily = {"o": 10.0, "h": 10.2, "l": 9.8, "c": 10.0, "v": 10_000}
+
+    cancelled = _fake_session(tmp_path, "cancelled", sid="cancelled")
+    session_path = cancelled / "session.json"
+    session = json.loads(session_path.read_text())
+    session["config"] = {"execution_model": "deterministic_ohlc_v1"}
+    session_path.write_text(json.dumps(session))
+    (cancelled / "stream.jsonl").write_text("\n".join(json.dumps(row) for row in [
+        {"type": "meta", "ticker": "TK", "date": "2025-01-02"},
+        {"type": "tick", "i": 0, "time": "10:20", **daily},
+        {"type": "tick", "i": 1, "time": "10:21", **daily},
+        {"type": "tick", "i": 2, "time": "10:22", **daily},
+    ]) + "\n")
+    (cancelled / "decisions.jsonl").write_text(
+        json.dumps({"i": 0, "time": "10:20", "action": "ARM_BUY_STOP", "trigger": 11.0, "stop": 9.0}) + "\n"
+        + json.dumps({"i": 1, "time": "10:21", "action": "CANCEL_ENTRY"}) + "\n"
+    )
+    assert batchsim._agent_abandoned_stream(cancelled) is None
+
+    gap = _fake_session(tmp_path, "gap-cancel", sid="gap-cancel")
+    session_path = gap / "session.json"
+    session = json.loads(session_path.read_text())
+    session["config"] = {"execution_model": "deterministic_ohlc_v1"}
+    session_path.write_text(json.dumps(session))
+    (gap / "stream.jsonl").write_text("\n".join(json.dumps(row) for row in [
+        {"type": "meta", "ticker": "TK", "date": "2025-01-02"},
+        {"type": "tick", "i": 0, "time": "10:20", **daily},
+        {"type": "tick", "i": 1, "time": "10:21", "o": 12.0, "h": 12.1, "l": 11.8, "c": 12.0, "v": 10_000},
+        {"type": "tick", "i": 2, "time": "10:22", **daily},
+    ]) + "\n")
+    (gap / "decisions.jsonl").write_text(
+        json.dumps({"i": 0, "time": "10:20", "action": "ARM_BUY_STOP", "trigger": 11.0,
+                    "stop": 9.0, "atr": 1.0, "max_entry_gap_atr": 0.5}) + "\n"
+        + json.dumps({"i": 1, "time": "10:21", "action": "OBSERVE"}) + "\n"
+    )
+    assert batchsim._agent_abandoned_stream(gap) is None
 
 
 def test_timed_out_excluded_from_stats_and_rerun(tmp_path, monkeypatch):
@@ -879,6 +960,16 @@ def test_prompt_uses_resolve_and_intents_for_deterministic_skill():
     assert "trading.llm_trader.recorder resolve" in p
     assert "ENTER_CLOSE|ARM_BUY_STOP" in p
     assert '"fill_px":null' not in p
+
+
+def test_engine_owned_target_prompt_omits_agent_scale_limit():
+    p = batchsim._prompt(
+        "0.6.0", "SKILL-TEXT", "tag", "SESSION-ID", "TK", "2026-01-01", "16:00",
+        "/tmp/session", execution_model="deterministic_ohlc_v1",
+        engine_owned_targets=True,
+    )
+    assert "SCALE_LIMIT" not in p
+    assert "SET_STOP" in p
 
 
 def test_from_open_prompt_hides_scanner_time_and_prevents_flat_early_stop():

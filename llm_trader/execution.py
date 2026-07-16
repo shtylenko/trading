@@ -15,7 +15,7 @@ intra-bar path that OHLC data cannot prove.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from math import ceil, floor
+from math import ceil, floor, isfinite
 from typing import Any, Optional
 
 
@@ -351,6 +351,58 @@ class ExecutionEngine:
             })
 
     @staticmethod
+    def _scanner_target_spec(decision: dict[str, Any]) -> Optional[dict[str, float]]:
+        """Validate immutable absolute targets supplied by a scanner plan.
+
+        Unlike an agent-authored ``SCALE_LIMIT``, these levels are sealed with the
+        entry intent and are installed by the engine only after it knows the real
+        entry fill.  This prevents duplicate targets or fractions calculated from
+        a position that has already been scaled.
+        """
+        raw = decision.get("engine_targets")
+        if raw is None:
+            return None
+        if not isinstance(raw, dict):
+            raise ValueError("engine_targets must be an object")
+        target1, target2 = raw.get("target1"), raw.get("target2")
+        if any(not isinstance(v, (int, float)) or isinstance(v, bool)
+               or not isfinite(float(v)) or float(v) <= 0
+               for v in (target1, target2)):
+            raise ValueError("engine_targets requires finite positive target1 and target2")
+        target1, target2 = float(target1), float(target2)
+        if target2 <= target1:
+            raise ValueError("engine_targets target2 must exceed target1")
+        return {"target1": target1, "target2": target2}
+
+    def _attach_scanner_targets(
+        self,
+        decision: dict[str, Any],
+        *,
+        fill: Optional[dict[str, Any]],
+        placed_i: int,
+    ) -> None:
+        """Attach the scanner's fixed half/T1 + remainder/T2 exit ladder."""
+        spec = self._scanner_target_spec(decision)
+        if spec is None or fill is None:
+            return
+        if spec["target1"] <= fill["price"]:
+            raise ValueError("engine-owned target1 must exceed the actual entry fill")
+        total = int(fill["shares"])
+        first = total // 2
+        second = total - first
+        if first:
+            self.targets.append({
+                "target": spec["target1"], "fraction": 0.0, "remaining": first,
+                "placed_i": placed_i, "engine_owned": True,
+                "move_stop_to_breakeven": True,
+            })
+        if second:
+            self.targets.append({
+                "target": spec["target2"], "fraction": 0.0, "remaining": second,
+                "placed_i": placed_i, "engine_owned": True,
+            })
+
+    @staticmethod
     def _pyramid_spec(decision: dict[str, Any]) -> Optional[dict[str, Any]]:
         """Validate the optional engine-managed starter/add plan on an entry."""
         pyramid = decision.get("pyramid")
@@ -500,6 +552,15 @@ class ExecutionEngine:
                 remaining = wanted - filled["shares"]
                 if remaining <= 0 or self.shares == 0:
                     self.targets.remove(target)
+                    if target.get("move_stop_to_breakeven") and self.shares > 0:
+                        breakeven = self.avg_entry
+                        if self.stop is None or breakeven > self.stop:
+                            self.stop = breakeven
+                            self.order_events.append({
+                                "i": int(bar["i"]),
+                                "action": "SET_STOP",
+                                "reason": "engine moved stop to breakeven after scanner target1",
+                            })
                 else:
                     target["remaining"] = remaining
 
@@ -539,6 +600,19 @@ class ExecutionEngine:
                     self.armed = None
                     return
                 price = self._buy_price(max(float(bar["o"]), armed["trigger"]))
+                scanner_targets = armed.get("engine_targets")
+                if scanner_targets is not None and float(scanner_targets["target1"]) <= price:
+                    # A permissible gap can still consume the whole first measured
+                    # move.  Do not manufacture an immediate target fill or crash
+                    # after entering; cancel the stale plan before it becomes a
+                    # non-positive-reward trade.
+                    self.order_events.append({
+                        "i": int(bar["i"]),
+                        "action": "CANCEL_ENTRY",
+                        "reason": "entry price reached scanner target1 before fill",
+                    })
+                    self.armed = None
+                    return
                 self.stop = armed["stop"]
                 qty = self._entry_qty(price, self.stop, capacity, add=False)
                 filled = self._append_fill(
@@ -549,6 +623,7 @@ class ExecutionEngine:
                 if filled is not None:
                     capacity -= filled["shares"]
                     self._attach_bracket(armed, fill=filled, placed_i=int(bar["i"]))
+                    self._attach_scanner_targets(armed, fill=filled, placed_i=int(bar["i"]))
                     self._start_pyramid(armed, filled)
                     # If both the entry and stop are reachable, use the adverse
                     # entry-then-stop path.  The bar does not reveal their order.
@@ -585,6 +660,9 @@ class ExecutionEngine:
             trigger, stop = float(decision["trigger"]), float(decision["stop"])
             if stop >= trigger:
                 raise ValueError("ARM_BUY_STOP stop must be below its trigger")
+            scanner_targets = self._scanner_target_spec(decision)
+            if scanner_targets is not None and scanner_targets["target1"] <= trigger:
+                raise ValueError("engine-owned target1 must exceed an armed-entry trigger")
             # Validate bracket shape at placement time, before a later trigger
             # could make an invalid order state actionable.
             self._bracket_scales(decision)
@@ -610,6 +688,7 @@ class ExecutionEngine:
                 "max_entry_gap_atr": float(max_gap_atr) if max_gap_atr is not None else None,
                 "atr": float(atr_px) if atr_px is not None else None,
                 "expiry_bars": expiry_bars,
+                "engine_targets": scanner_targets,
             }
             return
         if action == "ENTER_CLOSE":
@@ -648,6 +727,8 @@ class ExecutionEngine:
         if action == "SCALE_LIMIT":
             if self.shares <= 0:
                 raise ValueError("SCALE_LIMIT requires an open position")
+            if any(target.get("engine_owned") for target in self.targets):
+                raise ValueError("SCALE_LIMIT is unavailable while engine-owned scanner targets are active")
             target = float(decision["target"])
             if target <= self.avg_entry:
                 raise ValueError("SCALE_LIMIT target must be above average entry")

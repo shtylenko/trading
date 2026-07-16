@@ -149,6 +149,49 @@ def _daily_indicator_integrity_errors(session: dict, meta: dict, ticks: list[dic
     return errors
 
 
+def _causal_plan_integrity_errors(
+    session: dict,
+    meta: dict,
+    ticks: list[dict],
+    *,
+    allow_pending_setup: bool = False,
+) -> list[str]:
+    """Verify that a causal daily session actually received its scanner plan.
+
+    A one-tick gateway reveals and records the lookback before the setup bar.  During
+    that phase a plan is correctly absent; once the stream reaches the planned date,
+    though, its absence is a hard integrity failure.  Finalization/audit always use
+    the strict form because their streams are complete.
+    """
+    skill = session.get("skill") or {}
+    required = skill.get("arm_on_scanner_plan_required")
+    if not (required is True or str(required).strip().lower() in {"1", "true", "yes"}):
+        return []
+    setup_ticks = [tick for tick in ticks if tick.get("is_setup_day")]
+    if not setup_ticks and allow_pending_setup:
+        planned_date = str(meta.get("date") or session.get("historical_date") or "")
+        # ISO date strings sort chronologically.  Until the planned setup date is
+        # visible, no scanner_plan is expected (and auto-observe is safe).
+        if planned_date and all(str(tick.get("date") or "") < planned_date for tick in ticks):
+            return []
+    if len(setup_ticks) != 1:
+        return [
+            f"causal scanner plan requires exactly one setup bar; found {len(setup_ticks)}"
+        ]
+    plan = setup_ticks[0].get("scanner_plan")
+    if not isinstance(plan, dict):
+        return [
+            "causal scanner_plan is missing from the setup bar; entries source is stale "
+            "or a research label, not a prebreak arm"
+        ]
+    required_fields = (
+        "signal_as_of", "trigger", "stop", "target1", "target2", "atr",
+        "cup_depth_px", "arm_expiry_bars", "max_entry_gap_atr",
+    )
+    missing = [field for field in required_fields if plan.get(field) is None]
+    return (["causal scanner_plan missing field(s): " + ", ".join(missing)] if missing else [])
+
+
 def daily_stream_integrity_errors(session_dir: str | Path, session: Optional[dict] = None) -> list[str]:
     """Check a persisted stream without changing it (used by batch audit)."""
     sdir = Path(session_dir)
@@ -159,6 +202,21 @@ def daily_stream_integrity_errors(session_dir: str | Path, session: Optional[dic
     if meta is None:
         return ["stream has no meta record"]
     return _daily_indicator_integrity_errors(session, meta, ticks)
+
+
+def stream_integrity_errors(session_dir: str | Path, session: Optional[dict] = None) -> list[str]:
+    """All fail-closed stream checks used by batch audit."""
+    sdir = Path(session_dir)
+    session = session or _load_json(sdir / "session.json", {}) or {}
+    if not _is_multi_day_session(session):
+        return []
+    meta, ticks, _end = _parse_stream(sdir / "stream.jsonl")
+    if meta is None:
+        return ["stream has no meta record"]
+    return (
+        _daily_indicator_integrity_errors(session, meta, ticks)
+        + _causal_plan_integrity_errors(session, meta, ticks)
+    )
 
 # default account profile knobs (mirrors skill / strategy family sizing)
 PROFILE_RISK = {"small": 40.0, "main": 1350.0, "swing": 500.0}
@@ -865,10 +923,15 @@ def log(session_dir: str | Path, record: dict) -> None:
                 raise ValueError(
                     f"decision time {record['time']} does not match revealed tick time {tick.get('time')}"
                 )
-            indicator_errors = _daily_indicator_integrity_errors(session, _meta or {}, ticks)
-            if indicator_errors:
+            integrity_errors = (
+                _daily_indicator_integrity_errors(session, _meta or {}, ticks)
+                + _causal_plan_integrity_errors(
+                    session, _meta or {}, ticks, allow_pending_setup=True,
+                )
+            )
+            if integrity_errors:
                 raise ValueError(
-                    "daily stream data-integrity failure — " + "; ".join(indicator_errors)
+                    "daily stream data-integrity failure — " + "; ".join(integrity_errors)
                 )
             if require_scanner_plan_arm and record.get("action") == "ARM_BUY_STOP":
                 plan = tick.get("scanner_plan")
@@ -1192,10 +1255,13 @@ def resolve(session_dir: str | Path, i: Optional[int] = None) -> dict:
         tick = next((t for t in ticks if t.get("i") == current_i), None)
         if tick is None:
             raise ValueError(f"tick i={current_i} is not revealed")
-        indicator_errors = _daily_indicator_integrity_errors(session, meta, ticks)
-        if indicator_errors:
+        integrity_errors = (
+            _daily_indicator_integrity_errors(session, meta, ticks)
+            + _causal_plan_integrity_errors(session, meta, ticks, allow_pending_setup=True)
+        )
+        if integrity_errors:
             raise ValueError(
-                "daily stream data-integrity failure — " + "; ".join(indicator_errors)
+                "daily stream data-integrity failure — " + "; ".join(integrity_errors)
             )
         decisions = [d for d in _read_jsonl(sdir / "decisions.jsonl") if d.get("i", -1) < current_i]
         bars = _build_bars(meta, ticks)
@@ -1274,10 +1340,13 @@ def finalize(session_dir: str | Path, full_day: bool = True) -> dict:
         meta, ticks, end = _parse_stream(sdir / "stream.jsonl")
         if meta is None:
             raise ValueError(f"{sdir}/stream.jsonl has no meta line — was replay --out-file pointed here?")
-        indicator_errors = _daily_indicator_integrity_errors(session, meta, ticks)
-        if indicator_errors:
+        integrity_errors = (
+            _daily_indicator_integrity_errors(session, meta, ticks)
+            + _causal_plan_integrity_errors(session, meta, ticks)
+        )
+        if integrity_errors:
             raise ValueError(
-                "daily stream data-integrity failure — " + "; ".join(indicator_errors)
+                "daily stream data-integrity failure — " + "; ".join(integrity_errors)
             )
         decisions = _read_jsonl(sdir / "decisions.jsonl")
         # Chart bars: multi-day / daily streams already *are* the full sealed

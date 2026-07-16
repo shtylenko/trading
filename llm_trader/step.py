@@ -92,6 +92,25 @@ def _sealed_error_message(path: Path) -> Optional[str]:
     return None
 
 
+def _requires_causal_scanner_plan(skill: dict) -> bool:
+    value = skill.get("arm_on_scanner_plan_required")
+    return value is True or str(value).strip().lower() in {"1", "true", "yes"}
+
+
+def _causal_setup_error(replay_module, setup, skill: dict) -> Optional[str]:
+    """Return a fail-closed message when a v0.5 session receives stale scanner data."""
+    if not _requires_causal_scanner_plan(skill):
+        return None
+    errors = replay_module.causal_plan_feature_errors(setup)
+    if not errors:
+        return None
+    return (
+        "causal cup-handle setup is incompatible with this skill: "
+        + "; ".join(errors)
+        + ". Re-run the cup_handle scanner and regenerate the batch test set."
+    )
+
+
 class IsolatedStreamGateway:
     """Harness-owned, one-tick gateway for a pre-sealed in-memory stream.
 
@@ -482,6 +501,9 @@ def start_isolated(
         strategy=strategy_id if strategy_id != "warrior" else None,
         skip_time_filter=strategy_id != "warrior",
     )
+    causal_error = _causal_setup_error(replay, setup, session_meta.get("skill") or {})
+    if causal_error:
+        raise RuntimeError(causal_error)
     captured = io.StringIO()
     replay.replay(
         setup,
@@ -608,6 +630,10 @@ def start(
 
     # Skill frontmatter may request neutral meta / 5m context / from-open
     skill = session_meta.get("skill") or {}
+    causal_error = _causal_setup_error(replay, setup, skill)
+    if causal_error:
+        print(f"STATUS error {causal_error}", file=out)
+        return 3
     if skill.get("session_from_open") in (True, "true", "True", "1", "yes"):
         from_open = True
     if skill.get("five_minute_context") in (True, "true", "True", "1", "yes"):

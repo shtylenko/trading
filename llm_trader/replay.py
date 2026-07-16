@@ -69,6 +69,17 @@ logger = logging.getLogger("llm_trader.replay")
 _DAILY_SMA_WARMUP_BARS = 200
 _DAILY_WARMUP_BUFFER_BARS = 10
 _MIN_DAILY_WARMUP_CALENDAR_DAYS = 420
+_CAUSAL_PLAN_FEATURES = (
+    "signal_as_of",
+    "entry_trigger",
+    "stop_px",
+    "target1_px",
+    "target2_px",
+    "atr",
+    "cup_depth_px",
+    "arm_expiry_bars",
+    "max_entry_gap_atr",
+)
 
 
 @dataclass
@@ -408,6 +419,29 @@ def _daily_indicator_gaps(window: pd.DataFrame, dates: list[date]) -> list[str]:
             span = first if first == last else f"{first}..{last}"
             gaps.append(f"{field} ({len(positions)} bar(s), {span})")
     return gaps
+
+
+def causal_plan_feature_errors(setup: Setup) -> list[str]:
+    """Return stale/incomplete causal-plan metadata errors for a cup setup.
+
+    Version 0.5 arms only from a scanner-produced completed-handle plan.  Older
+    rows were breakout labels with a nominal 09:30 time and no causal plan; using
+    those rows with the new skill must be a loud setup error, never a zero-trade
+    pseudo-result.
+    """
+    if setup.strategy != "cup_handle":
+        return []
+    features = setup.features or {}
+    if features.get("signal_kind") != "prebreak_arm":
+        actual = features.get("signal_kind")
+        return [
+            "expected features.signal_kind='prebreak_arm' "
+            f"(got {actual!r})"
+        ]
+    missing = [key for key in _CAUSAL_PLAN_FEATURES if features.get(key) is None]
+    if missing:
+        return ["missing causal plan feature(s): " + ", ".join(missing)]
+    return []
 
 
 def replay_daily(

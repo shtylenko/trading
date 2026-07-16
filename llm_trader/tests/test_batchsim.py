@@ -69,6 +69,59 @@ def test_build_set_exclude_carves_disjoint_holdout(tmp_path):
     assert dev_keys.isdisjoint(hold_keys)
 
 
+def test_build_set_causal_only_excludes_legacy_cup_labels(tmp_path):
+    db = tmp_path / "entries.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "CREATE TABLE entries (ticker TEXT, date TEXT, time_et TEXT, pattern TEXT, "
+        "features_json TEXT, entry_px REAL, gap_pct REAL, rvol REAL, "
+        "float_shares REAL, reason TEXT)"
+    )
+    complete_plan = {
+        "signal_kind": "prebreak_arm", "signal_as_of": "2025-02-03",
+        "entry_trigger": 11.0, "stop_px": 9.0, "target1_px": 12.0,
+        "target2_px": 13.0, "atr": 1.0, "cup_depth_px": 3.0,
+        "arm_expiry_bars": 5, "max_entry_gap_atr": 0.5,
+    }
+    conn.executemany(
+        "INSERT INTO entries (ticker,date,time_et,pattern,features_json) VALUES (?,?,?,?,?)",
+        [
+            ("CAUSAL", "2025-02-03", "16:00", "cup_handle", json.dumps(complete_plan)),
+            ("STALE", "2025-02-04", "09:30", "cup_handle", "{}"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    setups = batchsim.build_set(n=10, db=db, causal_only=True)
+    assert [(s["ticker"], s["date"], s["time_et"]) for s in setups] == [
+        ("CAUSAL", "2025-02-03", "16:00"),
+    ]
+
+
+def test_causal_batch_preflight_rejects_a_stale_exact_setup(tmp_path):
+    db = tmp_path / "entries.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "CREATE TABLE entries (ticker TEXT, date TEXT, time_et TEXT, pattern TEXT, "
+        "strategy TEXT, features_json TEXT, entry_px REAL, gap_pct REAL, rvol REAL, "
+        "float_shares REAL, reason TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO entries (ticker,date,time_et,pattern,strategy,features_json) "
+        "VALUES (?,?,?,?,?,?)",
+        ("STALE", "2025-02-04", "09:30", "cup_handle", "cup_handle", "{}"),
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(ValueError, match="incompatible with the causal cup-handle skill"):
+        batchsim._validate_causal_testset(
+            [{"ticker": "STALE", "date": "2025-02-04", "time_et": "09:30"}],
+            db=db, strategy_id="cup_handle",
+        )
+
+
 def test_load_keys_reads_setups_and_top_level_list(tmp_path):
     p = tmp_path / "ts.json"
     p.write_text(json.dumps({"setups": [
@@ -193,8 +246,42 @@ def test_audit_voids_daily_indicator_integrity_before_transcript_lookup(tmp_path
     monkeypatch.setattr(batchsim, "_resolve_batch_commands", lambda sids: calls.append(sids) or {})
 
     assert batchsim.audit("bad-daily") == 1
-    assert calls == [[]]
+    assert calls == []
     assert "data-integrity" in json.loads(session_path.read_text())["void"]
+
+
+def test_audit_voids_causal_session_missing_scanner_plan(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    d = _fake_session(tmp_path, "stale-causal")
+    session_path = d / "session.json"
+    session = json.loads(session_path.read_text())
+    session.update({
+        "strategy": "cup_handle",
+        "config": {"horizon": "multi_day", "bar_resolution": "1day"},
+        "skill": {"arm_on_scanner_plan_required": "true"},
+    })
+    session_path.write_text(json.dumps(session))
+    daily = {
+        "sma20": 10.0, "sma50": 10.0, "sma200": 10.0, "atr14": 1.0,
+        "rvol": 1.0, "above_sma20": True, "above_sma50": True,
+        "above_sma200": True, "sma50_rising": True,
+    }
+    (d / "stream.jsonl").write_text("\n".join(json.dumps(row) for row in [
+        {"type": "meta", "ticker": "TK", "date": "2025-01-02",
+         "horizon": "multi_day", "bar_resolution": "1day"},
+        {"type": "tick", "i": 0, "date": "2025-01-02", "time": "16:00",
+         "is_setup_day": True, **daily},
+    ]) + "\n")
+    assert recorder.stream_integrity_errors(d, session)
+    assert batchsim._sessions_for_batch("stale-causal") == [d]
+    monkeypatch.setattr(
+        batchsim, "_resolve_batch_commands",
+        lambda _sids: (_ for _ in ()).throw(AssertionError("must not inspect transcripts")),
+    )
+
+    assert batchsim.audit("stale-causal") == 1
+    assert "causal scanner_plan is missing" in json.loads(session_path.read_text())["void"]
 
 
 def test_sessions_for_batch_includes_manifest_orphans(tmp_path, monkeypatch):

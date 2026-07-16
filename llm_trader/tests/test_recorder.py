@@ -536,6 +536,7 @@ def test_finalize_multi_day_uses_stream_bars_not_1min(tmp_path, monkeypatch):
     sess["config"]["bar_resolution"] = "1day"
     sess["config"]["same_day_only"] = False
     sess["config"]["execution_model"] = "reported_fill_v1"
+    sess["skill"].pop("arm_on_scanner_plan_required", None)
     (sdir / "session.json").write_text(json.dumps(sess))
 
     # Sealed multi-day daily stream (3 bars)
@@ -597,6 +598,7 @@ def test_finalize_multi_day_stamps_fill_dates_from_bars(tmp_path, monkeypatch):
         "execution_model": "reported_fill_v1",
         "risk_budget": 500.0,
     })
+    sess["skill"].pop("arm_on_scanner_plan_required", None)
     (sdir / "session.json").write_text(json.dumps(sess))
 
     lines = [

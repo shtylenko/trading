@@ -326,9 +326,41 @@ def _load_keys(path: Path) -> set:
     return {(s["ticker"], s["date"]) for s in setups}
 
 
+def _causal_entry_feature_errors(row: dict) -> list[str]:
+    """Return plan-contract errors for a raw scanner row.
+
+    `entries.db` deliberately retains prior research artifacts until their scan
+    scope is refreshed.  A cup-handle holdout, however, is an execution input,
+    not a research sample: it must contain only the complete causal plans that
+    the current scanner can disclose on the setup bar.
+    """
+    from . import replay
+
+    raw_features = row.get("features_json")
+    try:
+        features = json.loads(raw_features) if isinstance(raw_features, str) else raw_features
+    except json.JSONDecodeError:
+        features = {}
+    setup = replay.Setup(
+        ticker=str(row.get("ticker") or ""),
+        day=datetime.fromisoformat(str(row.get("date"))).date(),
+        time_et=str(row.get("time_et") or ""),
+        entry_px=row.get("entry_px"),
+        gap_pct=row.get("gap_pct"),
+        rvol=row.get("rvol"),
+        float_shares=row.get("float_shares"),
+        reason=str(row.get("reason") or ""),
+        strategy="cup_handle",
+        pattern=str(row.get("pattern") or "cup_handle"),
+        features=features if isinstance(features, dict) else {},
+    )
+    return replay.causal_plan_feature_errors(setup)
+
+
 def build_set(
     n: int = 30, *, seed: int = 13, db: Path = ENTRIES_DB, after: str = "09:30",
     exclude: Optional[set] = None, unique_ticker: bool = False,
+    causal_only: bool = False,
 ) -> list[dict]:
     """Stratified, deterministic sample of ~``n`` setups from ``entries.db``.
 
@@ -345,12 +377,18 @@ def build_set(
     ``unique_ticker`` collapses the pool to **one setup per ticker** (keeping each
     ticker's most-recent date) before sampling, so every setup is a distinct name — max
     cross-ticker diversity, no correlated repeats of the same ticker on different days.
+
+    ``causal_only`` is for execution holdouts of plan-first strategies.  It excludes
+    legacy labels and incomplete scanner rows instead of allowing them to turn into
+    agent stand-downs or invalid pseudo-results later in the batch.
     """
     exclude = exclude or set()
     with sqlite3.connect(str(db)) as conn:
         conn.row_factory = sqlite3.Row
         rows = [dict(r) for r in conn.execute("SELECT * FROM entries")]
     rows = [r for r in rows if _hhmm_after(r.get("time_et", ""), after)]
+    if causal_only:
+        rows = [r for r in rows if not _causal_entry_feature_errors(r)]
 
     # dedupe to one per (ticker, date), skipping excluded keys
     seen: dict[tuple, dict] = {}
@@ -1208,6 +1246,50 @@ def _tag_for_session(session_id: str) -> Optional[str]:
     return None
 
 
+def _requires_causal_scanner_plan(skill_meta: dict) -> bool:
+    value = skill_meta.get("arm_on_scanner_plan_required")
+    return value is True or str(value).strip().lower() in {"1", "true", "yes"}
+
+
+def _validate_causal_testset(
+    setups: list[dict],
+    *,
+    db: Path,
+    strategy_id: str,
+) -> None:
+    """Refuse a batch before preseal when its named scanner rows are stale.
+
+    This check uses the exact ``ticker/date/time_et`` testset pin.  It catches a
+    deleted/replaced row as well as an old confirmed-breakout label, so a batch never
+    produces a collection of quiet 0R stand-downs from incompatible provenance.
+    """
+    from . import replay
+
+    invalid: list[str] = []
+    for item in setups:
+        ticker, day, time_et = item.get("ticker"), item.get("date"), item.get("time_et")
+        label = f"{ticker} {day} {time_et}"
+        try:
+            setup = replay.pick_setup(
+                db, ticker=ticker, day=datetime.fromisoformat(str(day)).date(),
+                at_time=time_et, strategy=strategy_id, skip_time_filter=True,
+            )
+        except Exception as e:  # the exact testset pin is unavailable
+            invalid.append(f"{label}: scanner row unavailable ({e})")
+            continue
+        errors = replay.causal_plan_feature_errors(setup)
+        if errors:
+            invalid.append(f"{label}: " + "; ".join(errors))
+    if invalid:
+        preview = "\n  - ".join(invalid[:8])
+        more = f"\n  ... and {len(invalid) - 8} more" if len(invalid) > 8 else ""
+        raise ValueError(
+            "batch testset is incompatible with the causal cup-handle skill:\n  - "
+            + preview + more
+            + "\nRe-run the cup_handle scanner and regenerate this test set before running agents."
+        )
+
+
 def run(
     version: Optional[str] = None, *, model: Optional[str] = None,
     testset: Optional[str | Path] = None, parallel: int = 3,
@@ -1339,6 +1421,12 @@ def run(
                 "cannot resume with different skill bytes than the batch's recorded skill_hash"
             )
     setups = load_testset(testset)
+
+    # Do this before allocating a batch id, staging a session, or starting an
+    # agent.  v0.5 needs scanner-produced plans; historical confirmed labels are
+    # not safe substitutes even if their dates and tickers still exist in the DB.
+    if _requires_causal_scanner_plan(skill_meta):
+        _validate_causal_testset(setups, db=strategy_db, strategy_id=strategy_id)
 
     tag = tag or f"{version}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
@@ -2035,17 +2123,20 @@ def audit(tag: str) -> int:
     integrity_invalid: set[Path] = set()
     for d in sessions:
         session = recorder._load_json(d / "session.json", {}) or {}
-        indicator_errors = recorder.daily_stream_integrity_errors(d, session)
-        if not indicator_errors:
+        integrity_errors = recorder.stream_integrity_errors(d, session)
+        if not integrity_errors:
             continue
         integrity_invalid.add(d)
-        reason = "data-integrity: " + "; ".join(indicator_errors)
+        reason = "data-integrity: " + "; ".join(integrity_errors)
         if session.get("void") != reason:
             session["void"] = reason
             atomic_write_json(d / "session.json", session, indent=2)
             voided += 1
     sessions = [d for d in sessions if d not in integrity_invalid]
-    cmd_map = _resolve_batch_commands([d.name for d in sessions])
+    # Do not invoke the external transcript exporter for an empty cohort.  Besides
+    # avoiding needless work, this keeps a failed data-integrity preflight entirely
+    # local: no agent artifact is consulted once every leaf was rejected.
+    cmd_map = _resolve_batch_commands([d.name for d in sessions]) if sessions else {}
     # sid → session_name, so a run with no command log can still be matched to its
     # captured agent log to distinguish out-of-credits from genuinely unverifiable.
     manifest = _load_manifest(tag)
@@ -2793,8 +2884,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         exclude: set = set()
         for p in args.exclude:
             exclude |= _load_keys(Path(p))
-        setups = build_set(n=args.n, seed=args.seed, db=db_path, exclude=exclude,
-                           unique_ticker=args.unique_ticker)
+        setups = build_set(
+            n=args.n, seed=args.seed, db=db_path, exclude=exclude,
+            unique_ticker=args.unique_ticker,
+            causal_only=(strategy_id == "cup_handle"),
+        )
         write_testset(setups, out_path, args.seed)
         extra = f" (excluded {len(exclude)} keys)" if exclude else ""
         if args.unique_ticker:

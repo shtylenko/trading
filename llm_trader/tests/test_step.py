@@ -100,6 +100,29 @@ def test_start_surfaces_a_replay_data_integrity_failure(tmp_path, monkeypatch):
     assert not (sdir / "stream.jsonl").exists()
 
 
+def test_start_rejects_stale_cup_entry_without_a_causal_plan(tmp_path, monkeypatch):
+    sdir = tmp_path / "stale-cup"
+    sdir.mkdir()
+    (sdir / "session.json").write_text(json.dumps({
+        "strategy": "cup_handle", "ticker": "TEST", "historical_date": "2025-03-10",
+        "config": {"horizon": "multi_day", "bar_resolution": "1day"},
+        "skill": {"arm_on_scanner_plan_required": "true"},
+    }))
+    setup = Setup(
+        "TEST", date(2025, 3, 10), "09:30", 10.0, None, None, None,
+        "legacy breakout label", strategy="cup_handle", pattern="cup_handle", features={},
+    )
+    monkeypatch.setattr(replay, "pick_setup", lambda *args, **kwargs: setup)
+    monkeypatch.setattr(
+        replay, "replay",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not replay stale entry")),
+    )
+
+    out = StringIO()
+    assert step.start(sdir, out=out) == 3
+    assert "prebreak_arm" in out.getvalue()
+
+
 def test_next_reveals_one_bar_at_a_time(tmp_path, monkeypatch):
     _install_fake_provider(monkeypatch)
     sdir = tmp_path / "sess"

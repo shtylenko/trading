@@ -301,9 +301,15 @@ def test_recorder_enforces_causal_daily_arm_contract(tmp_path):
     _stream(sdir / "stream.jsonl")
 
     stream = [json.loads(line) for line in (sdir / "stream.jsonl").read_text().splitlines()]
+    # A causal arm is valid only on its one, explicitly revealed setup bar.  Keep
+    # this fixture structurally complete so the assertions below exercise the
+    # decision-level contract rather than the stream-integrity preflight.
+    stream[1]["is_setup_day"] = True
     stream[1]["scanner_plan"] = {
-        "trigger": 10.1, "stop": 9.0, "atr": 1.0,
-        "max_entry_gap_atr": 0.5, "arm_expiry_bars": 5,
+        "signal_as_of": "2025-03-10", "trigger": 10.1, "stop": 9.0,
+        "target1": 11.0, "target2": 12.0, "atr": 1.0,
+        "cup_depth_px": 2.0, "max_entry_gap_atr": 0.5,
+        "arm_expiry_bars": 5,
     }
     (sdir / "stream.jsonl").write_text("\n".join(json.dumps(row) for row in stream) + "\n")
 
@@ -338,6 +344,39 @@ def test_recorder_enforces_causal_daily_arm_contract(tmp_path):
         "trigger": 10.1, "stop": 9.0, "atr": 1.0,
         "max_entry_gap_atr": 0.5, "expiry_bars": 5,
     })
+
+
+def test_recorder_allows_causal_lookback_before_setup_but_not_through_it(tmp_path):
+    sdir = recorder.init(
+        "TEST", "2025-03-11", strategy="cup_handle", root=tmp_path,
+        now=datetime(2026, 7, 10, 10, 0, 0),
+    )
+    session_path = sdir / "session.json"
+    session = json.loads(session_path.read_text())
+    session["config"]["execution_model"] = EXECUTION_MODEL
+    session["skill"]["arm_on_scanner_plan_required"] = True
+    session_path.write_text(json.dumps(session))
+    daily = {
+        "sma20": 10.0, "sma50": 10.0, "sma200": 10.0, "atr14": 1.0,
+        "rvol": 1.0, "above_sma20": True, "above_sma50": True,
+        "above_sma200": True, "sma50_rising": True,
+    }
+    rows = [
+        {"type": "meta", "ticker": "TEST", "date": "2025-03-11",
+         "strategy": "cup_handle", "horizon": "multi_day", "bar_resolution": "1day"},
+        {"type": "tick", "i": 0, "date": "2025-03-10", "time": "16:00", **daily},
+    ]
+    stream_path = sdir / "stream.jsonl"
+    stream_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+
+    # The harness must be able to auto-observe this pre-setup lookback bar.
+    recorder.log(sdir, {"i": 0, "time": "16:00", "action": "OBSERVE"})
+
+    # When the planned date is revealed, a missing setup marker/plan is not deferred.
+    rows.append({"type": "tick", "i": 1, "date": "2025-03-11", "time": "16:00", **daily})
+    stream_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    with pytest.raises(ValueError, match="causal scanner plan requires exactly one setup bar; found 0"):
+        recorder.log(sdir, {"i": 1, "time": "16:00", "action": "OBSERVE"})
 
 
 def test_recorder_rejects_a_daily_stream_with_missing_indicators(tmp_path):

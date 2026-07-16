@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Webull Stock Monitor",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Captures Webull chart candles and configured My Screeners (e.g. Gap'n'Go) into local daily sessions.",
   "permissions": [
     "activeTab",

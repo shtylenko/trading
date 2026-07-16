@@ -234,6 +234,101 @@ class ScreenerConfigTest(unittest.TestCase):
         self.assertEqual(screener_config.max_session_tickers("gap-n-go"), 50)
 
 
+class SessionLogTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        import session_log
+        self.session_log = session_log
+        session_log.set_base_dir(self.base / "sessions")
+        # Point receiver log dir so handle paths stay independent
+        self.old_sessions = getattr(receiver, "SESSIONS_LOG_DIR", None)
+        receiver.SESSIONS_LOG_DIR = self.base / "sessions"
+        session_log.set_base_dir(receiver.SESSIONS_LOG_DIR)
+        receiver.init_session_db(self.base / "test.db")
+
+    def tearDown(self):
+        if self.old_sessions is not None:
+            receiver.SESSIONS_LOG_DIR = self.old_sessions
+        self.tmp.cleanup()
+
+    def test_log_event_appends_ndjson(self):
+        r1 = self.session_log.log_event(
+            "session_start",
+            session_date="2026-07-15",
+            screener_key="gap-n-go",
+        )
+        r2 = self.session_log.log_event(
+            "ticker_added",
+            session_date="2026-07-15",
+            ticker="AAPL",
+        )
+        self.assertEqual(r1["event"], "session_start")
+        self.assertEqual(r2["ticker"], "AAPL")
+        path = self.session_log.log_path("2026-07-15")
+        self.assertTrue(path.is_file())
+        lines = path.read_text(encoding="utf-8").strip().split("\n")
+        self.assertEqual(len(lines), 2)
+        events = self.session_log.read_events("2026-07-15")
+        self.assertEqual([e["event"] for e in events], ["session_start", "ticker_added"])
+        only = self.session_log.read_events("2026-07-15", event="ticker_added")
+        self.assertEqual(len(only), 1)
+        self.assertEqual(only[0]["ticker"], "AAPL")
+
+    def test_upsert_logs_session_start_and_ticker_added(self):
+        # Isolate session_log used by receiver handlers via module import
+        import session_log
+        session_log.set_base_dir(self.base / "sessions")
+        result = session_db.upsert_screener_rows(
+            [
+                {"ticker": "NVDA", "raw": {"close": 100}},
+                {"ticker": "AMD", "raw": {"close": 50}},
+            ],
+            session_date="2026-07-15",
+            captured_at="2026-07-15T09:30:00-04:00",
+            screener_key="gap-n-go",
+            screener_name="Gap'n'Go",
+        )
+        self.assertTrue(result.get("session_created"))
+        self.assertEqual(sorted(result["new_tickers"]), ["AMD", "NVDA"])
+
+        # Mirror what handle_screener does with the result
+        if result.get("session_created"):
+            session_log.log_event(
+                "session_start",
+                session_date=result["session_date"],
+                session_id=result.get("session_id"),
+                screener_key="gap-n-go",
+            )
+        for t in result["new_tickers"]:
+            session_log.log_event(
+                "ticker_added",
+                session_date=result["session_date"],
+                ticker=t,
+                screener_key="gap-n-go",
+            )
+        events = session_log.read_events("2026-07-15")
+        names = [e["event"] for e in events]
+        self.assertIn("session_start", names)
+        self.assertEqual(names.count("ticker_added"), 2)
+
+    def test_known_events_documented(self):
+        required = {
+            "session_start",
+            "session_end",
+            "screener_open",
+            "screener_close",
+            "ticker_added",
+            "screener_push",
+            "push_rejected",
+            "watchlist_added",
+            "watchlist_error",
+            "receiver_start",
+            "receiver_stop",
+        }
+        self.assertTrue(required.issubset(self.session_log.EVENTS))
+
+
 class WatchlistSyncTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

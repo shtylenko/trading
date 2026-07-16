@@ -116,6 +116,9 @@ def init_db() -> None:
 
 
 def get_or_create_session(session_date: str | None = None) -> dict[str, Any]:
+    """
+    Return session dict. Includes created=True when a new daily_sessions row is inserted.
+    """
     date = session_date or session_date_today()
     now = now_iso()
     with _lock:
@@ -138,6 +141,7 @@ def get_or_create_session(session_date: str | None = None) -> dict[str, Any]:
                     "session_date": row["session_date"],
                     "created_at": row["created_at"],
                     "updated_at": now,
+                    "created": False,
                 }
             cur.execute(
                 "INSERT INTO daily_sessions(session_date, created_at, updated_at) VALUES (?, ?, ?)",
@@ -149,6 +153,7 @@ def get_or_create_session(session_date: str | None = None) -> dict[str, Any]:
                 "session_date": date,
                 "created_at": now,
                 "updated_at": now,
+                "created": True,
             }
         finally:
             conn.close()
@@ -207,6 +212,7 @@ def upsert_screener_rows(
             "ok": True,
             "session_date": session["session_date"],
             "session_id": session["id"],
+            "session_created": bool(session.get("created")),
             "received": 0,
             "new_tickers": [],
             "updated_tickers": 0,
@@ -217,6 +223,7 @@ def upsert_screener_rows(
 
     session = get_or_create_session(session_date)
     sid = session["id"]
+    session_created = bool(session.get("created"))
     seen_at = captured_at or now_iso()
     now_ts = _parse_iso_to_epoch(seen_at) or datetime.now(tz=NY).timestamp()
     first_source = f"webull-screener:{screener_key}" if screener_key else "webull-screener"
@@ -360,6 +367,7 @@ def upsert_screener_rows(
         "ok": True,
         "session_date": session["session_date"],
         "session_id": sid,
+        "session_created": session_created,
         "received": len(by_ticker),
         "new_tickers": new_tickers,
         "updated_tickers": updated,

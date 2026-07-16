@@ -40,6 +40,8 @@ let activeScreener = null; // { key, name, webull_screener_id } | null
 let screenerArmed = false;
 let screenerArmReason = "not on screener page";
 let lastArmLog = "";
+// Last armed screener key we logged open for (null when closed / never opened)
+let lastLoggedOpenKey = null;
 
 function detectPageMode(url = location.href) {
   try {
@@ -52,10 +54,54 @@ function detectPageMode(url = location.href) {
   }
 }
 
+function postSessionEvent(event, fields = {}) {
+  // Fire-and-forget lifecycle event → backend daily NDJSON log
+  try {
+    if (!chrome.runtime?.id) return;
+    chrome.runtime.sendMessage({
+      type: "SESSION_EVENT",
+      payload: {
+        event,
+        url: location.href,
+        tab_id: myTabId != null ? String(myTabId) : undefined,
+        ...fields,
+      },
+    }).catch(() => {});
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function notifyScreenerArmChange(prevArmed, prevKey) {
+  // Emit screener_open / screener_close only on real transitions (not every poll)
+  const key = activeScreener?.key || null;
+  if (screenerArmed && key) {
+    if (!prevArmed || prevKey !== key || lastLoggedOpenKey !== key) {
+      postSessionEvent("screener_open", {
+        screener_key: key,
+        screener_name: activeScreener?.name,
+        ui_region: screenerUiRegion,
+        reason: screenerArmReason,
+        manual: !!manualArmOverride,
+      });
+      lastLoggedOpenKey = key;
+    }
+  } else if (prevArmed || lastLoggedOpenKey) {
+    postSessionEvent("screener_close", {
+      screener_key: prevKey || lastLoggedOpenKey,
+      reason: screenerArmReason,
+      ui_region: screenerUiRegion,
+    });
+    lastLoggedOpenKey = null;
+  }
+}
+
 function refreshPageMode() {
   const next = detectPageMode();
   if (next !== pageMode) {
     console.log("[stock-monitor] pageMode", pageMode, "→", next, location.href);
+    const prevArmed = screenerArmed;
+    const prevKey = activeScreener?.key || lastLoggedOpenKey;
     pageMode = next;
     // Icon: chart capture green handled separately; screener/chart-off → blue via REPORT
     if (pageMode === "screener") {
@@ -71,11 +117,13 @@ function refreshPageMode() {
       screenerArmed = false;
       activeScreener = null;
       screenerArmReason = "not on screener page";
+      notifyScreenerArmChange(prevArmed, prevKey);
     } else {
       safeSendMessage({ type: "REPORT_ICON_STATE", enabled: false, mode: "other" });
       screenerArmed = false;
       activeScreener = null;
       screenerArmReason = "not on screener page";
+      notifyScreenerArmChange(prevArmed, prevKey);
     }
   } else {
     pageMode = next;
@@ -311,6 +359,9 @@ function detectSelectedConfiguredScreener() {
 }
 
 function refreshScreenerArm() {
+  const prevArmed = screenerArmed;
+  const prevKey = activeScreener?.key || lastLoggedOpenKey;
+
   if (pageMode !== "screener") {
     screenerArmed = false;
     activeScreener = null;
@@ -325,6 +376,7 @@ function refreshScreenerArm() {
       region: "unknown",
       bodySnippet: "",
     };
+    notifyScreenerArmChange(prevArmed, prevKey);
     return screenerArmed;
   }
 
@@ -342,6 +394,7 @@ function refreshScreenerArm() {
       region: screenerUiRegion,
       manual: true,
     };
+    notifyScreenerArmChange(prevArmed, prevKey);
     return true;
   }
 
@@ -402,6 +455,7 @@ function refreshScreenerArm() {
       mode: "screener",
       armed: screenerArmed,
     });
+    notifyScreenerArmChange(prevArmed, prevKey);
   }
   return screenerArmed;
 }

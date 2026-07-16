@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, urlparse
 
 import db as session_db
 import screener_config
+import session_log
 import webull_watchlist
 
 # Config
@@ -35,6 +36,9 @@ PORT = int(os.environ.get("PORT", "8787"))
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data" / "captures"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+SESSIONS_LOG_DIR = BASE_DIR / "data" / "sessions"
+SESSIONS_LOG_DIR.mkdir(parents=True, exist_ok=True)
+session_log.set_base_dir(SESSIONS_LOG_DIR)
 
 DEBUG_DIR = DATA_DIR / "debug"
 DEBUG_DIR.mkdir(parents=True, exist_ok=True)
@@ -398,6 +402,23 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "sessions": session_db.list_sessions(limit=limit)})
             return
 
+        if path in ("/session/events", "/api/session/events"):
+            date = (qs.get("date") or [None])[0] or session_db.session_date_today()
+            event_filter = (qs.get("event") or [None])[0]
+            try:
+                limit = int((qs.get("limit") or ["0"])[0]) or None
+            except ValueError:
+                limit = None
+            events = session_log.read_events(date, event=event_filter, limit=limit)
+            self._send_json({
+                "ok": True,
+                "session_date": date,
+                "count": len(events),
+                "log_path": str(session_log.log_path(date)),
+                "events": events,
+            })
+            return
+
         if path in ("/watchlist/status", "/api/watchlist/status"):
             cfg = webull_watchlist.load_config()
             date = (qs.get("date") or [None])[0] or session_db.session_date_today()
@@ -484,9 +505,11 @@ class Handler(BaseHTTPRequestHandler):
                     "GET / — session UI",
                     "POST /push — closed candles → JSON files",
                     "POST /screener — screener rows → daily session SQLite",
+                    "POST /session/event — lifecycle events (screener_open/close, …)",
                     "GET /config/screeners — enabled named screeners (Gap'n'Go, …)",
                     "GET /session/today",
                     "GET /session?date=YYYY-MM-DD",
+                    "GET /session/events?date=YYYY-MM-DD",
                     "GET /sessions",
                     "GET /health",
                     "POST /debug/dom",
@@ -494,6 +517,7 @@ class Handler(BaseHTTPRequestHandler):
                 "output": {
                     "candles": str(DATA_DIR),
                     "db": str(session_db.get_db_path()),
+                    "session_events": str(SESSIONS_LOG_DIR),
                 },
             })
             return
@@ -509,6 +533,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/screener", "/api/screener"):
             self.handle_screener()
+            return
+
+        if path in ("/session/event", "/api/session/event"):
+            self.handle_session_event()
             return
 
         if path not in ("/push", "/api/candles"):
@@ -614,6 +642,17 @@ class Handler(BaseHTTPRequestHandler):
                 f"{len(rows)} rows > max_rows_per_push={max_rows} for {screener_key!r} "
                 f"(likely wrong screener or quote dump)"
             )
+            session_log.log_event(
+                "push_rejected",
+                session_date=session_date or session_db.session_date_today(),
+                reason="batch_too_large",
+                screener_key=screener_key,
+                screener_name=screener_name,
+                row_count=len(rows),
+                max_rows_per_push=max_rows,
+                tab_id=tab_id,
+                source_url=source_url,
+            )
             self._send_json({
                 "ok": False,
                 "error": "batch_too_large",
@@ -652,6 +691,17 @@ class Handler(BaseHTTPRequestHandler):
                         f"max_session_tickers={max_session} "
                         f"(have={existing_count}, new_in_batch={new_count})"
                     )
+                    session_log.log_event(
+                        "push_rejected",
+                        session_date=date,
+                        reason="session_too_large",
+                        screener_key=screener_key,
+                        screener_name=screener_name,
+                        existing_count=existing_count,
+                        new_in_batch=new_count,
+                        max_session_tickers=max_session,
+                        tab_id=tab_id,
+                    )
                     self._send_json({
                         "ok": False,
                         "error": "session_too_large",
@@ -681,13 +731,46 @@ class Handler(BaseHTTPRequestHandler):
             screener_key=screener_key,
             screener_name=screener_name,
         )
+        sess_date = result.get("session_date") or session_date or session_db.session_date_today()
+
+        if result.get("session_created"):
+            session_log.log_event(
+                "session_start",
+                session_date=sess_date,
+                session_id=result.get("session_id"),
+                screener_key=screener_key,
+                screener_name=screener_name,
+                tab_id=tab_id,
+            )
+
+        session_log.log_event(
+            "screener_push",
+            session_date=sess_date,
+            screener_key=screener_key,
+            screener_name=screener_name,
+            row_count=len(rows),
+            new_count=len(result.get("new_tickers") or []),
+            updated_count=result.get("updated_tickers") or 0,
+            tab_id=tab_id,
+            source_url=source_url,
+        )
+
         if result.get("new_tickers"):
             print(f"[receiver] new session tickers ({screener_key}): {result['new_tickers']}")
-            # Auto-add brand-new Gap'n'Go names to Webull "Today's Gap'n'Go" watchlist
+            for t in result["new_tickers"]:
+                session_log.log_event(
+                    "ticker_added",
+                    session_date=sess_date,
+                    ticker=t,
+                    screener_key=screener_key,
+                    screener_name=screener_name,
+                    tab_id=tab_id,
+                )
+            # Auto-add brand-new Gap'n'Go names to Webull watchlist
             try:
                 wl = webull_watchlist.sync_new_tickers(
                     result["new_tickers"],
-                    session_date=result.get("session_date") or session_date,
+                    session_date=sess_date,
                     screener_key=screener_key,
                 )
                 result["watchlist"] = wl
@@ -697,13 +780,67 @@ class Handler(BaseHTTPRequestHandler):
                         f"[receiver] watchlist {mode}sync → {wl.get('watchlist_name')}: "
                         f"added {wl['added']}"
                     )
+                    for t in wl["added"]:
+                        session_log.log_event(
+                            "watchlist_added",
+                            session_date=sess_date,
+                            ticker=t,
+                            watchlist_name=wl.get("watchlist_name"),
+                            dry_run=wl.get("dry_run"),
+                        )
                 if wl.get("errors"):
                     print(f"[receiver] watchlist sync errors: {wl['errors']}")
+                    session_log.log_event(
+                        "watchlist_error",
+                        session_date=sess_date,
+                        errors=wl.get("errors"),
+                        tickers=result["new_tickers"],
+                    )
             except Exception as e:
                 print(f"[receiver] watchlist sync failed: {e}")
                 result["watchlist"] = {"ok": False, "errors": [str(e)]}
+                session_log.log_event(
+                    "watchlist_error",
+                    session_date=sess_date,
+                    errors=[str(e)],
+                    tickers=result["new_tickers"],
+                )
 
         self._send_json(result)
+
+    def handle_session_event(self):
+        """POST /session/event — lifecycle events from extension (screener open/close, etc.)."""
+        payload, err = self._read_json_body()
+        if err:
+            body, status = err
+            self._send_json(body, status)
+            return
+
+        event = (payload.get("event") or "").strip()
+        if not event:
+            self._send_json({"error": "event required"}, 400)
+            return
+
+        allowed = {
+            "screener_open", "screener_close", "session_end",
+            "session_start",  # rare: client-initiated
+        }
+        if event not in allowed and event not in session_log.EVENTS:
+            # still accept unknown for forward-compat, but prefer known
+            pass
+
+        date = payload.get("session_date") or session_db.session_date_today()
+        fields = {
+            k: payload.get(k)
+            for k in (
+                "screener_key", "screener_name", "tab_id", "url",
+                "reason", "ui_region", "manual",
+            )
+            if payload.get(k) is not None
+        }
+        rec = session_log.log_event(event, session_date=date, **fields)
+        print(f"[receiver] session event: {event} date={date} {fields}")
+        self._send_json({"ok": True, "logged": rec})
 
     def handle_debug_dom(self):
         payload, err = self._read_json_body()
@@ -743,6 +880,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    SESSIONS_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    session_log.set_base_dir(SESSIONS_LOG_DIR)
     init_session_db()
     print(f"Webull Stock Monitor — candles + screener sessions")
     print(f"Listening on http://{HOST}:{PORT}")
@@ -752,16 +891,25 @@ def main():
     print(f"UI        → http://{HOST}:{PORT}/")
     print(f"Candles   → {DATA_DIR}")
     print(f"Sessions  → {session_db.get_db_path()}")
+    print(f"Event log → {SESSIONS_LOG_DIR}/YYYY-MM-DD/events.ndjson")
     print(
         f"Watchlist → {wl_cfg.get('watchlist_name')!r} "
         f"enabled={wl_cfg.get('enabled')} dry_run={wl_cfg.get('dry_run') or not has_creds} "
         f"creds={'yes' if has_creds else 'NO (set WEBULL_APP_KEY/SECRET)'}"
     )
-    print("POST /push     — closed candles (chart tabs)")
-    print("POST /screener — screener rows → daily session (America/New_York)")
-    print("GET  /session/today | /session?date= | /sessions | /watchlist/status")
+    print("POST /push          — closed candles (chart tabs)")
+    print("POST /screener      — screener rows → daily session (America/New_York)")
+    print("POST /session/event — lifecycle events (screener open/close, …)")
+    print("GET  /session/today | /session?date= | /sessions | /session/events | /watchlist/status")
     print("POST /debug/dom")
     print("Ctrl-C to stop.\n")
+
+    session_log.log_event(
+        "receiver_start",
+        host=HOST,
+        port=PORT,
+        db=str(session_db.get_db_path()),
+    )
 
     server = HTTPServer((HOST, PORT), Handler)
     try:
@@ -769,6 +917,7 @@ def main():
     except KeyboardInterrupt:
         print("\nShutting down.")
     finally:
+        session_log.log_event("receiver_stop", reason="shutdown")
         server.server_close()
 
 

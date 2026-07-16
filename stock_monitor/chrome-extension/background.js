@@ -179,6 +179,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "SESSION_EVENT") {
+    handleSessionEvent(message.payload || {})
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((err) => {
+        console.warn("[background] session event failed:", err);
+        sendResponse({ ok: false, error: String(err) });
+      });
+    return true;
+  }
+
   if (message.type === "GET_STATUS") {
     sendResponse({
       backendUrl,
@@ -308,6 +318,29 @@ async function handleDebugDump(payload) {
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
     throw new Error(`Debug backend error ${resp.status}: ${text}`);
+  }
+  return resp.json().catch(() => ({}));
+}
+
+async function handleSessionEvent(payload) {
+  const base = backendUrl.replace(/\/$/, "");
+  let url = `${base}/session/event`;
+  let resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok && resp.status === 404) {
+    url = `${base}/api/session/event`;
+    resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`session event error ${resp.status}: ${text}`);
   }
   return resp.json().catch(() => ({}));
 }

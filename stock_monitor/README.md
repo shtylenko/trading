@@ -92,6 +92,34 @@ curl -s http://127.0.0.1:8787/session/today | python3 -m json.tool
 curl -s http://127.0.0.1:8787/sessions | python3 -m json.tool
 ```
 
+### Session event log (per day)
+
+Each day gets an append-only NDJSON timeline:
+
+```
+backend/data/sessions/YYYY-MM-DD/events.ndjson
+```
+
+| Event | When |
+|-------|------|
+| `receiver_start` / `receiver_stop` | Backend process start/stop |
+| `session_start` | First activity creates that day's SQLite session |
+| `session_end` | Explicit end (optional; client or day-roll) |
+| `screener_open` / `screener_close` | Gap'n'Go (configured) armed / disarmed |
+| `screener_push` | Accepted result batch |
+| `push_rejected` | Batch too large / session cap / wrong key |
+| `ticker_added` | Ticker first joins today's session |
+| `watchlist_added` / `watchlist_error` | Webull watchlist sync |
+
+```bash
+# Today's events
+curl -s 'http://127.0.0.1:8787/session/events' | python3 -m json.tool
+# Filter
+curl -s 'http://127.0.0.1:8787/session/events?date=2026-07-15&event=ticker_added' | python3 -m json.tool
+# On disk
+jq . backend/data/sessions/$(date +%F)/events.ndjson
+```
+
 ## Run
 
 ```bash
@@ -115,9 +143,11 @@ Load the unpacked extension from `chrome-extension/` (reload after updates).
 |--------|------|---------|
 | POST | `/push` | Closed candles → `data/captures/` |
 | POST | `/screener` | Armed screener rows → SQLite (requires `screener_key`) |
+| POST | `/session/event` | Lifecycle events (`screener_open`, `screener_close`, …) |
 | GET | `/config/screeners` | Enabled named screeners |
 | GET | `/session/today` | Today's session + tickers |
 | GET | `/session?date=YYYY-MM-DD` | Historical session |
+| GET | `/session/events?date=` | Read daily event log (optional `event=` filter) |
 | GET | `/sessions` | Recent session dates |
 | GET | `/health` | Liveness + DB path |
 | GET | `/` | Session web UI |

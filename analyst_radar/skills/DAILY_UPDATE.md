@@ -8,8 +8,8 @@ description: Run daily Analyst Radar update — search YouTube for analyst inter
 Trigger: User says "run analyst radar" or "update analyst radar" or any variant.
 **RULES: Work through every step in order. Do not skip steps. Do not ask questions unless blocked.**
 
-All commands run from: `/Users/shtylenko/Hermes/projects`
-Database: `/Users/shtylenko/Hermes/projects/trading/analyst_radar/data/analyst_radar.db`
+All commands run from: `/Users/shtylenko/Projects/trading`
+Database: `/Users/shtylenko/Projects/trading/analyst_radar/data/analyst_radar.db`
 RAPIDAPI_KEY is already in your environment via `~/.hermes/.env`.
 
 ---
@@ -310,6 +310,9 @@ If you discovered a shortcut, pitfall, or recurring pattern during this run,
 - "Stock Market Analyst", "Market Insider" (generic) — aggregator/commentary channels
 - Korean/Japanese/Telugu/Chinese channels — non-English content
 - "Pablo Farkuh", "Neto Invest" — non-English (Portuguese)
+- "Crypto Nutshell", "The Silver Market", "The Metal Moves", "The Metal Bar" — gold/silver clickbait aggregator channels, not primary source
+- "The Bullion Boss", "The Bullion Brief", "The Metals Wisdom", "Metal Sense", "Fine Metals", "Wise Metals Investor" — gold/silver aggregator channels, not primary source
+- "Beast Islamicstaatus" — non-finance, spam-like content
 - "Max Cents" — non-finance content creator
 - "Certain POV Media" — non-finance (politics/entertainment, not market analysis)
 - "InferVods" — gaming VODs

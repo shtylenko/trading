@@ -268,10 +268,13 @@ async function showScreenerShell(resp, backend) {
   const sample = s.sampleTickers || [];
   if (!armed) {
     $("screener-sample").textContent = "Open Gap'n'Go, or click Arm Gap'n'Go below";
+  } else if (sample.length) {
+    $("screener-sample").textContent = sample.join(" · ");
+  } else if (s.lastRowCount > 0) {
+    $("screener-sample").textContent = `last batch ${s.lastRowCount} rows (see console if not pushing)`;
   } else {
-    $("screener-sample").textContent = sample.length
-      ? sample.join(" · ")
-      : "armed — waiting for result rows…";
+    $("screener-sample").textContent =
+      "armed — waiting for result network rows (≤50 tickers). Toggle filters or re-select Gap'n'Go to refresh.";
   }
 
   // Session from last result or backend

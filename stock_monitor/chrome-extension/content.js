@@ -20,10 +20,18 @@ let screenerConfig = {
       name_match: ["Gap'n'Go", "gap'n'go", "gap n go", "gapngo", "gap-n-go"],
       name_match_normalized: ["gapngo", "gapngo", "gapngo", "gapngo", "gapngo"],
       webull_screener_id: null,
+      max_rows_per_push: 50,
+      max_session_tickers: 50,
       enabled: true,
     },
   ],
 };
+
+function maxRowsForScreener(key) {
+  const s = (screenerConfig.screeners || []).find((x) => x.key === key);
+  const n = Number(s?.max_rows_per_push);
+  return Number.isFinite(n) && n > 0 ? n : 50;
+}
 let screenerConfigLoadedAt = 0;
 
 // Arm state: only true when My Screeners + a configured screener is selected
@@ -405,7 +413,11 @@ async function loadScreenerConfig() {
     if (resp?.ok && resp.config) {
       screenerConfig = {
         require_my_screeners: resp.config.require_my_screeners !== false,
-        screeners: resp.config.screeners || screenerConfig.screeners,
+        screeners: (resp.config.screeners || screenerConfig.screeners).map((s) => ({
+          ...s,
+          max_rows_per_push: s.max_rows_per_push ?? 50,
+          max_session_tickers: s.max_session_tickers ?? 50,
+        })),
       };
       screenerConfigLoadedAt = Date.now();
       console.log("[stock-monitor] screener config loaded", screenerConfig.screeners.map((s) => s.name));
@@ -580,8 +592,7 @@ function handleScreenerRows(payload) {
     }
   }
 
-  // Drop list-of-screeners-style payloads (names only, few quote fields) when not armed
-  // and always drop when not armed on a configured selection.
+  // Drop when not armed on a configured selection.
   refreshScreenerArm();
   if (!screenerArmed || !activeScreener) {
     screenerDroppedBatches += 1;
@@ -596,6 +607,13 @@ function handleScreenerRows(payload) {
     return;
   }
 
+  // Never ingest while Stock Screener tab is active
+  if (screenerUiRegion === "stock") {
+    screenerDroppedBatches += 1;
+    console.warn("[stock-monitor] dropped batch: Stock Screener region active");
+    return;
+  }
+
   // If config has a bound webull id, require request to match when present
   const boundId = activeScreener.webull_screener_id;
   if (boundId && reqId && String(reqId) !== String(boundId)) {
@@ -603,6 +621,21 @@ function handleScreenerRows(payload) {
     console.log("[stock-monitor] dropped batch: request id mismatch", {
       boundId,
       reqId,
+    });
+    return;
+  }
+
+  const maxRows = maxRowsForScreener(activeScreener.key);
+  // Hard abort oversized *incoming* batches (wrong screener / quote dump)
+  if (rows.length > maxRows) {
+    screenerDroppedBatches += 1;
+    pendingScreenerRows = null;
+    pendingScreenerMeta = null;
+    console.warn("[stock-monitor] ABORTED oversized screener batch", {
+      rows: rows.length,
+      maxRows,
+      screener: activeScreener.key,
+      url: payload?.url,
     });
     return;
   }
@@ -619,7 +652,6 @@ function handleScreenerRows(payload) {
     }
     // Skip rows that look like screener definitions rather than stocks
     if (matchConfiguredScreener(ticker) || matchConfiguredScreener(r.name || "")) {
-      // name equals a screener name — not a stock
       continue;
     }
     if (batchSeen.has(ticker)) continue;
@@ -635,6 +667,11 @@ function handleScreenerRows(payload) {
   }
   if (normalized.length === 0) return;
 
+  if (normalized.length > maxRows) {
+    console.warn("[stock-monitor] ABORTED normalized batch too large", normalized.length, maxRows);
+    return;
+  }
+
   screenerLastRowCount = normalized.length;
   lastDataTs = Date.now();
   pendingScreenerMeta = {
@@ -642,8 +679,10 @@ function handleScreenerRows(payload) {
     screener_name: activeScreener.name,
   };
 
-  // Merge into pending batch (last write wins per ticker)
-  if (!pendingScreenerRows) pendingScreenerRows = new Map();
+  // IMPORTANT: do NOT merge unbounded history across unrelated network responses.
+  // That was a primary failure mode: many quote dumps accumulated into 100+ tickers
+  // while armed for Gap'n'Go. Keep only the latest valid batch.
+  pendingScreenerRows = new Map();
   for (const r of normalized) {
     pendingScreenerRows.set(r.ticker, r);
   }
@@ -665,11 +704,26 @@ async function flushScreenerPush() {
     pendingScreenerMeta = null;
     return;
   }
+  if (screenerUiRegion === "stock") {
+    console.warn("[stock-monitor] flush aborted: Stock Screener region");
+    pendingScreenerRows = null;
+    pendingScreenerMeta = null;
+    return;
+  }
+
   const rows = Array.from(pendingScreenerRows.values());
   const meta = pendingScreenerMeta || {
     screener_key: activeScreener.key,
     screener_name: activeScreener.name,
   };
+  const maxRows = maxRowsForScreener(meta.screener_key || activeScreener.key);
+  if (rows.length > maxRows) {
+    console.warn("[stock-monitor] flush ABORTED: rows", rows.length, "> max", maxRows);
+    pendingScreenerRows = null;
+    pendingScreenerMeta = null;
+    return;
+  }
+
   pendingScreenerRows = null;
   pendingScreenerMeta = null;
   lastScreenerPushAt = Date.now();

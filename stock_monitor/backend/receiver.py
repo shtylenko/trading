@@ -408,20 +408,55 @@ class Handler(BaseHTTPRequestHandler):
                 err = str(e)
             else:
                 err = None
+
+            # Live membership from Webull (MCP OAuth / OpenAPI)
+            live = webull_watchlist.fetch_live_watchlist_symbols(cfg)
+            live_set = set(live.get("symbols") or [])
+
+            # Session tickers for this date (for per-row lights)
+            sess = session_db.get_session(date, include_tickers=True)
+            session_tickers = [
+                t.get("ticker") for t in (sess or {}).get("tickers") or [] if t.get("ticker")
+            ]
+            membership = webull_watchlist.membership_for_tickers(
+                session_tickers,
+                live_symbols=live_set,
+                sync_rows=rows,
+            )
+
+            # MCP OAuth logged-in if tokens exist
+            has_mcp = False
+            try:
+                from pathlib import Path as _P
+                has_mcp = (_P(__file__).parent / "conf" / "webull_mcp_tokens.json").is_file()
+            except Exception:
+                pass
+
             self._send_json({
-                "ok": err is None,
+                "ok": err is None and live.get("ok", False),
                 "session_date": date,
                 "config": {
                     "enabled": cfg.get("enabled"),
                     "dry_run": cfg.get("dry_run"),
+                    "auth_mode": cfg.get("auth_mode"),
                     "watchlist_name": cfg.get("watchlist_name"),
                     "screener_keys": cfg.get("screener_keys"),
                     "has_credentials": bool(
                         os.environ.get("WEBULL_APP_KEY") and os.environ.get("WEBULL_APP_SECRET")
                     ),
+                    "has_mcp_tokens": has_mcp,
                 },
                 "sync": rows,
-                "error": err,
+                "live": {
+                    "ok": live.get("ok"),
+                    "watchlist_id": live.get("watchlist_id"),
+                    "watchlist_name": live.get("watchlist_name"),
+                    "symbols": live.get("symbols") or [],
+                    "count": len(live.get("symbols") or []),
+                    "error": live.get("error"),
+                },
+                "membership": membership,
+                "error": err or live.get("error"),
             })
             return
 
@@ -564,11 +599,74 @@ class Handler(BaseHTTPRequestHandler):
             }, 400)
             return
 
-        # Prefer canonical name from config
+        # Prefer canonical name + limits from config
+        max_rows = screener_config.max_rows_per_push(screener_key, cfg)
+        max_session = screener_config.max_session_tickers(screener_key, cfg)
         for s in screener_config.enabled_screeners(cfg):
             if s["key"] == screener_key:
                 screener_name = s["name"]
                 break
+
+        # Hard abort: oversized batch = almost certainly the wrong screener / bulk quotes
+        if len(rows) > max_rows:
+            print(
+                f"[receiver] REJECTED screener push from {tab_id}: "
+                f"{len(rows)} rows > max_rows_per_push={max_rows} for {screener_key!r} "
+                f"(likely wrong screener or quote dump)"
+            )
+            self._send_json({
+                "ok": False,
+                "error": "batch_too_large",
+                "message": (
+                    f"Rejected {len(rows)} rows for {screener_name or screener_key}: "
+                    f"max_rows_per_push={max_rows}. Wrong screener or bulk quote traffic."
+                ),
+                "received": len(rows),
+                "max_rows_per_push": max_rows,
+                "screener_key": screener_key,
+            }, 400)
+            return
+
+        # Optional session cap (unique tickers for the day under this screener)
+        try:
+            date = session_date or session_db.session_date_today()
+            existing = session_db.get_session(date, include_tickers=True)
+            existing_count = (existing or {}).get("ticker_count") or 0
+            # Count how many of this batch are new symbols
+            existing_set = {
+                (t.get("ticker") or "").upper()
+                for t in (existing or {}).get("tickers") or []
+            }
+            batch_syms = set()
+            for r in rows:
+                if isinstance(r, dict):
+                    sym = (r.get("ticker") or r.get("symbol") or "").upper().strip()
+                    if sym:
+                        batch_syms.add(sym)
+            new_count = len(batch_syms - existing_set)
+            if existing_count + new_count > max_session and new_count > 0:
+                # If already over or would blow past max with many new names, reject
+                if existing_count >= max_session or new_count > max_rows:
+                    print(
+                        f"[receiver] REJECTED screener push: session would exceed "
+                        f"max_session_tickers={max_session} "
+                        f"(have={existing_count}, new_in_batch={new_count})"
+                    )
+                    self._send_json({
+                        "ok": False,
+                        "error": "session_too_large",
+                        "message": (
+                            f"Session already has {existing_count} tickers; "
+                            f"batch adds ~{new_count} new. max_session_tickers={max_session}."
+                        ),
+                        "existing_count": existing_count,
+                        "new_in_batch": new_count,
+                        "max_session_tickers": max_session,
+                        "screener_key": screener_key,
+                    }, 400)
+                    return
+        except Exception as e:
+            print(f"[receiver] session size check skipped: {e}")
 
         print(
             f"[receiver] screener push: {len(rows)} rows from {tab_id} "

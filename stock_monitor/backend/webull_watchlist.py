@@ -41,7 +41,7 @@ DEFAULT_CONFIG = {
     # mcp_oauth  → Cloud MCP OAuth (browser login) — retail paper/live account
     # openapi_sdk → App key/secret OpenAPI SDK — developer sandbox/prod API
     "auth_mode": "mcp_oauth",
-    "watchlist_name": "Today's Gap'n'Go",
+    "watchlist_name": "Gap'n'Go",
     "screener_keys": ["gap-n-go"],
     "instrument_category": "US_STOCK",
     "reset_daily": True,
@@ -653,6 +653,100 @@ def list_sync_for_session(session_date: str) -> list[dict]:
             return [dict(r) for r in rows]
         finally:
             conn.close()
+
+
+def fetch_live_watchlist_symbols(cfg: dict | None = None) -> dict[str, Any]:
+    """
+    Fetch symbols currently on the configured Webull watchlist (live MCP/OpenAPI).
+
+    Returns:
+      {
+        ok, watchlist_name, watchlist_id, symbols: set-as-list,
+        error?
+      }
+    """
+    cfg = cfg or load_config()
+    name = str(cfg.get("watchlist_name") or "Gap'n'Go")
+    out: dict[str, Any] = {
+        "ok": False,
+        "watchlist_name": name,
+        "watchlist_id": None,
+        "symbols": [],
+        "error": None,
+    }
+    try:
+        client = make_client(cfg)
+        lists = client.get_watchlists()
+        wl = None
+        for w in lists:
+            if str(w.get("name") or "") == name:
+                wl = w
+                break
+        if not wl:
+            out["error"] = f"watchlist {name!r} not found"
+            return out
+        wid = str(wl.get("watchlist_id") or wl.get("id") or "")
+        out["watchlist_id"] = wid
+        instruments = client.get_instruments(wid) if wid else []
+        symbols = sorted({
+            str(i.get("symbol") or "").upper()
+            for i in instruments
+            if i.get("symbol")
+        })
+        out["symbols"] = symbols
+        out["ok"] = True
+        return out
+    except Exception as e:
+        out["error"] = str(e)
+        return out
+
+
+def membership_for_tickers(
+    tickers: list[str],
+    *,
+    live_symbols: set[str] | None = None,
+    sync_rows: list[dict] | None = None,
+) -> dict[str, dict]:
+    """
+    Per-ticker membership for the UI.
+
+    status:
+      on     — currently on the live Webull watchlist (green)
+      left   — was synced before, but not on the live list now (yellow)
+      off    — never successfully synced / unknown (yellow/dim)
+    """
+    live = {s.upper() for s in (live_symbols or set())}
+    sync_by = {}
+    for row in sync_rows or []:
+        t = (row.get("ticker") or "").upper()
+        if t:
+            sync_by[t] = row
+
+    result: dict[str, dict] = {}
+    for raw in tickers:
+        t = str(raw or "").upper().strip()
+        if not t:
+            continue
+        was_synced = bool(
+            sync_by.get(t)
+            and sync_by[t].get("status") in ("synced", "dry_run")
+        )
+        if t in live:
+            status = "on"
+            label = "on watchlist"
+        elif was_synced:
+            status = "left"
+            label = "left watchlist"
+        else:
+            status = "off"
+            label = "not on watchlist"
+        result[t] = {
+            "status": status,
+            "label": label,
+            "on_watchlist": t in live,
+            "was_synced": was_synced,
+        }
+    return result
 
 
 def set_client_factory(factory: Callable[[], WebullWatchlistClient] | None) -> None:

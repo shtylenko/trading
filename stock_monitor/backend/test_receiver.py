@@ -215,6 +215,9 @@ class ScreenerConfigTest(unittest.TestCase):
         self.assertTrue(pub["require_my_screeners"])
         keys = {s["key"] for s in pub["screeners"]}
         self.assertIn("gap-n-go", keys)
+        g = next(s for s in pub["screeners"] if s["key"] == "gap-n-go")
+        self.assertEqual(g["max_rows_per_push"], 50)
+        self.assertEqual(g["max_session_tickers"], 50)
 
     def test_match_name_gap_n_go(self):
         import screener_config
@@ -224,6 +227,11 @@ class ScreenerConfigTest(unittest.TestCase):
         m2 = screener_config.match_screener_name("gap n go")
         self.assertIsNotNone(m2)
         self.assertIsNone(screener_config.match_screener_name("Random Screener"))
+
+    def test_max_rows_helpers(self):
+        import screener_config
+        self.assertEqual(screener_config.max_rows_per_push("gap-n-go"), 50)
+        self.assertEqual(screener_config.max_session_tickers("gap-n-go"), 50)
 
 
 class WatchlistSyncTest(unittest.TestCase):

@@ -8,8 +8,8 @@ description: Scan recent analyst predictions for actionable trade ideas — cons
 Trigger: User says "trade ideas", "what should I trade", "any trade setups from analysts", etc.
 **RULES: Work through every step in order. Do not skip. Do not ask questions unless blocked.**
 
-All commands run from: `/Users/shtylenko/Hermes/projects`
-Database: `/Users/shtylenko/Hermes/projects/trading/analyst_radar/data/analyst_radar.db`
+All commands run from: `/Users/shtylenko/Projects/trading`
+Database: `/Users/shtylenko/Projects/trading/analyst_radar/data/analyst_radar.db`
 
 ---
 

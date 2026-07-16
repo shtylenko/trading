@@ -370,6 +370,16 @@ def upsert_screener_rows(
     }
 
 
+def _parse_iso_ts(iso: str | None) -> float | None:
+    if not iso:
+        return None
+    try:
+        s = str(iso).replace("Z", "+00:00")
+        return datetime.fromisoformat(s).timestamp()
+    except Exception:
+        return None
+
+
 def get_session(session_date: str | None = None, include_tickers: bool = True) -> dict[str, Any] | None:
     date = session_date or session_date_today()
     with _lock:
@@ -389,6 +399,7 @@ def get_session(session_date: str | None = None, include_tickers: bool = True) -
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
             }
+            last_push_at = row["updated_at"]
             if include_tickers:
                 cur.execute(
                     """
@@ -401,6 +412,8 @@ def get_session(session_date: str | None = None, include_tickers: bool = True) -
                     (row["id"],),
                 )
                 tickers = []
+                max_last_seen_ts = _parse_iso_ts(last_push_at) or 0.0
+                max_last_seen_iso = last_push_at
                 for t in cur.fetchall():
                     meta = None
                     if t["meta_json"]:
@@ -408,6 +421,11 @@ def get_session(session_date: str | None = None, include_tickers: bool = True) -
                             meta = json.loads(t["meta_json"])
                         except json.JSONDecodeError:
                             meta = t["meta_json"]
+                    ls = t["last_seen_at"]
+                    ls_ts = _parse_iso_ts(ls) or 0.0
+                    if ls_ts >= max_last_seen_ts:
+                        max_last_seen_ts = ls_ts
+                        max_last_seen_iso = ls or max_last_seen_iso
                     tickers.append({
                         "ticker": t["ticker"],
                         "ticker_id": t["ticker_id"],
@@ -421,6 +439,26 @@ def get_session(session_date: str | None = None, include_tickers: bool = True) -
                     })
                 result["tickers"] = tickers
                 result["ticker_count"] = len(tickers)
+                last_push_at = max_last_seen_iso or last_push_at
+
+            # How fresh is screener push traffic for this session?
+            # last_push_at = max(session.updated_at, any ticker last_seen_at)
+            result["last_push_at"] = last_push_at
+            push_ts = _parse_iso_ts(last_push_at)
+            if push_ts is not None:
+                from datetime import timezone as _tz
+                now_ts = datetime.now(tz=_tz.utc).timestamp()
+                age = max(0.0, now_ts - push_ts)
+                result["last_push_age_sec"] = int(age)
+                if age <= 45:
+                    result["push_status"] = "live"      # actively receiving
+                elif age <= 300:
+                    result["push_status"] = "recent"    # stopped recently
+                else:
+                    result["push_status"] = "idle"
+            else:
+                result["last_push_age_sec"] = None
+                result["push_status"] = "unknown"
             return result
         finally:
             conn.close()

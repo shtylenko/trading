@@ -193,32 +193,89 @@
 
   // --- Screener list detection ---
   const SCREENER_URL_HINTS = [
-    "screener", "scanner", "wlas", "stock/screener", "strategy",
-    "rank", "filter", "screen", "queryTicker", "tickerList",
+    "screener", "scanner", "stock/screener", "userscreener", "user-screener",
+    "wlas/screener", "strategy/screener", "screen/query", "queryTickerList",
   ];
+
+  // Hard block — never screener results
+  const SCREENER_URL_HARD_BLOCK = [
+    "kdata", "/charts/", "kline",
+    "agreement", "userauth", "userinfo", "message",
+  ];
+
+  // Gap'n'Go (and My Screeners) often hydrate results via quote/realtime with a
+  // *small* id list. Allow those when id-count ≤ MAX; reject bulk dumps.
+  const MAX_QUOTE_IDS_FOR_SCREENER = 50;
+
+  function countIdsInUrl(url) {
+    try {
+      const u = new URL(url, location.origin);
+      const raw =
+        u.searchParams.get("ids") ||
+        u.searchParams.get("tickerIds") ||
+        u.searchParams.get("tickerids") ||
+        "";
+      if (!raw) return 0;
+      return raw.split(",").map((s) => s.trim()).filter(Boolean).length;
+    } catch {
+      return 0;
+    }
+  }
 
   function urlLooksLikeScreener(url) {
     if (!url) return false;
     const u = String(url).toLowerCase();
-    // kline/chart endpoints are not screener
-    if (u.includes("kdata") || u.includes("/charts/") || u.includes("kline")) return false;
-    return SCREENER_URL_HINTS.some((h) => u.includes(h.toLowerCase()));
+    if (SCREENER_URL_HARD_BLOCK.some((h) => u.includes(h))) return false;
+    if (SCREENER_URL_HINTS.some((h) => u.includes(h.toLowerCase()))) return true;
+    // Small realtime quote batches on screener page = likely result hydration
+    if (
+      (u.includes("bgw/quote/realtime") || u.includes("quote/realtime") || u.includes("tickerrealtime")) &&
+      countIdsInUrl(url) > 0 &&
+      countIdsInUrl(url) <= MAX_QUOTE_IDS_FOR_SCREENER
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function urlIsBulkQuoteDump(url) {
+    if (!url) return false;
+    const u = String(url).toLowerCase();
+    if (SCREENER_URL_HARD_BLOCK.some((h) => u.includes(h))) return true;
+    const isQuote =
+      u.includes("bgw/quote/realtime") ||
+      u.includes("quote/realtime") ||
+      u.includes("tickerrealtime") ||
+      u.includes("getquote") ||
+      (u.includes("realtime") && u.includes("ids="));
+    if (!isQuote) return false;
+    const n = countIdsInUrl(url);
+    // No id list or huge list → not a Gap'n'Go-sized result set
+    if (n === 0) return true;
+    return n > MAX_QUOTE_IDS_FOR_SCREENER;
   }
 
   function looksLikeScreenerRow(item) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return false;
-    const hasSymbol =
-      item.symbol || item.disSymbol || item.tickerSymbol || item.code ||
-      (item.tickerId && (item.name || item.close != null || item.changeRatio != null));
-    if (!hasSymbol) return false;
-    // Prefer objects that also look quote-ish (avoid random entities)
     const keys = Object.keys(item).map((k) => k.toLowerCase());
+    // Reject legal/agreement/config objects that polluted captures
+    if (
+      keys.some((k) =>
+        k.includes("agreement") || k.includes("needsign") || k.includes("servicetype")
+      )
+    ) {
+      return false;
+    }
+    const hasSymbol =
+      item.symbol || item.disSymbol || item.tickerSymbol ||
+      (item.tickerId && (item.name || item.close != null || item.changeRatio != null || item.disSymbol));
+    // Do NOT use bare `code` — agreements use code: "PRIVACY01" etc.
+    if (!hasSymbol) return false;
     const quoteHints = [
       "close", "change", "volume", "turnover", "marketcap", "market_value",
       "changeratio", "pchg", "price", "name", "disname", "tickerid",
     ];
     const hits = quoteHints.filter((h) => keys.some((k) => k.includes(h))).length;
-    // symbol + tickerId alone is enough if URL already looks like screener
     return hits >= 1 || !!(item.tickerId && (item.symbol || item.disSymbol));
   }
 
@@ -252,8 +309,9 @@
 
   function normalizeScreenerRow(item) {
     if (!item || typeof item !== "object") return null;
+    // Prefer real equity symbols — never agreement "code" fields alone
     const tickerRaw =
-      item.symbol || item.disSymbol || item.tickerSymbol || item.code || item.ticker;
+      item.symbol || item.disSymbol || item.tickerSymbol || item.ticker;
     let ticker = tickerRaw != null ? String(tickerRaw).trim().toUpperCase() : null;
     const tickerId = item.tickerId != null ? String(item.tickerId) : (item.ticker_id != null ? String(item.ticker_id) : null);
     // If only numeric tickerId, keep it as ticker fallback (content may map later)
@@ -317,12 +375,21 @@
   function maybeExtractScreener(source, url, json, body) {
     try {
       if (!json) return;
+
+      // Never treat bulk realtime/quote dumps as screener results — this was the
+      // main path that polluted Gap'n'Go sessions with 100+ unrelated tickers.
+      if (urlIsBulkQuoteDump(url)) return;
+
       const urlHint = urlLooksLikeScreener(url);
-      // On screener pages, also try payload-only detection (API paths vary)
+      // On screener pages, allow heuristic payloads ONLY when the URL is not a quote dump.
+      // Prefer explicit screener URLs; do not accept arbitrary large arrays on /screener.
       const onScreenerPage = typeof location !== "undefined" &&
         String(location.pathname || "").toLowerCase().includes("/screener");
 
       if (!urlHint && !onScreenerPage) return;
+      // On screener page without URL hint: only accept small lists (≤50) to avoid
+      // absorbing market-wide payloads mis-detected as "screener".
+      // Prefer urlHint for full ingestion.
 
       const arrays = extractScreenerArrays(json);
       if (!arrays.length) return;
@@ -344,6 +411,20 @@
       // Avoid tiny false positives on non-screener pages unless URL strongly matches
       if (!urlHint && rows.length < 3) return;
 
+      // Hard safety: never emit huge batches from inject (backend also rejects)
+      // Gap'n'Go config max is 50; anything larger is wrong-screener traffic.
+      if (rows.length > 50) {
+        console.warn("[webull-monitor-inject] dropping oversized candidate batch", {
+          count: rows.length,
+          url: String(url).substring(0, 120),
+          urlHint,
+        });
+        return;
+      }
+
+      // Without a clear screener URL, require modest size (≤50 already) and page context
+      if (!urlHint && !onScreenerPage) return;
+
       const requestScreenerId = extractScreenerIdFromRequest(url, body);
 
       console.log("[webull-monitor-inject] screener rows", {
@@ -352,6 +433,7 @@
         url: String(url).substring(0, 120),
         sample: rows[0]?.ticker,
         request_screener_id: requestScreenerId,
+        urlHint,
       });
 
       post("SCREENER_ROWS", {

@@ -24,9 +24,14 @@ _DEFAULT = {
             "name_match": ["gap'n'go", "gap n go", "gapngo", "gap-n-go"],
             "enabled": True,
             "webull_screener_id": None,
+            "max_rows_per_push": 50,
+            "max_session_tickers": 50,
         }
     ],
 }
+
+DEFAULT_MAX_ROWS_PER_PUSH = 50
+DEFAULT_MAX_SESSION_TICKERS = 50
 
 
 def _normalize_match(s: str) -> str:
@@ -68,6 +73,35 @@ def enabled_screeners(config: dict[str, Any] | None = None) -> list[dict[str, An
     return out
 
 
+def screener_by_key(key: str, config: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    if not key:
+        return None
+    for s in enabled_screeners(config):
+        if s.get("key") == key:
+            return s
+    return None
+
+
+def max_rows_per_push(key: str, config: dict[str, Any] | None = None) -> int:
+    s = screener_by_key(key, config)
+    if not s:
+        return DEFAULT_MAX_ROWS_PER_PUSH
+    try:
+        return int(s.get("max_rows_per_push") or DEFAULT_MAX_ROWS_PER_PUSH)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_ROWS_PER_PUSH
+
+
+def max_session_tickers(key: str, config: dict[str, Any] | None = None) -> int:
+    s = screener_by_key(key, config)
+    if not s:
+        return DEFAULT_MAX_SESSION_TICKERS
+    try:
+        return int(s.get("max_session_tickers") or DEFAULT_MAX_SESSION_TICKERS)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_SESSION_TICKERS
+
+
 def public_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Payload for GET /config/screeners (extension + tools)."""
     cfg = config if config is not None else load_config()
@@ -83,6 +117,8 @@ def public_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
             "name_match": matches,
             "name_match_normalized": [_normalize_match(m) for m in matches],
             "webull_screener_id": s.get("webull_screener_id"),
+            "max_rows_per_push": max_rows_per_push(s["key"], cfg),
+            "max_session_tickers": max_session_tickers(s["key"], cfg),
             "enabled": True,
         })
     return {

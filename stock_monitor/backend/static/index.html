@@ -37,11 +37,16 @@
             <p id="detail-meta" class="muted">Select a session</p>
           </div>
           <div class="detail-stats">
+            <span id="push-status" class="pill push-idle" title="Screener push activity for this session">—</span>
             <span id="ticker-count" class="pill">0 tickers</span>
           </div>
         </div>
         <div class="toolbar">
           <input id="filter" type="search" placeholder="Filter ticker or name…" autocomplete="off" />
+          <div class="legend" title="Watchlist membership">
+            <span class="legend-item"><span class="wl-light green"></span> on watchlist</span>
+            <span class="legend-item"><span class="wl-light yellow"></span> left / not on list</span>
+          </div>
         </div>
         <div class="table-wrap">
           <table id="tickers-table">
@@ -50,13 +55,13 @@
                 <th class="col-sym">Ticker</th>
                 <th class="col-name">Name</th>
                 <th class="col-scr">Screener</th>
-                <th class="col-wl">Watchlist</th>
+                <th class="col-light">WL</th>
                 <th class="col-time">First seen</th>
                 <th class="col-time">Last seen</th>
               </tr>
             </thead>
             <tbody id="tickers-body">
-              <tr class="empty-row"><td colspan="6">Select a session to view tickers</td></tr>
+              <tr class="empty-row"><td colspan="7">Select a session to view tickers</td></tr>
             </tbody>
           </table>
         </div>

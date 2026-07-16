@@ -2,7 +2,7 @@
   "enabled": true,
   "dry_run": false,
   "auth_mode": "mcp_oauth",
-  "watchlist_name": "Today's Gap'n'Go",
+  "watchlist_name": "Gap'n'Go",
   "screener_keys": ["gap-n-go"],
   "instrument_category": "US_STOCK",
   "reset_daily": true,

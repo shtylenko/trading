@@ -445,17 +445,55 @@ def get_watchlist_instruments(watchlist_id: str) -> list[dict]:
     return _as_instrument_list(data)
 
 
-def add_watchlist_instruments(watchlist_id: str, instruments: list[dict]) -> Any:
+def add_watchlist_instruments(
+    watchlist_id: str,
+    instruments: list[dict] | None = None,
+    *,
+    symbols: list[str] | None = None,
+    category: str = "US_STOCK",
+) -> Any:
+    """
+    Cloud MCP schema:
+      { watchlist_id, symbols: ["AAPL", ...], category: "US_STOCK" }
+    Also accepts OpenAPI-style instruments=[{symbol, category}, ...] for compatibility.
+    """
+    syms = list(symbols or [])
+    if instruments:
+        for inst in instruments:
+            if isinstance(inst, dict) and inst.get("symbol"):
+                syms.append(str(inst["symbol"]).upper())
+            elif isinstance(inst, str):
+                syms.append(inst.upper())
+    syms = sorted({s.upper().strip() for s in syms if s and str(s).strip()})
+    if not syms:
+        return {"ok": True, "added": []}
     return call_tool(
         "add_watchlist_instruments",
-        {"watchlist_id": watchlist_id, "instruments": instruments},
+        {"watchlist_id": watchlist_id, "symbols": syms, "category": category},
     )
 
 
-def remove_watchlist_instruments(watchlist_id: str, instruments: list[dict]) -> Any:
+def remove_watchlist_instruments(
+    watchlist_id: str,
+    instruments: list[dict] | None = None,
+    *,
+    symbols: list[str] | None = None,
+    category: str = "US_STOCK",
+) -> Any:
+    """Cloud MCP schema: { watchlist_id, symbols: [...], category }."""
+    syms = list(symbols or [])
+    if instruments:
+        for inst in instruments:
+            if isinstance(inst, dict) and inst.get("symbol"):
+                syms.append(str(inst["symbol"]).upper())
+            elif isinstance(inst, str):
+                syms.append(inst.upper())
+    syms = sorted({s.upper().strip() for s in syms if s and str(s).strip()})
+    if not syms:
+        return {"ok": True, "removed": []}
     return call_tool(
         "remove_watchlist_instruments",
-        {"watchlist_id": watchlist_id, "instruments": instruments},
+        {"watchlist_id": watchlist_id, "symbols": syms, "category": category},
     )
 
 
@@ -512,15 +550,21 @@ class WebullMcpWatchlistClient:
         return get_watchlist_instruments(watchlist_id)
 
     def add_instruments(self, watchlist_id: str, instruments: list[dict]) -> Any:
+        cat = "US_STOCK"
+        if instruments and isinstance(instruments[0], dict):
+            cat = instruments[0].get("category") or cat
         self._calls.append((
             "add_watchlist_instruments",
             {"watchlist_id": watchlist_id, "instruments": instruments},
         ))
-        return add_watchlist_instruments(watchlist_id, instruments)
+        return add_watchlist_instruments(watchlist_id, instruments, category=cat)
 
     def remove_instruments(self, watchlist_id: str, instruments: list[dict]) -> Any:
+        cat = "US_STOCK"
+        if instruments and isinstance(instruments[0], dict):
+            cat = instruments[0].get("category") or cat
         self._calls.append((
             "remove_watchlist_instruments",
             {"watchlist_id": watchlist_id, "instruments": instruments},
         ))
-        return remove_watchlist_instruments(watchlist_id, instruments)
+        return remove_watchlist_instruments(watchlist_id, instruments, category=cat)

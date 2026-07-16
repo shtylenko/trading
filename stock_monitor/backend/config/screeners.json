@@ -13,7 +13,9 @@
       ],
       "enabled": true,
       "webull_screener_id": null,
-      "notes": "My Screeners → select Gap'n'Go before data is ingested"
+      "max_rows_per_push": 50,
+      "max_session_tickers": 50,
+      "notes": "My Screeners → select Gap'n'Go only. Batches > max_rows_per_push are rejected (wrong screener / bulk quotes)."
     }
   ]
 }

@@ -14,3 +14,5 @@
 | size.dollar_risk | engine | sim-constraint | shares from risk_budget / stop_distance | 0.1.0 |
 | manage.no_reentry_after_stop | MANAGE §1 | process | engine stop → flat; no re-entry same setup | 0.2.0 |
 | manage.never_abandon | MANAGE loop | process | keep reveal/resolve/log while armed or in position until flat/STAND_DOWN/STATUS end | 0.3.0 |
+| entry.breakout_quality | ENTER_CLOSE gate | direct | green close above handle high AND (rvol null or ≥1.3); else OBSERVE/ARM only | 0.4.0 |
+| plan.handle_length_hard | ENTRY checklist §3 | operationalization | handle 3–15 sessions hard fail | 0.4.0 |

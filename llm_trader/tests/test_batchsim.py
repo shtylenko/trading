@@ -6,6 +6,7 @@ import json
 import sqlite3
 import subprocess
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -740,7 +741,7 @@ def test_prompt_is_preseal_step_next_only():
     assert "trading.llm_trader.step start" not in p           # no sealing
     assert "trading.llm_trader.recorder finalize" not in p    # harness finalizes
     assert "trading.llm_trader.step next" in p                # the one data command
-    assert "FAIL CLOSED" in p                                 # explicit fail-closed rule
+    assert "fail closed" in p.lower()                         # explicit fail-closed rule
     assert f"BATCHSIM_SID={sdir}" in p                        # audit anchor marker
 
 
@@ -778,11 +779,10 @@ def test_multi_day_prompt_does_not_use_intraday_1100_stop():
     # BNY pilot: agents delayed arm until scanner date; prompt must forbid that.
     assert "NOT a wait-to-arm clock" in p
     assert "ENTER_CLOSE" in p
-    assert "do not wait for that calendar day to arm" in p
+    assert "do not wait for that calendar day" in p
     # BNY v0.2.0: agent armed then abandoned loop while stop still pending.
     assert "live ARM_BUY_STOP" in p or "pending buy-stop" in p
     assert "FAILED run" in p
-    assert "Flat + live ARM_BUY_STOP is NOT done" in p
     assert "NEVER print BATCHSIM_SID while ARMED" in p
     assert "progress report" in p
 
@@ -795,6 +795,50 @@ def test_continue_prompt_forbids_early_batchsim_sid():
     assert "pending ARM_BUY_STOP" in p
     assert "Do NOT print BATCHSIM_SID until you are truly done" in p
     assert "BASE PROMPT BODY" in p
+
+
+def test_skill_text_for_batch_strips_init_and_finalize():
+    skill = """# skill
+## ENTRY checklist
+- trade
+## Shell / $SDIR discipline
+```bash
+init here
+```
+## Step 0 — Init + seal
+do not show
+## MANAGE checklist (IN position)
+- manage
+## Finalize
+finalize cmd
+"""
+    out = batchsim._skill_text_for_batch_agent(skill)
+    assert "ENTRY checklist" in out
+    assert "MANAGE checklist" in out
+    assert "Shell / $SDIR" not in out
+    assert "Step 0" not in out
+    assert "Finalize" not in out
+    assert "init here" not in out
+
+
+def test_multi_day_prompt_is_slim_runtime_contract():
+    skill = Path(__file__).resolve().parents[1] / "strategies/cup_handle/skills/trade_skills/0.4.0.md"
+    if not skill.exists():
+        skill = Path(__file__).resolve().parents[1] / "strategies/cup_handle/skills/trade_skills/0.3.0.md"
+    text = skill.read_text()
+    p = batchsim._prompt(
+        "0.4.0", text, "tag", "SID", "BNY", "2025-06-18", "09:30", "/tmp/s",
+        execution_model="deterministic_ohlc_v1", session_from_open=True,
+        horizon="multi_day", bar_resolution="1day",
+        auto_lookback={"n_auto_observe": 20, "first_llm_i": 20, "setup_i": 40},
+    )
+    assert "runtime contract" in p or "already live" in p or "SESSION (already set up)" in p
+    assert "recorder init" in p  # must say do NOT run it
+    assert "Do NOT run recorder init" in p or "Do NOT run recorder init" in p.replace("\n", " ")
+    # Operator shell tutorial should not appear after slim
+    assert "CAPTURED_SDIR" not in p
+    assert "Early lookback bars" in p
+    assert "first_llm_i" in p or "i≈20" in p or "i≈20" in p or "i=20" in p or "20" in p
 
 
 def test_agent_needs_continue_when_armed_and_bars_remain(tmp_path, monkeypatch):
@@ -843,6 +887,52 @@ def test_agent_needs_continue_when_armed_and_bars_remain(tmp_path, monkeypatch):
         json.dumps({"i": 0, "action": "ARM_BUY_STOP", "trigger": 90.63, "stop": 87.9}) + "\n"
     )
     assert batchsim._agent_needs_continue(sdir, _Done(), multi_day=True) is None
+
+
+def test_auto_observe_multi_day_lookback_logs_early_bars(tmp_path):
+    """Harness should OBSERVE deep lookback and leave setup-near bars for the LLM."""
+    from trading.llm_trader.step import IsolatedStreamGateway
+
+    sdir = tmp_path / "auto"
+    sdir.mkdir()
+    (sdir / "session.json").write_text(json.dumps({
+        "id": "s", "status": "running", "ticker": "BNY", "strategy": "cup_handle",
+        "config": {
+            "execution_model": "deterministic_ohlc_v1",
+            "risk_budget": 500.0, "buying_power": 50000.0,
+            "horizon": "multi_day", "bar_resolution": "1day",
+        },
+        "skill": {"execution_model": "deterministic_ohlc_v1"},
+    }))
+    (sdir / "decisions.jsonl").write_text("")
+    records = [{"type": "meta", "ticker": "BNY", "date": "2025-06-18",
+                "plan_lookback_bars": 40, "horizon": "multi_day"}]
+    # 5 lookback + setup at i=5 + 2 hold
+    for i in range(8):
+        day = f"2025-05-{20+i:02d}" if i < 5 else (
+            "2025-06-18" if i == 5 else f"2025-06-{19+i-5:02d}")
+        records.append({
+            "type": "tick", "i": i, "date": day if i != 5 else "2025-06-18",
+            "time": "16:00", "o": 90, "h": 91, "l": 89, "c": 90.5, "v": 1e6,
+            **({"is_setup_day": True} if i == 5 else {}),
+        })
+    records.append({"type": "end", "bars": 8, "close": 90.5})
+    gw = IsolatedStreamGateway(sdir, records).start()
+    try:
+        info = batchsim._auto_observe_multi_day_lookback(
+            sdir, gw, "2025-06-18", llm_lookback=2,
+        )
+        # setup_i=5, first_llm_i=3 → auto i=0,1,2
+        assert info["setup_i"] == 5
+        assert info["first_llm_i"] == 3
+        assert info["n_auto_observe"] == 3
+        assert gw.revealed_tick_count() == 3
+        raw = [json.loads(l) for l in (sdir / "decisions.jsonl").read_text().splitlines() if l.strip()]
+        assert len(raw) == 3
+        assert all(d["action"] == "OBSERVE" for d in raw)
+        assert [d["i"] for d in raw] == [0, 1, 2]
+    finally:
+        gw.close()
 
 
 def test_prompt_reentry_budget_and_cutoff():

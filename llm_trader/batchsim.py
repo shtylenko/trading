@@ -283,6 +283,17 @@ _LIVE_PLAN_ACTIONS = frozenset({
 # is terminal or this budget is exhausted.
 _DEFAULT_MAX_CONTINUES_MULTI_DAY = 5
 _DEFAULT_MAX_CONTINUES_INTRADAY = 0
+# Bars immediately before the scanner setup day that the LLM still walks manually
+# (plan/arm window). Earlier lookback is harness auto-OBSERVE to cut turn count.
+_DEFAULT_MULTI_DAY_LLM_LOOKBACK = 20
+
+# Operator-only skill sections that confuse batch agents (session is already live).
+_SKILL_DROP_SECTION_HEADERS = (
+    "## Shell / $SDIR discipline",
+    "## Step 0 — Init + seal",
+    "## Finalize",
+    "## Step 0",
+)
 
 
 def _text_out_of_credits(text: Optional[str]) -> bool:
@@ -428,13 +439,106 @@ def _archived_skill(version: str, strategy_id: str = "warrior") -> Path:
     return p
 
 
+def _skill_text_for_batch_agent(skill_text: str) -> str:
+    """Drop operator/init/finalize sections that batch agents must not re-run.
+
+    Batch hermes sessions are already init+sealed; shell tutorials waste context and
+    encourage re-init (look-ahead / void). Keep checklists, actions, and manage rules.
+    """
+    text = skill_text or ""
+    # Drop the "Run from monorepo root / .env" operator block (often before Step 0).
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    skipping = False
+    skip_until_header = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            if any(stripped.startswith(h) or stripped == h for h in _SKILL_DROP_SECTION_HEADERS):
+                skipping = True
+                skip_until_header = True
+                continue
+            if skip_until_header:
+                skipping = False
+                skip_until_header = False
+        if skipping:
+            continue
+        # Drop standalone env-load / import-check operator blurbs.
+        if stripped.startswith("Run from the **monorepo root**") or stripped.startswith(
+            "Run from the monorepo root"
+        ):
+            skipping = True
+            skip_until_header = True
+            continue
+        if skipping and stripped.startswith("```"):
+            # skip fenced block after env blurb — handled by section drop usually
+            pass
+        out.append(line)
+    cleaned = "".join(out)
+    # Collapse excessive blank lines after drops.
+    while "\n\n\n\n" in cleaned:
+        cleaned = cleaned.replace("\n\n\n\n", "\n\n\n")
+    return cleaned.strip() + "\n"
+
+
+def _auto_observe_multi_day_lookback(
+    sdir: Path,
+    gateway: "step.IsolatedStreamGateway",
+    setup_date: str,
+    *,
+    llm_lookback: int = _DEFAULT_MULTI_DAY_LLM_LOOKBACK,
+) -> dict:
+    """Harness-advance early lookback bars with OBSERVE so the LLM starts nearer setup.
+
+    Leaves the last ``llm_lookback`` bars before the setup day (and everything after)
+    for the agent to plan/arm/manage. Returns summary stats for the prompt.
+    """
+    import io
+
+    sdir = Path(sdir)
+    setup_i = gateway.setup_bar_index(setup_date)
+    first_llm_i = max(0, int(setup_i) - int(llm_lookback))
+    n_auto = 0
+    # Reveal+log until the next tick to reveal is first_llm_i.
+    while gateway.revealed_tick_count() < first_llm_i:
+        buf = io.StringIO()
+        rc = step.next_(sdir, out=buf)
+        if rc != 0:
+            break
+        # Last revealed tick is the one we must log.
+        meta, ticks, _end = recorder._parse_stream(sdir / "stream.jsonl")
+        if not ticks:
+            break
+        tick = ticks[-1]
+        i = int(tick["i"])
+        hhmm = tick.get("time") or "16:00"
+        date_s = tick.get("date") or ""
+        recorder.log(sdir, {
+            "i": i,
+            "time": hhmm if len(str(hhmm)) == 5 else "16:00",
+            "action": "OBSERVE",
+            "thought": (
+                f"harness auto-observe lookback i={i} date={date_s} "
+                f"(LLM window starts at i={first_llm_i}; setup_i={setup_i})"
+            ),
+        })
+        n_auto += 1
+    return {
+        "n_auto_observe": n_auto,
+        "first_llm_i": first_llm_i,
+        "setup_i": setup_i,
+        "llm_lookback": int(llm_lookback),
+    }
+
+
 def _prompt(version: str, skill_text: str, tag: str, session_id: str,
             ticker: str, date: str, time_et: Optional[str], sdir: str,
             max_reentries: int = 1, trade_until: Optional[str] = None,
             execution_model: str = "reported_fill_v1",
             session_from_open: bool = False,
             horizon: str = "intraday",
-            bar_resolution: str = "1min") -> str:
+            bar_resolution: str = "1min",
+            auto_lookback: Optional[dict] = None) -> str:
     """The per-setup task handed to a headless hermes agent.
 
     The harness has ALREADY created the session and holds the sealed day in a private
@@ -449,18 +553,26 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
     multi_day = (horizon or "").lower() in ("multi_day", "multiday", "swing") or (
         bar_resolution or ""
     ).lower() in ("1day", "daily")
+    skill_for_agent = _skill_text_for_batch_agent(skill_text)
+    auto_lb = auto_lookback or {}
     # The early-stop rule (condition b) is set by the run's §C re-entry BUDGET
     # (max_reentries) and an optional cutoff time (trade_until). Budget 1 + no cutoff
     # reproduces the classic single-re-entry behaviour exactly.
     if multi_day:
         # Daily bars all print time "16:00" — NEVER use clock-of-day cutoffs here.
-        # Agent must walk plan lookback → setup day → hold window until STATUS end
-        # (or a terminal STAND_DOWN after the plan is fully resolved).
-        # Critical: "flat" alone is NOT done — a live ARM_BUY_STOP is flat + pending.
+        auto_note = ""
+        if auto_lb.get("n_auto_observe"):
+            auto_note = (
+                f" Early lookback bars i=0..{int(auto_lb['first_llm_i']) - 1} were already "
+                f"revealed and logged as OBSERVE by the harness "
+                f"({auto_lb['n_auto_observe']} bars); your first `step next` continues at "
+                f"i≈{auto_lb['first_llm_i']} (setup day i={auto_lb.get('setup_i')}). "
+            )
         done_rule = (
             "This is a MULTI-DAY swing run (one bar = one trading day; time is usually 16:00). "
             "Do NOT stop because the clock says after 11:00 — that rule is for intraday only. "
-            "NEVER stop merely because you are flat: a live ARM_BUY_STOP / pending buy-stop "
+            + auto_note
+            + "NEVER stop merely because you are flat: a live ARM_BUY_STOP / pending buy-stop "
             "means you are NOT done — keep `step next` + `resolve` + log every bar until "
             "the order fills, you CANCEL_ENTRY, or the stream ends. "
             "While IN a position, keep going every bar (SCALE_LIMIT / SET_STOP / OBSERVE / "
@@ -472,12 +584,11 @@ def _prompt(version: str, skill_text: str, tag: str, session_id: str,
             "(3) either you logged STAND_DOWN for a terminal invalidation, OR you finished "
             "the plan after a round-trip and will not re-enter, OR `step next` prints STATUS end. "
             "You must at least reach the scanner setup date before standing down for "
-            "'no setup' — early abort mid-lookback is a failed run. "
+            "'no setup'. "
             "The scanner setup date is NOT a wait-to-arm clock: if the ENTRY checklist "
-            "passes during lookback, ARM_BUY_STOP (or ENTER_CLOSE if already broken) "
-            "immediately — do not delay arming just because the date has not arrived. "
-            "ARM_BUY_STOP only fills on later bars; if this bar already closed above the "
-            "handle high, use ENTER_CLOSE instead of arming a stop that already traded through. "
+            "passes, ARM_BUY_STOP (or ENTER_CLOSE only when the skill's breakout quality "
+            "gates pass) immediately. "
+            "ARM_BUY_STOP only fills on later bars. "
             "Abandoning the loop after ARM while still waiting for a fill is a FAILED run."
         )
     elif session_from_open:
@@ -529,9 +640,8 @@ Repeat 1→2.'''
     if session_from_open and multi_day:
         setup_line = (
             f"Setup to trade (scanner-selected ticker/date): ticker={ticker}  date={date}. "
-            f"The date is the setup reference day in a multi-day daily stream "
-            f"(lookback precedes it). Arm as soon as the skill checklist passes — "
-            f"do not wait for that calendar day to arm."
+            f"The date is the setup reference day in a multi-day daily stream. "
+            f"Arm when the skill checklist passes — do not wait for that calendar day."
         )
     elif session_from_open:
         setup_line = f"Setup to trade (scanner-selected ticker/date only): ticker={ticker}  date={date}"
@@ -541,75 +651,35 @@ Repeat 1→2.'''
         )
     return f"""You are executing ONE trade simulation as an automated backtest.
 
-Your trading rules are provided IN FULL below, between the BEGIN/END markers — they
-are already in your context. Follow them EXACTLY.
+Trading rules (runtime contract only — session is already live; do NOT init/start/finalize):
 
 ===== BEGIN TRADE_SIMULATOR SKILL (v{version}) =====
-{skill_text}
+{skill_for_agent}
 ===== END TRADE_SIMULATOR SKILL =====
 
 {setup_line}
 Batch tag: {tag}   Session ID: {session_id}   pinned skill version: {version}
 
-=== YOUR SESSION IS ALREADY SET UP — DO NOT CREATE OR START ONE ===
-
-The session has already been initialized for you. Use this exact path
-(it is fixed for the whole run; copy it literally into every command):
-
+=== SESSION (already set up) ===
 SDIR="{sdir}"
+Do NOT run recorder init, step start, or recorder finalize.
+Your ONLY price window is `step next` (one bar per call). No replay/fetch/marketdata.
 
-There is nothing to initialize, seal, or start. The market's future is held only by
-the harness gateway: there is no reachable data file, no command that fetches bars,
-and no API that accepts an index or returns more than one tick. Your ONLY window into
-price is `step next`.
-
-=== THE TRADING LOOP — THESE ARE THE ONLY COMMANDS YOU RUN ===
-
+=== LOOP (only commands) ===
 {loop_commands}
 
-STOP as soon as EITHER of these is true — do NOT keep revealing bars past
-the stop point:
-  (a) `step next` prints `STATUS end` (the stream is over), OR
-  (b) you are truly DONE trading this setup — {done_rule}
-Once you stop, the harness finalizes the run for you; do NOT run finalize yourself. As
-the very last thing you output, print exactly this line so the audit can find your run:
-BATCHSIM_SID={sdir}
+=== STOP when ===
+  (a) `step next` prints `STATUS end`, OR
+  (b) you are truly DONE — {done_rule}
 
-CRITICAL — when you may print BATCHSIM_SID:
-  - ONLY after you are truly done (conditions a/b above).
-  - NEVER print BATCHSIM_SID while ARMED (live buy-stop) or IN a position.
-  - NEVER write a "progress report / in progress / need additional turns" and exit —
-    that fails the run. Keep calling step next until done, or the harness will
-    re-invoke you (continue) — but you must not self-stop mid-plan.
+Then print exactly: BATCHSIM_SID={sdir}
+NEVER print BATCHSIM_SID while ARMED or IN a position.
+NEVER exit with a "progress report / need more turns".
 
-WHY THIS MATTERS: every `step next` is a real model turn. Walking the whole day bar-by-bar
-after you are already flat and done wastes the run (and can time it out) for zero value —
-the setup's later bars change nothing once you have no position, no pending entry, and no
-permitted re-entry left to hunt. While you HOLD a position, OR wait on an armed buy-stop /
-pending entry, OR are flat but still have §C re-entry budget and the cutoff time (if any)
-has not passed — you MUST keep going. Flat + live ARM_BUY_STOP is NOT done. Flat + open
-shares is impossible; open shares means KEEP managing. The early stop only applies once
-you have nothing left to do (no position, no pending entry, no remaining re-entry budget).
-
-=== ABSOLUTE HARD RULES — ANY VIOLATION VOIDS THE ENTIRE RUN (audit detects this) ===
-
-- Your ONLY data source is `step next` against the SDIR above. NEVER run `replay`,
-  `fetch_bars`, `fetch_minute_bars`, anything under `trading.marketdata`, or any command
-  that reads the day's data another way. (These will fail anyway — you have no data
-  credentials — and attempting them voids the run.)
-- Do NOT run `recorder init`, `step start`, or `recorder finalize`. The session is
-  already sealed and the harness finalizes it; there is nothing for you to set up or
-  close, and re-sealing is look-ahead.
-- NEVER place the literal strings "_sealed.jsonl" or "_step.json" (or paths containing
-  them) into ANY command. Do not read, cat, ls, mv, or open private/session-control
-  files. Everything you need comes from `step next` and the stream it reveals.
-- Do NOT read, cat, or open ANY skill file — the rules are inlined above.
-- FAIL CLOSED: if anything looks wrong — you lose the path, a command errors, the state
-  seems inconsistent — STOP and report it. Do NOT try to recover by re-initializing,
-  re-starting, forcing, or inspecting the data another way. An aborted run is fine; a
-  creative workaround voids the run.
-
-Copy the command text literally. The audit scans every tool-call command you executed.
+=== VOID if you ===
+- call replay / fetch_bars / marketdata, or open `_sealed.jsonl` / `_step.json`
+- re-init / re-seal / finalize yourself
+- invent recovery paths when a command fails (fail closed instead)
 """
 
 
@@ -734,6 +804,14 @@ def _preseal(work: dict, skill_path: Path, version: str, session_id: str) -> tup
             db=work.get("db") or ENTRIES_DB,
             strategy=strategy_id,
         )
+        # Multi-day: harness auto-OBSERVEs deep lookback so the agent starts nearer
+        # the plan/arm window (cuts ~20–40 LLM turns of pure narration).
+        multi_day = bool(work.get("multi_day"))
+        if multi_day:
+            llm_lb = int(work.get("llm_lookback", _DEFAULT_MULTI_DAY_LLM_LOOKBACK))
+            work["auto_lookback"] = _auto_observe_multi_day_lookback(
+                sdir, gateway, work["date"], llm_lookback=llm_lb,
+            )
         return sdir, gateway
     except Exception:
         shutil.rmtree(staging_root, ignore_errors=True)
@@ -1329,7 +1407,8 @@ def run(
                                   execution_model=execution_model,
                                   session_from_open=w["session_from_open"],
                                   horizon=w.get("horizon") or "intraday",
-                                  bar_resolution=w.get("bar_resolution") or "1min")
+                                  bar_resolution=w.get("bar_resolution") or "1min",
+                                  auto_lookback=w.get("auto_lookback"))
         print(json.dumps([_run_one(w) for w in work], indent=2))
         return tag
 
@@ -1349,7 +1428,8 @@ def run(
                                   execution_model=execution_model,
                                   session_from_open=w["session_from_open"],
                                   horizon=w.get("horizon") or "intraday",
-                                  bar_resolution=w.get("bar_resolution") or "1min")
+                                  bar_resolution=w.get("bar_resolution") or "1min",
+                                  auto_lookback=w.get("auto_lookback"))
             ready.append(w)
         except Exception as e:  # noqa: BLE001 — one bad setup shouldn't sink the batch
             print(f"  [preseal-err] {w['item']}: {e}", file=sys.stderr)

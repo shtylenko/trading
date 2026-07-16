@@ -328,6 +328,22 @@ class IsolatedStreamGateway:
         with self._state_lock:
             return self._cursor
 
+    def setup_bar_index(self, setup_date: str) -> int:
+        """Index of the scanner setup day in the sealed multi-day stream (owner-only)."""
+        with self._state_lock:
+            for t in self._ticks:
+                if t.get("is_setup_day"):
+                    return int(t["i"])
+            for t in self._ticks:
+                if t.get("date") == setup_date:
+                    return int(t["i"])
+            # Fallback: plan_lookback_bars after stream start (classic cup_handle shape).
+            try:
+                pl = int(self._meta.get("plan_lookback_bars") or 40)
+            except (TypeError, ValueError):
+                pl = 40
+            return min(pl, max(0, len(self._ticks) - 1))
+
     def publish(self) -> None:
         """Owner-only finalization: publish the full stream after the agent exits."""
         with self._state_lock, file_lock(_lock_path(self.sdir)):

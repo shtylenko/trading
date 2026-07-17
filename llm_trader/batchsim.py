@@ -55,7 +55,7 @@ import sys
 import tempfile
 from math import floor
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -395,6 +395,10 @@ def _research_universe_feature(row: dict) -> Optional[dict]:
     required_interval = {"start", "end", "as_of", "source", "symbols_sha256"}
     if not required_interval.issubset(interval):
         return None
+    if provenance.get("source_quality", "unqualified") not in {
+        "primary_or_licensed", "public_pit_unverified", "unqualified",
+    }:
+        return None
     return provenance
 
 
@@ -443,6 +447,7 @@ def research_provenance_for_setups(db: Path, setups: list[dict]) -> dict:
             p.get("manifest_sha256"),
             p.get("manifest_name"),
             p.get("membership_basis"),
+            p.get("source_quality", "unqualified"),
         )
         for p in provenance_rows
     }
@@ -451,7 +456,7 @@ def research_provenance_for_setups(db: Path, setups: list[dict]) -> dict:
             "selected cup_handle setups span multiple research universe manifests; "
             "build a holdout from one immutable PIT scan corpus"
         )
-    manifest_sha256, manifest_name, membership_basis = identities.pop()
+    manifest_sha256, manifest_name, membership_basis, source_quality = identities.pop()
     intervals = {
         json.dumps(p["interval"], sort_keys=True, separators=(",", ":"))
         for p in provenance_rows
@@ -459,6 +464,7 @@ def research_provenance_for_setups(db: Path, setups: list[dict]) -> dict:
     return {
         "schema_version": 1,
         "membership_basis": membership_basis,
+        "source_quality": source_quality,
         "manifest_name": manifest_name,
         "manifest_sha256": manifest_sha256,
         "intervals": [json.loads(value) for value in sorted(intervals)],
@@ -471,6 +477,8 @@ def build_set(
     exclude: Optional[set] = None, unique_ticker: bool = False,
     causal_only: bool = False, require_exact: bool = False,
     require_research_provenance: bool = False,
+    start_date: Optional[date] = None, end_date: Optional[date] = None,
+    all_rows: bool = False,
 ) -> list[dict]:
     """Stratified, deterministic sample of ~``n`` setups from ``entries.db``.
 
@@ -492,17 +500,27 @@ def build_set(
     legacy labels and incomplete scanner rows instead of allowing them to turn into
     agent stand-downs or invalid pseudo-results later in the batch.
 
+    ``start_date`` and ``end_date`` bound the setup bar inclusively, allowing an
+    immutable chronological development/holdout split. ``all_rows`` returns every
+    eligible, deduplicated row in that bounded pool rather than a sample.
+
     ``require_exact`` makes the request a hard contract.  The CLI enables it so a
     file called ``testset_10`` can never silently contain nine rows because the
     eligible (or unique-ticker) pool was too small.
     """
     if n < 1:
         raise ValueError("testset size n must be positive")
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise ValueError("start_date must be on or before end_date")
     exclude = exclude or set()
     with sqlite3.connect(str(db)) as conn:
         conn.row_factory = sqlite3.Row
         rows = [dict(r) for r in conn.execute("SELECT * FROM entries")]
     rows = [r for r in rows if _hhmm_after(r.get("time_et", ""), after)]
+    if start_date is not None:
+        rows = [r for r in rows if str(r.get("date") or "") >= start_date.isoformat()]
+    if end_date is not None:
+        rows = [r for r in rows if str(r.get("date") or "") <= end_date.isoformat()]
     if causal_only:
         rows = [r for r in rows if not _causal_entry_feature_errors(r)]
     if require_research_provenance:
@@ -528,7 +546,7 @@ def build_set(
                 by_ticker[r["ticker"]] = r
         rows = list(by_ticker.values())
 
-    if require_exact and len(rows) < n:
+    if require_exact and not all_rows and len(rows) < n:
         scope = "unique tickers" if unique_ticker else "eligible setup rows"
         raise ValueError(
             f"requested {n} setup(s), but only {len(rows)} {scope} are available "
@@ -546,7 +564,7 @@ def build_set(
 
     rng = random.Random(seed)
     total = len(rows)
-    wanted = min(n, total)
+    wanted = total if all_rows else min(n, total)
     shuffled_groups: dict[tuple, list[dict]] = {}
     quotas: dict[tuple, int] = {}
     remainders: dict[tuple, float] = {}
@@ -585,6 +603,7 @@ def write_testset(
     seed: int,
     *,
     research_provenance: Optional[dict] = None,
+    cohort: Optional[dict] = None,
 ) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     doc = {
@@ -595,6 +614,8 @@ def write_testset(
     }
     if research_provenance is not None:
         doc["research_provenance"] = research_provenance
+    if cohort is not None:
+        doc["cohort"] = cohort
     out.write_text(json.dumps(doc, indent=2) + "\n")
 
 
@@ -624,6 +645,10 @@ def _cup_handle_testset_research_provenance(path: Path, setups: list[dict]) -> d
         )
     if not isinstance(provenance.get("intervals"), list) or not provenance["intervals"]:
         raise ValueError("cup_handle batch testset research provenance has no interval evidence")
+    if provenance.get("source_quality", "unqualified") not in {
+        "primary_or_licensed", "public_pit_unverified", "unqualified",
+    }:
+        raise ValueError("cup_handle batch testset has an unknown universe source_quality")
     return provenance
 
 
@@ -641,7 +666,20 @@ def _cup_handle_research_tier(
     gate refuses to treat it as validation evidence.
     """
     try:
-        return _cup_handle_testset_research_provenance(path, setups), "promotion_eligible"
+        provenance = _cup_handle_testset_research_provenance(path, setups)
+        source_quality = provenance.get("source_quality", "unqualified")
+        if source_quality == "primary_or_licensed":
+            return provenance, "promotion_eligible"
+        # A dated public snapshot is useful research evidence, but without a
+        # licensed/primary membership feed it must not silently pass the final
+        # promotion gate.  Keep it distinct from legacy exploratory scans: it
+        # remains reproducible PIT validation, just not final validation.
+        if source_quality == "public_pit_unverified":
+            return provenance, "pit_public_validation_only"
+        raise ValueError(
+            "cup_handle batch testset has unqualified universe provenance; "
+            "use a declared public PIT source or --exploratory"
+        )
     except ValueError as exc:
         if not exploratory:
             raise
@@ -1599,11 +1637,13 @@ def run(
     trade_until: Optional[str] = None,
     resume: bool = False, dry_run: bool = False, session: Optional[str] = None,
     strategy: str = "warrior", exploratory: bool = False,
+    db: Optional[str | Path] = None,
 ) -> str:
     """Run the batch: spawn agents for every (setup × repeat), then audit + report."""
     resume_meta: dict = {}
     strategy_id = (strategy or "warrior").strip().lower().replace("-", "_")
     registry_path, trade_skills_dir, strategy_db, strat = _strategy_paths(strategy_id)
+    entry_db = Path(db).expanduser().resolve() if db is not None else strategy_db.resolve()
     # ── Resolve the batch identity FIRST (before touching skill/testset) so a --resume
     # can recover the batch's recorded config. A batch is keyed internally by its `tag`
     # (manifest/logs/batch.json) and displayed under its top-level `session` id
@@ -1634,6 +1674,16 @@ def run(
         model = model or bmeta.get("model")
         if testset is None and bmeta.get("testset"):
             testset = Path(bmeta["testset"])
+        recorded_db = bmeta.get("entry_db")
+        if recorded_db:
+            recorded_db = Path(recorded_db).expanduser().resolve()
+            if db is None:
+                entry_db = recorded_db
+            elif entry_db != recorded_db:
+                raise ValueError(
+                    "cannot resume with a different entry database than the batch's "
+                    f"recorded entry_db ({recorded_db})"
+                )
         if repeats == 1 and isinstance(bmeta.get("repeats"), int):
             repeats = bmeta["repeats"]
         # Re-entry budget + cutoff are fixed for the batch — a resume must match them, so
@@ -1648,7 +1698,7 @@ def run(
             exploratory = True
         print(f"--resume: using version={version} model={model} "
               f"set={testset} repeats={repeats} max_reentries={max_reentries} "
-              f"trade_until={trade_until} (from batch.json)", file=sys.stderr)
+              f"trade_until={trade_until} db={entry_db} (from batch.json)", file=sys.stderr)
 
     if not model:
         model = DEFAULT_MODEL
@@ -1662,6 +1712,8 @@ def run(
         raise SystemExit(f"--trade-until must be HH:MM ET (got {trade_until!r}).")
     if max_reentries < 0:
         raise SystemExit(f"--max-reentries must be ≥ 0 (got {max_reentries}).")
+    if not entry_db.is_file():
+        raise ValueError(f"entry database does not exist or is not a file: {entry_db}")
 
     # Source the skill from the current BASE version by default so a batch tests the
     # accepted rules. Its text is inlined into every agent prompt (see _prompt), so
@@ -1740,7 +1792,7 @@ def run(
     # agent.  v0.5 needs scanner-produced plans; historical confirmed labels are
     # not safe substitutes even if their dates and tickers still exist in the DB.
     if _requires_causal_scanner_plan(skill_meta):
-        _validate_causal_testset(setups, db=strategy_db, strategy_id=strategy_id)
+        _validate_causal_testset(setups, db=entry_db, strategy_id=strategy_id)
 
     tag = tag or f"{version}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
@@ -1790,7 +1842,7 @@ def run(
                 "bar_resolution": bar_resolution,
                 "strategy": strategy_id,
                 "profile": strat.risk.profile,
-                "db": str(strategy_db),
+                "db": str(entry_db),
                 "multi_day": (horizon or "").lower() in ("multi_day", "multiday", "swing")
                     or (bar_resolution or "").lower() in ("1day", "daily"),
             })
@@ -1801,9 +1853,13 @@ def run(
         f"deterministic policy {decision_policy}; no LLM"
         if decision_policy else f"model {model}, {reentry_desc}"
     )
+    research_tier_note = (
+        "" if research_tier == "promotion_eligible"
+        else f" [{research_tier.upper().replace('_', ' ')} — NON-PROMOTABLE]"
+    )
     print(f"batch {tag} (session {session_id}): version {version}, {len(setups)} setups × {repeats} "
           f"= {len(work)} runs (parallel {parallel}, {executor_desc})"
-          f"{' [EXPLORATORY — NON-PROMOTABLE]' if research_tier == 'exploratory' else ''}"
+          f"{research_tier_note}"
           f"{' [DRY RUN]' if dry_run else ''}", file=sys.stderr)
 
     if dry_run:
@@ -1863,6 +1919,7 @@ def run(
     _write_batch_meta(
         tag, version=version, model=model, testset=str(testset),
         testset_hash=testset_hash, skill_hash=skill_meta.get("content_hash"),
+        entry_db=str(entry_db),
         research_provenance=research_provenance,
         research_tier=research_tier,
         runner_contract=current_runner_contract,
@@ -2742,12 +2799,14 @@ def _require_matching_batch_metadata(tag_a: str, tag_b: str) -> None:
                 "built from point-in-time universe provenance; exploratory runs are for "
                 "diagnostics only."
             )
-    fields = (
+    fields = [
         ("model", "model"),
         ("testset_hash", "test-set hash"),
         ("runner_contract", "runner contract"),
         ("reentry", "re-entry policy"),
-    )
+    ]
+    if {meta_a.get("strategy"), meta_b.get("strategy")} & {"cup_handle"}:
+        fields.append(("entry_db", "entry database"))
     for field, label in fields:
         va, vb = meta_a.get(field), meta_b.get(field)
         if va is None or vb is None:
@@ -3431,6 +3490,7 @@ def portfolio_replay(
         "strategy": meta.get("strategy"),
         "decision_source": meta.get("decision_source"),
         "research_tier": meta.get("research_tier"),
+        "entry_db": meta.get("entry_db"),
         "testset_hash": meta.get("testset_hash"),
         "skill_version": meta.get("version"),
         "leaf_sessions": sorted(row["sid"] for row in leaves),
@@ -3479,7 +3539,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pb.add_argument("--strategy", default="warrior",
                     help="strategy family (warrior, cup_handle, …); picks default --db/--out")
     pb.add_argument("--n", type=int, default=30)
+    pb.add_argument("--all", action="store_true",
+                    help="select every eligible setup after filters instead of a sample; "
+                    "use with --start/--end for a complete chronological cohort")
     pb.add_argument("--seed", type=int, default=13)
+    pb.add_argument("--start", default=None, metavar="YYYY-MM-DD",
+                    help="inclusive setup-date lower bound for an immutable chronological cohort")
+    pb.add_argument("--end", default=None, metavar="YYYY-MM-DD",
+                    help="inclusive setup-date upper bound for an immutable chronological cohort")
     pb.add_argument("--out", default=None,
                     help="output path (default: batch/<strategy>/testset.json)")
     pb.add_argument("--db", default=None,
@@ -3507,6 +3574,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help="testset name or path (default: batch/<strategy>/testset.json). "
                     "Bare names like testset_30 resolve under batch/<strategy>/. "
                     "On --resume, recovered from the batch if omitted.")
+    pr.add_argument("--db", default=None,
+                    help="entries SQLite bound to this batch (default: strategy database). "
+                    "Use the same PIT corpus that produced --set; resume recovers it.")
     pr.add_argument("--parallel", type=int, default=3,
                     help="concurrent hermes agents (default: 3)")
     pr.add_argument("--repeats", type=int, default=1,
@@ -3610,12 +3680,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         exclude: set = set()
         for p in args.exclude:
             exclude |= _load_keys(Path(p))
+        try:
+            start_date = date.fromisoformat(args.start) if args.start else None
+            end_date = date.fromisoformat(args.end) if args.end else None
+        except ValueError as exc:
+            raise SystemExit("--start/--end must be YYYY-MM-DD") from exc
         setups = build_set(
             n=args.n, seed=args.seed, db=db_path, exclude=exclude,
             unique_ticker=args.unique_ticker,
             causal_only=(strategy_id == "cup_handle"),
             require_research_provenance=(strategy_id == "cup_handle" and not args.exploratory),
             require_exact=True,
+            start_date=start_date, end_date=end_date, all_rows=args.all,
         )
         research_provenance = (
             research_provenance_for_setups(db_path, setups)
@@ -3623,6 +3699,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         write_testset(
             setups, out_path, args.seed, research_provenance=research_provenance,
+            cohort={
+                "selection": "all_eligible_rows" if args.all else "stratified_sample",
+                "start": start_date.isoformat() if start_date else None,
+                "end": end_date.isoformat() if end_date else None,
+                "after": "09:30",
+                "source_entry_db": str(db_path.resolve()),
+            },
         )
         extra = f" (excluded {len(exclude)} keys)" if exclude else ""
         if args.unique_ticker:
@@ -3642,7 +3725,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             resume=args.resume, dry_run=args.dry_run,
             session=args.session,
             strategy=getattr(args, "strategy", None) or "warrior",
-            exploratory=args.exploratory)
+            exploratory=args.exploratory,
+            db=args.db)
     elif args.cmd == "audit":
         n = audit(args.tag)
         print(f"voided {n} session(s) in batch {args.tag}")

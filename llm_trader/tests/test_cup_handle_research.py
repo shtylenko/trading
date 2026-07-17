@@ -11,7 +11,10 @@ from trading.llm_trader.models import Entry
 from trading.llm_trader.store import EntryStore
 from trading.llm_trader.strategies.cup_handle.config import CupHandleConfig
 from trading.llm_trader.strategies.cup_handle.research_universe import (
+    SOURCE_QUALITY_PUBLIC,
     UniverseManifestError,
+    build_lagged_daily_csv_manifest,
+    build_lagged_monthly_snapshot_manifest,
     load_research_universe,
 )
 from trading.llm_trader.strategies.cup_handle.runner import ScanStats, ScopeScan
@@ -71,6 +74,49 @@ def test_manifest_requires_complete_pit_coverage_and_rejects_current_snapshot(tm
         gapped.slices_for(date(2025, 1, 1), date(2025, 1, 31))
 
 
+def test_lagged_monthly_manifest_uses_prior_month_and_hashes_archived_bytes(tmp_path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    december = b'[{"Symbol":"AAA"},{"Symbol":"BBB"}]'
+    january = b'[{"Symbol":"BBB"},{"Symbol":"CCC"}]'
+    (source_dir / "2024-12.json").write_bytes(december)
+    (source_dir / "2025-01.json").write_bytes(january)
+
+    manifest = build_lagged_monthly_snapshot_manifest(
+        source_dir, start=date(2025, 1, 1), end=date(2025, 2, 28),
+        name="public-pit", url_template="https://example.test/{year}/{month:02d}.json",
+    )
+
+    assert manifest["source_quality"] == SOURCE_QUALITY_PUBLIC
+    assert [(row["start"], row["end"], row["as_of"], row["symbols"]) for row in manifest["intervals"]] == [
+        ("2025-01-01", "2025-01-31", "2024-12-01", ["AAA", "BBB"]),
+        ("2025-02-01", "2025-02-28", "2025-01-01", ["BBB", "CCC"]),
+    ]
+    assert manifest["intervals"][0]["source_sha256"].startswith("sha256:")
+
+
+def test_lagged_daily_csv_manifest_never_uses_same_day_membership(tmp_path):
+    source = tmp_path / "members.csv"
+    source.write_text(
+        "date,tickers\n"
+        "2024-12-31,AAA\n"
+        "2025-01-02,\"AAA,BBB\"\n"
+        "2025-01-06,BBB\n",
+        encoding="utf-8",
+    )
+
+    manifest = build_lagged_daily_csv_manifest(
+        source, start=date(2025, 1, 1), end=date(2025, 1, 7), name="daily-pit",
+        source_url="https://example.test/members.csv",
+    )
+
+    assert [(row["start"], row["end"], row["as_of"], row["symbols"]) for row in manifest["intervals"]] == [
+        ("2025-01-01", "2025-01-02", "2024-12-31", ["AAA"]),
+        ("2025-01-03", "2025-01-06", "2025-01-02", ["AAA", "BBB"]),
+        ("2025-01-07", "2025-01-07", "2025-01-06", ["BBB"]),
+    ]
+
+
 def test_research_scan_publishes_all_intervals_once_and_stamps_entries(tmp_path, monkeypatch):
     from trading.llm_trader.strategies.cup_handle import research_scan
 
@@ -88,6 +134,11 @@ def test_research_scan_publishes_all_intervals_once_and_stamps_entries(tmp_path,
     def fake_scan(cfg, *, symbols, **_kwargs):
         return _scope(symbols[0], cfg.start + (date(2025, 1, 3) - date(2025, 1, 1)))
 
+    monkeypatch.setattr(
+        research_scan,
+        "fetch_market_regime_features",
+        lambda _cfg: {date(2025, 1, 3): {"as_of": "2025-01-03"}},
+    )
     monkeypatch.setattr(research_scan, "scan_scope", fake_scan)
     stats = research_scan.run_research_scan(cfg, universe=universe)
 
@@ -102,6 +153,7 @@ def test_research_scan_publishes_all_intervals_once_and_stamps_entries(tmp_path,
         features = json.loads(row["features_json"])
         assert features["research_universe"]["manifest_sha256"] == universe.manifest_sha256
         assert features["research_universe"]["membership_basis"] == "point_in_time"
+        assert features["research_universe"]["source_quality"] == "unqualified"
     artifact = json.loads(db.with_suffix(".research_scan.json").read_text())
     assert artifact["research_universe"]["manifest_sha256"] == universe.manifest_sha256
     assert len(artifact["interval_results"]) == 2
@@ -127,6 +179,11 @@ def test_research_scan_provider_failure_in_later_interval_leaves_database_unchan
             raise RuntimeError("provider coverage failed")
         return _scope("AAA", date(2025, 1, 3))
 
+    monkeypatch.setattr(
+        research_scan,
+        "fetch_market_regime_features",
+        lambda _cfg: {date(2025, 1, 3): {"as_of": "2025-01-03"}},
+    )
     monkeypatch.setattr(research_scan, "scan_scope", fake_scan)
     with pytest.raises(RuntimeError, match="provider coverage failed"):
         research_scan.run_research_scan(cfg, universe=universe)

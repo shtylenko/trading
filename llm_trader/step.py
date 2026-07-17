@@ -369,10 +369,11 @@ class IsolatedStreamGateway:
                 if t.get("date") == setup_date:
                     return int(t["i"])
             # Fallback: plan_lookback_bars after stream start (classic cup_handle shape).
+            from .indicators import DAILY_REPLAY_PLAN_LOOKBACK_BARS
             try:
-                pl = int(self._meta.get("plan_lookback_bars") or 40)
+                pl = int(self._meta.get("plan_lookback_bars") or DAILY_REPLAY_PLAN_LOOKBACK_BARS)
             except (TypeError, ValueError):
-                pl = 40
+                pl = DAILY_REPLAY_PLAN_LOOKBACK_BARS
             return min(pl, max(0, len(self._ticks) - 1))
 
     def publish(self) -> None:

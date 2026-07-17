@@ -101,3 +101,13 @@ def test_replay_fails_closed_when_action_pnl_does_not_match_persisted_leaf():
 
     with pytest.raises(PortfolioReplayError, match="do not match"):
         replay([leaf], PortfolioConfig())
+
+
+def test_replay_orders_a_same_timestamp_forced_exit_after_its_opening_fill():
+    result = replay(
+        [_leaf("same-day", "AAA", "2025-01-01", "2025-01-02", "2025-01-02", pnl=100)],
+        PortfolioConfig(),
+    )
+
+    assert result["summary"]["accepted_trades"] == 1
+    assert result["summary"]["portfolio_realized_pnl"] == 100.0

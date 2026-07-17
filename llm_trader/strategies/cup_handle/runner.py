@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from trading.llm_trader.fsutils import atomic_write_json
@@ -13,7 +13,7 @@ from trading.llm_trader.store import EntryStore
 from trading.llm_trader.universe import fetch_symbols
 
 from .config import CupHandleConfig
-from .patterns import detect_ticker, fetch_market_regime
+from .patterns import MarketRegimeDataError, detect_ticker, fetch_market_regime_features
 
 log = logging.getLogger("llm_trader.cup_handle")
 
@@ -54,6 +54,7 @@ def scan_scope(
     max_symbols: int | None = None,
     progress_every: int = 50,
     strategy_id: str = "cup_handle",
+    market_regime_features: Optional[dict[date, dict]] = None,
 ) -> ScopeScan:
     """Detect one scanner scope without writing the database.
 
@@ -76,7 +77,19 @@ def scan_scope(
         "cup_handle scan %s → %s | %d symbols | price≥$%.0f avgvol≥%.0fK",
         cfg.start, cfg.end, len(symbols), cfg.price_min, cfg.avg_vol_min / 1000,
     )
-    market_ok_dates = fetch_market_regime(cfg) if cfg.require_spy_above_sma50 else None
+    # Research scans pass one full-period feature map here so every interval
+    # shares the exact same causal SPY series.  Normal scans fetch it only when
+    # their optional market gate requires it.
+    if market_regime_features is None and cfg.require_spy_above_sma50:
+        market_regime_features = fetch_market_regime_features(cfg)
+    market_ok_dates = (
+        {
+            as_of for as_of, record in market_regime_features.items()
+            if record["above_sma50"]
+        }
+        if cfg.require_spy_above_sma50 and market_regime_features is not None
+        else None
+    )
     scanned_symbols: list[str] = []
     detected: list[Entry] = []
     failures: list[str] = []
@@ -89,8 +102,17 @@ def scan_scope(
             )
         try:
             entries = detect_ticker(
-                sym, cfg, strategy_id=strategy_id, market_ok_dates=market_ok_dates
+                sym,
+                cfg,
+                strategy_id=strategy_id,
+                market_ok_dates=market_ok_dates,
+                market_regime_features=market_regime_features,
             )
+        except MarketRegimeDataError as exc:
+            # This is a required shared indicator stream, not an isolated ticker
+            # provider failure. Continuing to examine other symbols would only
+            # disguise a global data-integrity breach behind a failure count.
+            raise RuntimeError(f"cup_handle scan failed closed: {exc}") from exc
         except Exception:
             failures.append(sym)
             log.exception("cup_handle detect failed for %s", sym)

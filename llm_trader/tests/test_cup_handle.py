@@ -130,6 +130,73 @@ def test_detect_synthetic_cup_breakout():
     assert abs(e.entry_px - handle_high) / handle_high < 0.05
 
 
+def test_scanner_attaches_causal_market_and_quality_diagnostics_without_gating():
+    """Diagnostics enrich evidence only; they cannot alter the v0.7 plan."""
+    df, _breakout_day, _handle_high = _synthetic_cup_breakout()
+    cfg = CupHandleConfig(
+        start=date(2024, 1, 1),
+        end=date(2026, 12, 31),
+        price_min=10.0,
+        avg_vol_min=500_000,
+        cup_min_bars=15,
+        cup_max_bars=80,
+        handle_min_bars=3,
+        handle_max_bars=15,
+        require_sma50_rising=False,
+    )
+    baseline = detect_from_frame(df, "TEST", cfg)
+    assert baseline
+    regime = {
+        ts.date(): {
+            "schema_version": 1,
+            "as_of": ts.date().isoformat(),
+            "close": 600.0,
+            "sma50": 590.0,
+            "sma200": 550.0,
+            "above_sma50": True,
+            "above_sma200": True,
+            "sma50_rising": True,
+            "regime": "above_sma50_and_sma200",
+        }
+        for ts in df.index
+    }
+    enriched = detect_from_frame(df, "TEST", cfg, market_regime_features=regime)
+
+    assert _plan_keys(enriched) == _plan_keys(baseline)
+    features = enriched[0].features
+    assert features["market_regime"] == regime[enriched[0].day]
+    quality = features["formation_quality"]
+    assert quality["definition"] == "formation_quality_v1_diagnostics_only"
+    assert 0.0 <= quality["score"] <= 1.0
+    assert set(quality["components"]) == {
+        "handle_high_position", "handle_shallowness", "lip_alignment",
+        "trough_centrality", "volume_dryup",
+    }
+
+
+def test_scanner_fails_closed_when_candidate_lacks_market_diagnostic():
+    df, _breakout_day, _handle_high = _synthetic_cup_breakout()
+    cfg = CupHandleConfig(
+        start=date(2024, 1, 1),
+        end=date(2026, 12, 31),
+        price_min=10.0,
+        avg_vol_min=500_000,
+        cup_min_bars=15,
+        cup_max_bars=80,
+        handle_min_bars=3,
+        handle_max_bars=15,
+        require_sma50_rising=False,
+    )
+    candidate_day = detect_from_frame(df, "TEST", cfg)[0].day
+    incomplete_regime = {
+        ts.date(): {"as_of": ts.date().isoformat()}
+        for ts in df.index
+        if ts.date() != candidate_day
+    }
+    with pytest.raises(RuntimeError, match="SPY regime diagnostics are unavailable"):
+        detect_from_frame(df, "TEST", cfg, market_regime_features=incomplete_regime)
+
+
 def test_store_strategy_uniqueness(tmp_path):
     df, _, _ = _synthetic_cup_breakout()
     cfg = CupHandleConfig(
@@ -217,6 +284,22 @@ def test_runner_fails_closed_without_mutating_existing_entries(tmp_path, monkeyp
         assert store.count(strategy="cup_handle") == 1
 
 
+def test_runner_aborts_immediately_on_missing_shared_market_diagnostic(monkeypatch):
+    from trading.llm_trader.strategies.cup_handle import runner as cup_runner
+    from trading.llm_trader.strategies.cup_handle.patterns import MarketRegimeDataError
+
+    calls = []
+
+    def missing_market(ticker, *_args, **_kwargs):
+        calls.append(ticker)
+        raise MarketRegimeDataError("SPY regime diagnostics are unavailable for candidate setup date 2026-06-26")
+
+    monkeypatch.setattr(cup_runner, "detect_ticker", missing_market)
+    with pytest.raises(RuntimeError, match="failed closed: SPY regime diagnostics"):
+        cup_runner.scan_scope(CupHandleConfig(), symbols=["AAA", "BBB"])
+    assert calls == ["AAA"], "shared-indicator breach must not be counted-and-continued"
+
+
 def test_runner_replaces_completed_scope_and_writes_manifest(tmp_path, monkeypatch):
     from trading.llm_trader.models import Entry
     from trading.llm_trader.strategies.cup_handle import runner as cup_runner
@@ -296,6 +379,43 @@ def test_regime_filter_requires_explicit_market_dates():
     )
     with pytest.raises(ValueError, match="SPY regime dates"):
         detect_from_frame(df, "TEST", cfg)
+
+
+def test_market_regime_features_use_sma200_complete_history(monkeypatch):
+    from trading.llm_trader.strategies.cup_handle import patterns as cup_patterns
+
+    idx = _daily_index(280)
+    closes = np.linspace(400.0, 680.0, len(idx))
+    spy = pd.DataFrame(
+        {
+            "open": closes * 0.999,
+            "high": closes * 1.01,
+            "low": closes * 0.99,
+            "close": closes,
+            "volume": np.full(len(idx), 100_000_000.0),
+        },
+        index=idx,
+    )
+    start, end = idx[220].date(), idx[260].date()
+    cfg = CupHandleConfig(start=start, end=end)
+
+    requested = {}
+
+    def fake_fetch(ticker, resolution, *, start, end, adjustment="raw", **_kwargs):
+        requested.update(ticker=ticker, resolution=resolution, start=start, end=end)
+        return spy
+
+    monkeypatch.setattr(cup_patterns, "fetch_bars", fake_fetch)
+    records = cup_patterns.fetch_market_regime_features(cfg)
+
+    assert requested["ticker"] == "SPY"
+    assert (cfg.start - requested["start"].date()).days >= 420
+    assert set(records) == {ts.date() for ts in idx[220:261]}
+    first = records[start]
+    assert first["as_of"] == start.isoformat()
+    assert first["above_sma50"] is True
+    assert first["above_sma200"] is True
+    assert first["sma50_rising"] is True
 
 
 # --------------------------------------------------------------------------- #
@@ -392,6 +512,32 @@ def test_scan_asof_matches_detector_and_never_requests_future_bars(monkeypatch):
     # No look-ahead: every provider request ended on or before D.
     assert requested_ends, "detector should have fetched bars"
     assert all(pd.Timestamp(e).date() <= d for e in requested_ends)
+
+
+def test_detect_ticker_fails_closed_when_provider_returns_no_bars(monkeypatch):
+    from trading.llm_trader.strategies.cup_handle import patterns as cup_patterns
+
+    monkeypatch.setattr(cup_patterns, "fetch_bars", lambda *_args, **_kwargs: pd.DataFrame())
+    with pytest.raises(RuntimeError, match="no daily market-data bars available for MISSING"):
+        cup_patterns.detect_ticker("MISSING", CupHandleConfig())
+
+
+def test_scanner_rejects_plan_when_visible_replay_history_lacks_an_indicator():
+    from trading.llm_trader.indicators import DAILY_REPLAY_REQUIRED_INDICATORS
+    from trading.llm_trader.strategies.cup_handle.patterns import (
+        _replay_window_indicators_available,
+    )
+
+    frame = pd.DataFrame(index=range(241))
+    for field in DAILY_REPLAY_REQUIRED_INDICATORS:
+        frame[field] = True if field.startswith("above_") or field == "sma50_rising" else 1.0
+    # The setup bar has SMA200, but the first twenty visible planning bars do
+    # not. This must be rejected by the scanner rather than fail later in replay.
+    frame.loc[180:199, "sma200"] = np.nan
+
+    assert not _replay_window_indicators_available(frame, 220)
+    frame["sma200"] = 1.0
+    assert _replay_window_indicators_available(frame, 220)
 
 
 def test_scan_asof_fails_closed_on_provider_error(monkeypatch):

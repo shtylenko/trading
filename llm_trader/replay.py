@@ -54,6 +54,7 @@ from trading.marketdata import fetch_bars
 
 from .config import DATA_DIR, ScanConfig
 from .indicators import (
+    DAILY_REPLAY_PLAN_LOOKBACK_BARS,
     DAILY_REPLAY_REQUIRED_INDICATORS,
     enrich_1min_for_replay,
     session_vwap,
@@ -293,7 +294,7 @@ def replay(
     out_file: Optional[str | Path] = None,
     bar_resolution: Optional[str] = None,
     max_hold_bars: Optional[int] = None,
-    plan_lookback_bars: int = 40,
+    plan_lookback_bars: int = DAILY_REPLAY_PLAN_LOOKBACK_BARS,
 ) -> int:
     """Stream bars for a setup (1-minute same-day, or daily multi-day).
 
@@ -454,7 +455,7 @@ def replay_daily(
     out: TextIO = sys.stdout,
     out_file: Optional[str | Path] = None,
     max_hold_bars: Optional[int] = None,
-    plan_lookback_bars: int = 40,
+    plan_lookback_bars: int = DAILY_REPLAY_PLAN_LOOKBACK_BARS,
 ) -> int:
     """Stream daily bars for a multi-day swing setup (plan lookback + hold).
 

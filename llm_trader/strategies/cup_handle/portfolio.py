@@ -89,9 +89,11 @@ def _hhmm(value: object, label: str) -> str:
 
 
 def _event_key(event: dict) -> tuple:
-    # Exits happen before entries on a shared daily timestamp, allowing an
-    # unambiguous completed position to release its capital/risk.  Same-timestamp
-    # entries use a stable causal priority: setup date, ticker, then sealed leaf id.
+    # Exits from positions already open at a shared daily timestamp happen before
+    # new entries, releasing their capital/risk. A same-timestamp exit belonging
+    # to a leaf that *opened* at that timestamp is deliberately phase 2, after
+    # its own entry; daily bars otherwise give no truthful sub-bar order. Entries
+    # use a stable causal priority: setup date, ticker, then sealed leaf id.
     return (
         event["date"],
         event["time"],
@@ -204,14 +206,16 @@ def replay(leaves: list[dict], config: PortfolioConfig) -> dict[str, Any]:
 
     events: list[dict] = []
     for candidate in prepared:
+        opening_stamp = (candidate["actions"][0]["date"], candidate["actions"][0]["time"])
         for action in candidate["actions"]:
             is_entry = action["action_index"] == 0
+            same_timestamp_as_open = (action["date"], action["time"]) == opening_stamp
             events.append({
                 **action,
                 "sid": candidate["sid"],
                 "ticker": candidate["ticker"],
                 "setup_day": candidate["setup_day"],
-                "phase": 1 if is_entry else 0,
+                "phase": 1 if is_entry else (2 if same_timestamp_as_open else 0),
                 "is_entry": is_entry,
                 "candidate": candidate,
             })

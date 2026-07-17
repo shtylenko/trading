@@ -25,7 +25,12 @@ import pandas as pd
 
 from trading.marketdata import fetch_bars
 
-from trading.llm_trader.indicators import atr, enrich_daily_for_replay
+from trading.llm_trader.indicators import (
+    DAILY_REPLAY_PLAN_LOOKBACK_BARS,
+    atr,
+    daily_replay_indicators_available,
+    enrich_daily_for_replay,
+)
 from trading.llm_trader.models import Entry
 
 from .config import CupHandleConfig
@@ -46,6 +51,16 @@ class CupGeometry:
     cup_depth_pct: float
     cup_depth_px: float
     handle_depth_px: float
+    cup_window_bars: int
+    lip_to_lip_bars: int
+    handle_bars: int
+    lip_diff_pct: float
+    handle_volume_fraction: float
+    trough_centrality: float
+
+
+class MarketRegimeDataError(RuntimeError):
+    """Required causal SPY diagnostics are incomplete for a scanner scope."""
 
 
 def _prep_daily(df: pd.DataFrame, cfg: CupHandleConfig) -> pd.DataFrame:
@@ -78,30 +93,138 @@ def _passes_trend(row: pd.Series, cfg: CupHandleConfig) -> bool:
     return True
 
 
+def _replay_window_indicators_available(frame: pd.DataFrame, plan_i: int) -> bool:
+    """Require the scanner plan to satisfy its complete visible replay window."""
+    stream_start = max(0, plan_i - DAILY_REPLAY_PLAN_LOOKBACK_BARS)
+    return daily_replay_indicators_available(frame.iloc[stream_start : plan_i + 1])
+
+
 def _index_date(index_value: Any) -> date:
     return index_value.date() if hasattr(index_value, "date") else pd.Timestamp(index_value).date()
 
 
-def fetch_market_regime(cfg: CupHandleConfig) -> set[date]:
-    """Return dates on which SPY closed above its SMA50 for this scan window.
+def fetch_market_regime_features(cfg: CupHandleConfig) -> dict[date, dict[str, Any]]:
+    """Return one fully-defined, causal SPY regime record per trading date.
 
-    This is deliberately a separate, explicit fetch.  A regime option that cannot
-    be evaluated must not silently become a no-op.
+    The research corpus stores these records as diagnostics even when the optional
+    ``require_spy_above_sma50`` gate is disabled.  This fetch is deliberately
+    strict: a date that has a candidate stock signal but no finite SPY SMA data is
+    a data-integrity failure, never an implicit "regime unknown" value.
     """
-    warmup_days = 150
+    # SMA200 needs at least 200 trading sessions.  Four hundred and twenty
+    # calendar days leaves enough room for weekends and market holidays.
+    warmup_days = 420
     start = datetime.combine(cfg.start, datetime.min.time(), tzinfo=timezone.utc) - timedelta(
         days=warmup_days
     )
     end = datetime.combine(cfg.end, datetime.max.time(), tzinfo=timezone.utc)
     spy = fetch_bars("SPY", "1day", start=start, end=end, adjustment="raw")
     if spy is None or spy.empty:
-        raise RuntimeError("SPY regime filter is enabled but no SPY daily bars are available")
+        raise MarketRegimeDataError(
+            "SPY regime diagnostics require daily SPY bars, but none are available"
+        )
     prepared = _prep_daily(spy, cfg)
+    records: dict[date, dict[str, Any]] = {}
+    for ts, row in prepared.iterrows():
+        as_of = _index_date(ts)
+        if as_of < cfg.start or as_of > cfg.end:
+            continue
+        required = ("close", "sma50", "sma200", "sma50_rising")
+        if any(pd.isna(row.get(field)) or not np.isfinite(float(row[field])) for field in required):
+            # Do not fail for every calendar date in the requested range: only
+            # trading dates can be setup dates.  Detectors below fail closed if
+            # a candidate falls on an omitted date.
+            continue
+        above_sma50 = bool(row["close"] > row["sma50"])
+        above_sma200 = bool(row["close"] > row["sma200"])
+        sma50_rising = bool(row.get("sma50_rising"))
+        if above_sma50 and above_sma200:
+            regime = "above_sma50_and_sma200"
+        elif above_sma50:
+            regime = "above_sma50_only"
+        elif above_sma200:
+            regime = "above_sma200_only"
+        else:
+            regime = "below_sma50_and_sma200"
+        records[as_of] = {
+            "schema_version": 1,
+            "as_of": as_of.isoformat(),
+            "close": round(float(row["close"]), 4),
+            "sma50": round(float(row["sma50"]), 4),
+            "sma200": round(float(row["sma200"]), 4),
+            "above_sma50": above_sma50,
+            "above_sma200": above_sma200,
+            "sma50_rising": sma50_rising,
+            "regime": regime,
+        }
+    if not records:
+        raise MarketRegimeDataError(
+            "SPY regime diagnostics have no indicator-complete trading dates in "
+            f"{cfg.start.isoformat()}..{cfg.end.isoformat()}"
+        )
+    return records
+
+
+def fetch_market_regime(cfg: CupHandleConfig) -> set[date]:
+    """Return dates on which the strict SPY record is above its SMA50."""
     return {
-        _index_date(ts)
-        for ts, row in prepared.iterrows()
-        if pd.notna(row.get("sma50")) and bool(row.get("above_sma50"))
+        as_of for as_of, record in fetch_market_regime_features(cfg).items()
+        if record["above_sma50"]
     }
+
+
+def _formation_quality_features(geom: CupGeometry, cfg: CupHandleConfig) -> dict[str, Any]:
+    """Log a predeclared structural quality score; it is not an entry gate.
+
+    The component formula deliberately uses only formation observations visible at
+    the setup close.  It gives development analysis a stable, inspectable ranking
+    candidate without changing v0.7's decision rule or its historical outcomes.
+    """
+    def clamp(value: float) -> float:
+        return max(0.0, min(1.0, value))
+
+    components = {
+        "handle_high_position": clamp(
+            (geom.handle_low - geom.cup_low_px) / geom.cup_depth_px
+        ),
+        "handle_shallowness": clamp(1.0 - geom.handle_depth_px / geom.cup_depth_px),
+        "lip_alignment": clamp(1.0 - geom.lip_diff_pct / cfg.lip_tolerance_pct),
+        "trough_centrality": clamp(1.0 - abs(geom.trough_centrality - 0.5) / 0.5),
+        "volume_dryup": clamp(
+            1.0 - geom.handle_volume_fraction / cfg.handle_vol_frac_max
+        ),
+    }
+    return {
+        "schema_version": 1,
+        "definition": "formation_quality_v1_diagnostics_only",
+        "score": round(sum(components.values()) / len(components), 4),
+        "components": {name: round(value, 4) for name, value in components.items()},
+        "raw": {
+            "cup_window_bars": geom.cup_window_bars,
+            "lip_to_lip_bars": geom.lip_to_lip_bars,
+            "handle_bars": geom.handle_bars,
+            "lip_diff_pct": round(geom.lip_diff_pct, 4),
+            "handle_depth_fraction": round(geom.handle_depth_px / geom.cup_depth_px, 4),
+            "handle_volume_fraction": round(geom.handle_volume_fraction, 4),
+            "trough_centrality": round(geom.trough_centrality, 4),
+        },
+    }
+
+
+def _market_regime_for_setup(
+    day: date,
+    market_regime_features: Optional[dict[date, dict[str, Any]]],
+) -> Optional[dict[str, Any]]:
+    """Return an immutable-as-practice setup-day SPY record or fail closed."""
+    if market_regime_features is None:
+        return None
+    record = market_regime_features.get(day)
+    if record is None:
+        raise MarketRegimeDataError(
+            "SPY regime diagnostics are unavailable for candidate setup date "
+            f"{day.isoformat()}"
+        )
+    return dict(record)
 
 
 def _find_cup_and_handle(
@@ -192,6 +315,12 @@ def _find_cup_and_handle(
             cup_vol = float(cup_vol_arr.mean())
             if cup_vol > 0 and handle_vol > cfg.handle_vol_frac_max * cup_vol:
                 continue
+            if cup_vol <= 0:
+                continue
+
+            lip_to_lip_bars = right_lip_i - left_lip_i
+            if lip_to_lip_bars <= 0:
+                continue
 
             return CupGeometry(
                 left_lip_i=left_lip_i,
@@ -207,6 +336,12 @@ def _find_cup_and_handle(
                 cup_depth_pct=round(cup_depth_pct, 2),
                 cup_depth_px=round(cup_depth_px, 4),
                 handle_depth_px=round(handle_depth_px, 4),
+                cup_window_bars=cup_len,
+                lip_to_lip_bars=lip_to_lip_bars,
+                handle_bars=handle_len,
+                lip_diff_pct=round(lip_diff_pct, 4),
+                handle_volume_fraction=round(handle_vol / cup_vol, 6),
+                trough_centrality=round((cup_low_i - left_lip_i) / lip_to_lip_bars, 6),
             )
     return None
 
@@ -241,6 +376,7 @@ def _entry_from_geometry(
     strategy_id: str,
     signal_kind: str,
     time_et: str,
+    market_regime: Optional[dict[str, Any]] = None,
 ) -> Optional[Entry]:
     """Build a fully specified plan using only data through ``day``."""
     atr_px = float(row["atr14"])
@@ -284,7 +420,11 @@ def _entry_from_geometry(
             round(float(row["rvol"]), 2) if pd.notna(row.get("rvol")) else None
         ),
         "horizon": "multi_day",
+        # Diagnostics only: neither record changes whether v0.7 emits a plan.
+        "formation_quality": _formation_quality_features(geom, cfg),
     }
+    if market_regime is not None:
+        features["market_regime"] = dict(market_regime)
     if signal_kind == "prebreak_arm":
         reason = (
             f"Cup-and-handle arm: trigger ${trigger:.2f} after the {day.isoformat()} close "
@@ -323,6 +463,7 @@ def _detect_confirmed_breakouts_from_frame(
     *,
     strategy_id: str = "cup_handle",
     market_ok_dates: Optional[set[date]] = None,
+    market_regime_features: Optional[dict[date, dict[str, Any]]] = None,
 ) -> list[Entry]:
     """Historical confirmation labels, retained for offline analysis only.
 
@@ -356,6 +497,8 @@ def _detect_confirmed_breakouts_from_frame(
                 continue
 
         row = frame.iloc[bi]
+        if not _replay_window_indicators_available(frame, bi):
+            continue
         close = float(closes[bi])
         if not (cfg.price_min <= close <= cfg.price_max):
             continue
@@ -393,6 +536,7 @@ def _detect_confirmed_breakouts_from_frame(
             strategy_id=strategy_id,
             signal_kind="confirmed_breakout",
             time_et="16:00",
+            market_regime=_market_regime_for_setup(d, market_regime_features),
         )
         if entry is None:
             continue
@@ -413,6 +557,7 @@ def _detect_prebreak_arms_from_frame(
     *,
     strategy_id: str = "cup_handle",
     market_ok_dates: Optional[set[date]] = None,
+    market_regime_features: Optional[dict[date, dict[str, Any]]] = None,
 ) -> list[Entry]:
     """Emit causal end-of-day plans for a completed cup-and-handle.
 
@@ -445,6 +590,8 @@ def _detect_prebreak_arms_from_frame(
             continue
 
         row = frame.iloc[plan_i]
+        if not _replay_window_indicators_available(frame, plan_i):
+            continue
         close = float(row["close"])
         avg_vol = row.get("vol_avg20")
         if not (cfg.price_min <= close <= cfg.price_max):
@@ -474,6 +621,7 @@ def _detect_prebreak_arms_from_frame(
             strategy_id=strategy_id,
             signal_kind="prebreak_arm",
             time_et="16:00",
+            market_regime=_market_regime_for_setup(d, market_regime_features),
         )
         if entry is None:
             continue
@@ -490,6 +638,7 @@ def detect_from_frame(
     *,
     strategy_id: str = "cup_handle",
     market_ok_dates: Optional[set[date]] = None,
+    market_regime_features: Optional[dict[date, dict[str, Any]]] = None,
 ) -> list[Entry]:
     """Detect the configured cup-and-handle signal type over a daily frame.
 
@@ -500,10 +649,20 @@ def detect_from_frame(
     cfg.validate()
     if cfg.signal_mode == "prebreak_arm":
         return _detect_prebreak_arms_from_frame(
-            df, ticker, cfg, strategy_id=strategy_id, market_ok_dates=market_ok_dates
+            df,
+            ticker,
+            cfg,
+            strategy_id=strategy_id,
+            market_ok_dates=market_ok_dates,
+            market_regime_features=market_regime_features,
         )
     return _detect_confirmed_breakouts_from_frame(
-        df, ticker, cfg, strategy_id=strategy_id, market_ok_dates=market_ok_dates
+        df,
+        ticker,
+        cfg,
+        strategy_id=strategy_id,
+        market_ok_dates=market_ok_dates,
+        market_regime_features=market_regime_features,
     )
 
 
@@ -513,6 +672,7 @@ def detect_ticker(
     *,
     strategy_id: str = "cup_handle",
     market_ok_dates: Optional[set[date]] = None,
+    market_regime_features: Optional[dict[date, dict[str, Any]]] = None,
 ) -> list[Entry]:
     """Fetch daily bars and detect entries for one ticker."""
     cfg.validate()
@@ -523,9 +683,23 @@ def detect_ticker(
     end = datetime.combine(cfg.end, datetime.max.time(), tzinfo=timezone.utc)
     df = fetch_bars(ticker, "1day", start=start, end=end, adjustment="raw")
     if df is None or df.empty:
-        return []
+        # An unavailable provider series is not a negative pattern result.  In a
+        # research scan, returning [] here would make a broken or invalid symbol
+        # indistinguishable from a fully evaluated no-signal and let the corpus
+        # publish with a hidden coverage hole.
+        raise RuntimeError(f"no daily market-data bars available for {ticker}")
     if cfg.require_spy_above_sma50 and market_ok_dates is None:
-        market_ok_dates = fetch_market_regime(cfg)
+        if market_regime_features is None:
+            market_regime_features = fetch_market_regime_features(cfg)
+        market_ok_dates = {
+            as_of for as_of, record in market_regime_features.items()
+            if record["above_sma50"]
+        }
     return detect_from_frame(
-        df, ticker, cfg, strategy_id=strategy_id, market_ok_dates=market_ok_dates
+        df,
+        ticker,
+        cfg,
+        strategy_id=strategy_id,
+        market_ok_dates=market_ok_dates,
+        market_regime_features=market_regime_features,
     )

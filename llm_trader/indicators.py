@@ -11,6 +11,7 @@ OHLCV data (any tz on index; functions normalize to ET internally when needed).
 from __future__ import annotations
 
 from datetime import date
+import math
 from typing import Optional
 
 import numpy as np
@@ -31,6 +32,32 @@ DAILY_REPLAY_REQUIRED_INDICATORS = (
     "above_sma200",
     "sma50_rising",
 )
+
+# Replay presents this many completed bars before the setup bar. The scanner
+# must prove this window is fully indicator-complete before publishing a plan.
+DAILY_REPLAY_PLAN_LOOKBACK_BARS = 40
+
+
+def daily_replay_indicators_available(df: pd.DataFrame) -> bool:
+    """Return whether every required daily-replay field is finite over ``df``.
+
+    A valid setup-day SMA200 is insufficient when earlier visible planning bars
+    lack it. Missing values are a data-integrity failure, never a permission to
+    emit a partial-context plan.
+    """
+    if df is None or df.empty:
+        return False
+    for field in DAILY_REPLAY_REQUIRED_INDICATORS:
+        if field not in df:
+            return False
+        values = df[field]
+        unavailable = values.isna()
+        if not pd.api.types.is_bool_dtype(values):
+            numeric = pd.to_numeric(values, errors="coerce")
+            unavailable = unavailable | ~numeric.map(math.isfinite)
+        if bool(unavailable.any()):
+            return False
+    return True
 
 
 def session_vwap(df: pd.DataFrame) -> pd.Series:

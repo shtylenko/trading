@@ -27,6 +27,7 @@ from trading.llm_trader.fsutils import atomic_write_json
 from trading.llm_trader.store import EntryStore
 
 from .config import CupHandleConfig
+from .patterns import fetch_market_regime_features
 from .research_universe import ResearchUniverse, UniverseInterval, UniverseManifestError, load_research_universe
 from .runner import ScanStats, ScopeScan, scan_scope
 
@@ -50,6 +51,7 @@ def _entry_universe_provenance(
     return {
         "schema_version": 1,
         "membership_basis": universe.membership_basis,
+        "source_quality": universe.source_quality,
         "manifest_name": universe.name,
         "manifest_sha256": universe.manifest_sha256,
         "interval": interval.provenance(),
@@ -86,6 +88,11 @@ def run_research_scan(
     """
     cfg.validate()
     intervals = universe.slices_for(cfg.start, cfg.end)
+    # Persist a causal market-regime observation with every setup.  It is a
+    # diagnostic only: no v0.7 entry rule changes here.  Fetch once over the
+    # entire research range so interval boundaries cannot create subtly
+    # different SPY warmups for the same date.
+    market_regime_features = fetch_market_regime_features(cfg)
     scope_results: list[tuple[UniverseInterval, ScopeScan]] = []
     stats = ResearchScanStats(intervals_scanned=len(intervals))
     for interval in intervals:
@@ -99,6 +106,7 @@ def run_research_scan(
             symbols=list(interval.symbols),
             progress_every=progress_every,
             strategy_id=strategy_id,
+            market_regime_features=market_regime_features,
         )
         _stamp_scope_entries(scope, universe, interval)
         scope_results.append((interval, scope))
@@ -129,6 +137,11 @@ def run_research_scan(
         "completed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "strategy": strategy_id,
         "config": cfg.to_dict(),
+        "market_regime_diagnostics": {
+            "schema_version": 1,
+            "definition": "SPY daily close/SMA50/SMA200 as of each setup date",
+            "feature_dates": len(market_regime_features),
+        },
         "research_universe": universe.provenance(cfg.start, cfg.end),
         "interval_results": [
             {

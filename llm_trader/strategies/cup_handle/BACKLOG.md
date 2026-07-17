@@ -58,6 +58,23 @@ new ten-unique-ticker smoke cohort, v0.6 and v0.7 were economically near-equal
 ($839.04 versus $838.67); this is migration evidence, not a profitability or
 promotion result.
 
+### Scanner/replay indicator-window parity — completed 2026-07-17
+
+- [x] Make the scanner require every daily replay indicator across the same
+  40 completed planning bars that replay exposes before the setup bar. A valid
+  indicator on the setup bar alone is insufficient: a plan with a late-starting
+  SMA200 would otherwise be admitted by research and fail only during batch
+  preseal.
+- [x] Centralize the 40-bar planning-window constant and required-indicator
+  completeness predicate. The scanner, replay, and step fallback now derive
+  from the same contract.
+
+**Regression evidence:** the first full 2025 run rejected `GEV_2025-02-10`
+before any trade because its visible planning window lacked 24 SMA200 values.
+The portfolio replayer then correctly refused to score the incomplete cohort.
+After the scanner fix, an atomic PIT rescan removed that plan; the corrected
+569-setup development batch completed with zero indicator preseal failures.
+
 ### Completed cohort-integrity remediation (2026-07-17)
 
 - [x] Make exact testset size a CLI contract: `build-set --n N` now fails when
@@ -94,12 +111,27 @@ alphabetically concentrated; it is not a point-in-time representative universe.
   default. A raw historical list requires an explicit exploratory opt-in and
   cannot become a promotion batch.
 
-**Operational blocker (not a code defect):** no source-controlled historical
-constituent file currently exists in this repository. Do not relabel
-`universe_sp500.json` as PIT: it is explicitly a 2026-07-16 current snapshot.
-Before any profitability/geometry conclusion, acquire or export an immutable
-historical membership source, write the interval manifest, run `research_scan`,
-and create a new provenance-sealed development/holdout pair from that corpus.
+**Public PIT validation corpus — completed 2026-07-17:** archive a dated public
+S&P 500 membership CSV, hash the raw source, and apply every source-day
+membership list only from the following calendar day. The resulting immutable
+manifest, `batch/cup_handle/universe_sp500_public_pit_2025_2026.json`, covers
+28 intervals from 2025-01-01 through 2026-06-30. Its fail-closed scan requested
+and received data for all 14,088 interval-symbols and yielded 818 causal plans
+across 247 tickers. `testset_sp500_public_pit_30.json` is a stratified,
+provenance-sealed 30-plan validation cohort from that corpus.
+
+**Source-quality gate — completed 2026-07-17:** every manifest, scanned setup,
+testset, and batch now carries `source_quality`. `primary_or_licensed` is the
+only promotion-eligible tier. The public dated archive is deliberately marked
+`public_pit_unverified`, so its batches run as reproducible PIT validation but
+are non-promotable and cannot be used in the final batch-comparison gate.
+`universe_sp500.json` remains an explicitly non-historical current snapshot.
+
+**Remaining operational blocker:** acquire/export an immutable primary or
+licensed historical-constituent source, reproduce the multi-year corpus with
+that source, and create chronological development and untouched holdout cohorts.
+Do not draw a profitability or geometry conclusion from the public-validation
+cohort alone.
 
 ### Deterministic geometry selection
 
@@ -153,6 +185,37 @@ rule and tested on a materially larger frozen cohort.
 
 **Experiment:** compare pre-declared variants: SPY > SMA50, SPY > SMA200, and both. Compute on the plan date only and retain the same universe/execution contract. Select at most one variant using development data; freeze it for the final holdout.
 
+**Causal diagnostics — completed 2026-07-17:** the research scanner now
+persists a strict, plan-date SPY close/SMA50/SMA200 record (schema v1) and a
+diagnostic-only `formation_quality_v1` record with structural and volume
+components for every causal plan. The 2025 PIT development refresh completed
+all 17 intervals and all 569 baseline setups with zero provider failures; the
+enriched setup identities exactly matched the frozen strict v0.7 batch. The
+new feature report fails closed if a batch setup lacks either feature record or
+if a trade is not classified by the auditable portfolio replay.
+
+**Development evidence, not a selected rule:** the 31 plans made while SPY was
+below both averages were poor independently (`-0.475` effective R), but the
+current capacity-constrained portfolio had accepted several of them. The
+pre-declared *frozen-plan* `SPY > SMA50 and SMA200` veto was therefore tested
+without rescanning or allowing replacement arms: it stood down 51 of 569
+setups, improved independent effective R from `+0.031` to `+0.054`, but made
+the portfolio result worse (`-$10,585.13` / `-0.037` effective R versus the
+baseline `-$10,033.02` / `-0.035`) and deepened realized drawdown. **Reject
+this veto as a portfolio policy.** Do not convert the independent-only result
+into a scanner gate. The 2026-H1 holdout remains unexecuted and unscored.
+
+The calendar-quarter diagnostic reinforces that restraint: independent effective
+R ranged from `-0.529` (2025-Q1) to `+0.251` (Q2), while constrained portfolio
+effective R ranged from `-0.214` to `+0.006` before Q4 fell to `-0.109`. One
+calendar year is not stable enough to infer an all-regime market rule or to
+optimize a portfolio priority from these descriptive bands.
+
+**Data-integrity enforcement:** any missing shared SPY diagnostic now aborts
+the scanner immediately rather than being counted as an isolated ticker
+failure. Before a future holdout refresh, repair the shared SPY daily-series
+coverage through the holdout end; never impute or carry forward a regime value.
+
 ### Single-name relative performance versus SPY
 
 **Hypothesis:** a strong stock relative to the broad market improves breakout quality.
@@ -182,6 +245,15 @@ research/live parity.
 **Hypothesis:** high, gently downward/flat, low-volume handles have superior expectancy.
 
 **Plan:** persist handle position within cup, handle low versus cup midpoint, normalized handle slope, volume-trend slope, and resistance-touch count. Test upper-half/upper-third location and depth/duration constraints only after feature analysis.
+
+**First diagnostic slice — completed 2026-07-17:** `formation_quality_v1`
+currently records handle height, shallowness, lip alignment, trough centrality,
+and handle-volume dry-up along with the raw geometry. Its fixed score bands
+were intentionally descriptive only: the small `>=0.70` group (28 setups) was
+negative, while the broad middle band was positive independently but negative
+after portfolio capacity. This is insufficiently stable to select a threshold
+or use score as priority. Next, inspect chronological stability and individual
+components before registering exactly one portfolio-priority hypothesis.
 
 ### Pre-break volume and accumulation features
 
@@ -254,6 +326,37 @@ interpret independent-session P&L as portfolio P&L.
   trades, rejected eight same-ticker overlaps and four capacity conflicts, and
   produced `$3,624.62` / `+0.123` effective R (versus `$8,497.49` / `+0.288`
   independently). This cohort is still exploratory and non-promotable.
+- [x] Correct same-bar ordering in the portfolio replay: an exit on the exact
+  timestamp of its own opening fill is processed after that fill, while exits
+  from already-open positions release capacity before new entries. This avoids
+  silently discarding valid one-bar trades while retaining conservative,
+  deterministic ordering where daily bars have no truthful intrabar sequence.
+
+**Public-PIT contract check — completed 2026-07-17:** the deterministic v0.7
+run on `testset_sp500_public_pit_30` completed 30/30 leaves with no audit voids;
+25 trades yielded `$4,725.60` / `+0.315` independent effective R and five
+no-trades. Under the predeclared 3-position / $1,500-risk / $50,000-gross
+portfolio contract, 21 trades were accepted and four were rejected by capacity,
+for `$7,231.14` / `+0.482` portfolio effective R and `-$1,521.19` realized-P&L
+maximum drawdown. The higher constrained outcome is selection, not alpha: all
+four mechanically rejected entries happened to be losers in this small cohort.
+This is a validation-only safety check, not an optimization target or promotion
+result.
+
+**Full 2025 development baseline — completed 2026-07-17:** the sealed
+`testset_sp500_public_pit_dev_2025` contains every eligible causal plan from
+2025 (569 setups); the sealed 249-setup 2026-H1 cohort remains untouched.
+The strict deterministic run completed all 569 leaves with zero voids and zero
+indicator preseal failures: 385 trades / 184 no-trades, `$8,727.06`, and
+`+0.031` portfolio-normalized independent effective R. Under the predeclared
+3-position / `$1,500`-risk / `$50,000`-gross contract, only 53 of 385 entries
+were feasible, producing `$-10,033.02` / `-0.035` effective R and a
+`$-10,791.14` realized-P&L maximum drawdown. Of 332 deterministic rejections,
+306 were the position limit, 21 the ticker limit, and five gross-notional.
+The ticker-exclusive control was also negative (`-0.011` effective R). Treat
+the independent-session gain as non-investable; do not open the 2026-H1
+holdout or tune thresholds until a predeclared development-only selection
+hypothesis is implemented.
 - [ ] Extend the replay with point-in-time sector concentration and
   mark-to-market portfolio heat/drawdown. The current drawdown is realized-P&L
   only; it deliberately never invents intraday portfolio marks from leaf data.

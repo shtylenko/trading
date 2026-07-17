@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import subprocess
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -96,6 +96,24 @@ def test_build_set_exclude_carves_disjoint_holdout(tmp_path):
     assert dev_keys.isdisjoint(hold_keys)
 
 
+def test_build_set_all_rows_respects_an_immutable_date_window(tmp_path):
+    db = tmp_path / "entries.db"
+    _make_entries_db(db, [
+        ("DEV_A", "2025-01-01", "11:20", "acd_orb", 9e6, 20.0),
+        ("DEV_B", "2025-12-31", "11:20", "acd_orb", 9e6, 20.0),
+        ("HOLD", "2026-01-02", "11:20", "acd_orb", 9e6, 20.0),
+    ])
+
+    setups = batchsim.build_set(
+        n=1, db=db, require_exact=True, all_rows=True,
+        start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+    )
+
+    assert [(s["ticker"], s["date"]) for s in setups] == [
+        ("DEV_A", "2025-01-01"), ("DEV_B", "2025-12-31"),
+    ]
+
+
 def test_build_set_causal_only_excludes_legacy_cup_labels(tmp_path):
     db = tmp_path / "entries.db"
     conn = sqlite3.connect(str(db))
@@ -173,6 +191,51 @@ def test_cup_holdout_requires_and_records_one_pit_universe_manifest(tmp_path):
     assert tier == "exploratory"
     assert exploratory["membership_basis"] == "unverified_exploratory"
     assert exploratory["promotion_eligible"] is False
+
+
+def test_public_pit_testset_is_validation_only_not_promotion_eligible(tmp_path):
+    setups = [{"ticker": "AAA", "date": "2025-02-03", "time_et": "16:00"}]
+    path = tmp_path / "public_pit.json"
+    batchsim.write_testset(setups, path, seed=7, research_provenance={
+        "schema_version": 1,
+        "membership_basis": "point_in_time",
+        "source_quality": "public_pit_unverified",
+        "manifest_name": "public-pit",
+        "manifest_sha256": "sha256:manifest",
+        "intervals": [{
+            "start": "2025-01-01", "end": "2025-03-31", "as_of": "2024-12-01",
+            "source": "public fixture", "symbols_sha256": "sha256:symbols",
+        }],
+        "setup_count": 1,
+    })
+
+    _provenance, tier = batchsim._cup_handle_research_tier(
+        path, setups, exploratory=False,
+    )
+
+    assert tier == "pit_public_validation_only"
+
+
+def test_unqualified_pit_testset_requires_explicit_exploratory_mode(tmp_path):
+    setups = [{"ticker": "AAA", "date": "2025-02-03", "time_et": "16:00"}]
+    path = tmp_path / "unqualified_pit.json"
+    batchsim.write_testset(setups, path, seed=7, research_provenance={
+        "schema_version": 1,
+        "membership_basis": "point_in_time",
+        "source_quality": "unqualified",
+        "manifest_name": "unqualified-pit",
+        "manifest_sha256": "sha256:manifest",
+        "intervals": [{
+            "start": "2025-01-01", "end": "2025-03-31", "as_of": "2024-12-01",
+            "source": "fixture", "symbols_sha256": "sha256:symbols",
+        }],
+        "setup_count": 1,
+    })
+
+    with pytest.raises(ValueError, match="unqualified universe provenance"):
+        batchsim._cup_handle_research_tier(path, setups, exploratory=False)
+    _provenance, tier = batchsim._cup_handle_research_tier(path, setups, exploratory=True)
+    assert tier == "exploratory"
 
 
 def test_causal_batch_preflight_rejects_a_stale_exact_setup(tmp_path):
@@ -926,6 +989,33 @@ def test_run_rejects_testset_missing_time(tmp_path):
     ts.write_text(json.dumps({"setups": [{"ticker": "TK", "date": "2025-01-02", "time_et": None}]}))
     with pytest.raises(ValueError, match="time_et"):
         batchsim.run("2.0.2", model="m", testset=ts, dry_run=True)
+
+
+def test_cup_run_binds_explicit_pit_database_for_preflight(tmp_path, monkeypatch):
+    db = tmp_path / "pit_entries.db"
+    db.touch()
+    testset = tmp_path / "pit_set.json"
+    setups = [{"ticker": "AAA", "date": "2025-02-03", "time_et": "16:00"}]
+    batchsim.write_testset(setups, testset, seed=7, research_provenance={
+        "schema_version": 1, "membership_basis": "point_in_time",
+        "source_quality": "public_pit_unverified", "manifest_name": "public-pit",
+        "manifest_sha256": "sha256:manifest", "setup_count": 1,
+        "intervals": [{
+            "start": "2025-01-01", "end": "2025-03-31", "as_of": "2024-12-01",
+            "source": "fixture", "symbols_sha256": "sha256:symbols",
+        }],
+    })
+    seen = {}
+    monkeypatch.setattr(
+        batchsim, "_validate_causal_testset",
+        lambda _setups, *, db, strategy_id: seen.update({"db": db, "strategy": strategy_id}),
+    )
+
+    batchsim.run(
+        "0.7.0", strategy="cup_handle", testset=testset, db=db, dry_run=True,
+    )
+
+    assert seen == {"db": db.resolve(), "strategy": "cup_handle"}
 
 
 def test_void_stats_counts_unverifiable(tmp_path, monkeypatch):

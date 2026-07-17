@@ -197,6 +197,37 @@ def test_scanner_fails_closed_when_candidate_lacks_market_diagnostic():
         detect_from_frame(df, "TEST", cfg, market_regime_features=incomplete_regime)
 
 
+def test_pit_membership_dates_do_not_reset_or_poison_arm_cooldown():
+    """Only sessions where the ticker was eligible can create scanner state."""
+    df, _breakout_day, _handle_high = _synthetic_cup_breakout(post=20)
+    base = CupHandleConfig(
+        start=date(2024, 1, 1),
+        end=date(2026, 12, 31),
+        price_min=10.0,
+        avg_vol_min=500_000,
+        cup_min_bars=15,
+        cup_max_bars=80,
+        handle_min_bars=3,
+        handle_max_bars=15,
+        require_sma50_rising=False,
+        arm_expiry_bars=5,
+    )
+    baseline = detect_from_frame(df, "TEST", base)
+    assert len(baseline) >= 2
+    first, later = baseline[:2]
+
+    # With a long cooldown, a continuous eligible history retains only
+    # the first arm. If the first session was outside this ticker's PIT
+    # membership, it was never actionable and must not suppress the later arm.
+    cooldown_cfg = CupHandleConfig.from_dict({**base.to_dict(), "arm_expiry_bars": 20})
+    continuous = detect_from_frame(df, "TEST", cooldown_cfg)
+    assert [entry.day for entry in continuous] == [first.day]
+    eligible_later = detect_from_frame(
+        df, "TEST", cooldown_cfg, eligible_plan_dates={later.day},
+    )
+    assert [entry.day for entry in eligible_later] == [later.day]
+
+
 def test_store_strategy_uniqueness(tmp_path):
     df, _, _ = _synthetic_cup_breakout()
     cfg = CupHandleConfig(
@@ -416,6 +447,16 @@ def test_market_regime_features_use_sma200_complete_history(monkeypatch):
     assert first["above_sma50"] is True
     assert first["above_sma200"] is True
     assert first["sma50_rising"] is True
+
+    # A missing SPY bar for an expected market session is a scope-wide data
+    # integrity error. It must fail before the scanner reaches any ticker.
+    from trading.marketdata.calendar import trading_days_in_range
+
+    missing_day = trading_days_in_range(start, end)[2]
+    incomplete = spy[spy.index.date != missing_day]
+    monkeypatch.setattr(cup_patterns, "fetch_bars", lambda *_args, **_kwargs: incomplete)
+    with pytest.raises(cup_patterns.MarketRegimeDataError, match="incomplete"):
+        cup_patterns.fetch_market_regime_features(cfg)
 
 
 # --------------------------------------------------------------------------- #

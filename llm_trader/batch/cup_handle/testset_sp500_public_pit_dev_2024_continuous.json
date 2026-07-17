@@ -1,0 +1,3198 @@
+{
+  "created": "2026-07-17T14:17:27",
+  "seed": 13,
+  "n": 381,
+  "setups": [
+    {
+      "ticker": "AAPL",
+      "date": "2024-05-21",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2024-05-30",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2024-06-07",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2024-08-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2024-09-30",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2024-10-11",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2024-10-21",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2024-10-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ABBV",
+      "date": "2024-07-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ABNB",
+      "date": "2024-02-01",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ACN",
+      "date": "2024-07-25",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ACN",
+      "date": "2024-08-21",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ADBE",
+      "date": "2024-07-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ADBE",
+      "date": "2024-07-12",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ADI",
+      "date": "2024-10-25",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ADSK",
+      "date": "2024-07-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ADSK",
+      "date": "2024-07-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AEP",
+      "date": "2024-01-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AES",
+      "date": "2024-09-30",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AFL",
+      "date": "2024-04-01",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AFL",
+      "date": "2024-04-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AFL",
+      "date": "2024-05-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AFL",
+      "date": "2024-05-21",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AIG",
+      "date": "2024-10-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMD",
+      "date": "2024-07-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMGN",
+      "date": "2024-05-15",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMGN",
+      "date": "2024-06-24",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMT",
+      "date": "2024-06-24",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ANET",
+      "date": "2024-03-07",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ANET",
+      "date": "2024-03-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ANET",
+      "date": "2024-08-13",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "APTV",
+      "date": "2024-06-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2024-05-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2024-05-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2024-05-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2024-06-07",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AXP",
+      "date": "2024-08-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AXP",
+      "date": "2024-09-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BA",
+      "date": "2024-12-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BAX",
+      "date": "2024-08-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BAX",
+      "date": "2024-09-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BAX",
+      "date": "2024-09-13",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BAX",
+      "date": "2024-09-23",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BBWI",
+      "date": "2024-05-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BBWI",
+      "date": "2024-05-30",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BBY",
+      "date": "2024-01-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BBY",
+      "date": "2024-04-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BBY",
+      "date": "2024-06-12",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BKR",
+      "date": "2024-04-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BKR",
+      "date": "2024-10-07",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BKR",
+      "date": "2024-10-25",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BMY",
+      "date": "2024-08-30",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BWA",
+      "date": "2024-10-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BX",
+      "date": "2024-03-27",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BX",
+      "date": "2024-08-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BX",
+      "date": "2024-09-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CAG",
+      "date": "2024-04-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CAG",
+      "date": "2024-08-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CARR",
+      "date": "2024-05-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CARR",
+      "date": "2024-08-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CAT",
+      "date": "2024-01-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CBRE",
+      "date": "2024-03-06",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CCI",
+      "date": "2024-07-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CDNS",
+      "date": "2024-11-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CDNS",
+      "date": "2024-11-18",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CDNS",
+      "date": "2024-11-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CEG",
+      "date": "2024-07-12",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CEG",
+      "date": "2024-12-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CF",
+      "date": "2024-04-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CFG",
+      "date": "2024-03-13",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CFG",
+      "date": "2024-03-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CFG",
+      "date": "2024-05-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CFG",
+      "date": "2024-10-14",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CI",
+      "date": "2024-01-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CMS",
+      "date": "2024-01-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CNC",
+      "date": "2024-08-19",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CNC",
+      "date": "2024-08-27",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CNP",
+      "date": "2024-10-15",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CNP",
+      "date": "2024-11-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CNP",
+      "date": "2024-11-18",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "COF",
+      "date": "2024-09-25",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "COF",
+      "date": "2024-10-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CPB",
+      "date": "2024-02-01",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CPRT",
+      "date": "2024-10-15",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CPRT",
+      "date": "2024-11-18",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRM",
+      "date": "2024-09-24",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRM",
+      "date": "2024-10-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CTRA",
+      "date": "2024-03-27",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CTVA",
+      "date": "2024-09-13",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CTVA",
+      "date": "2024-09-27",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CTVA",
+      "date": "2024-10-07",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CTVA",
+      "date": "2024-12-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CVX",
+      "date": "2024-11-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CVX",
+      "date": "2024-12-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CZR",
+      "date": "2024-09-25",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "D",
+      "date": "2024-04-12",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "D",
+      "date": "2024-04-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DAL",
+      "date": "2024-02-27",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DAL",
+      "date": "2024-03-06",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DAL",
+      "date": "2024-03-18",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DD",
+      "date": "2024-01-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DD",
+      "date": "2024-04-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DD",
+      "date": "2024-05-06",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DD",
+      "date": "2024-05-14",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DD",
+      "date": "2024-05-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DELL",
+      "date": "2024-10-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DELL",
+      "date": "2024-10-30",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DFS",
+      "date": "2024-02-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHI",
+      "date": "2024-03-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHR",
+      "date": "2024-02-06",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHR",
+      "date": "2024-02-14",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DOC",
+      "date": "2024-05-15",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DOW",
+      "date": "2024-01-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DUK",
+      "date": "2024-01-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DVN",
+      "date": "2024-03-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DXCM",
+      "date": "2024-03-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EBAY",
+      "date": "2024-02-12",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EIX",
+      "date": "2024-01-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EIX",
+      "date": "2024-01-12",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EL",
+      "date": "2024-04-23",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EMR",
+      "date": "2024-01-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EMR",
+      "date": "2024-11-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ENPH",
+      "date": "2024-02-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EOG",
+      "date": "2024-03-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EOG",
+      "date": "2024-10-14",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EOG",
+      "date": "2024-11-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EQT",
+      "date": "2024-05-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EQT",
+      "date": "2024-10-11",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EQT",
+      "date": "2024-10-30",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ES",
+      "date": "2024-05-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EXC",
+      "date": "2024-09-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EXC",
+      "date": "2024-09-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EXPE",
+      "date": "2024-08-23",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EXPE",
+      "date": "2024-09-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "FCX",
+      "date": "2024-01-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "FDX",
+      "date": "2024-04-01",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "FDX",
+      "date": "2024-07-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "FOXA",
+      "date": "2024-05-14",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "FTV",
+      "date": "2024-09-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "FTV",
+      "date": "2024-11-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GEN",
+      "date": "2024-06-06",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GILD",
+      "date": "2024-07-24",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GIS",
+      "date": "2024-08-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GIS",
+      "date": "2024-08-30",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GLW",
+      "date": "2024-08-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GLW",
+      "date": "2024-09-11",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GLW",
+      "date": "2024-09-24",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GLW",
+      "date": "2024-10-14",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GLW",
+      "date": "2024-10-23",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GM",
+      "date": "2024-09-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GM",
+      "date": "2024-09-18",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GM",
+      "date": "2024-10-15",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOG",
+      "date": "2024-01-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOG",
+      "date": "2024-01-18",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOG",
+      "date": "2024-03-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOG",
+      "date": "2024-04-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOG",
+      "date": "2024-04-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOG",
+      "date": "2024-04-24",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOG",
+      "date": "2024-11-11",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2024-01-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2024-01-18",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2024-03-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2024-04-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2024-04-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2024-04-24",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2024-11-11",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GPN",
+      "date": "2024-11-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GPN",
+      "date": "2024-11-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HAL",
+      "date": "2024-03-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HAL",
+      "date": "2024-03-28",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HD",
+      "date": "2024-07-19",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HD",
+      "date": "2024-07-31",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HES",
+      "date": "2024-02-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HES",
+      "date": "2024-03-12",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HPE",
+      "date": "2024-10-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HPE",
+      "date": "2024-11-06",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HPE",
+      "date": "2024-11-14",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HPQ",
+      "date": "2024-01-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HPQ",
+      "date": "2024-10-17",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HPQ",
+      "date": "2024-10-25",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HPQ",
+      "date": "2024-11-06",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HPQ",
+      "date": "2024-11-21",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HWM",
+      "date": "2024-08-27",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HWM",
+      "date": "2024-09-19",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HWM",
+      "date": "2024-09-30",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IBM",
+      "date": "2024-07-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IBM",
+      "date": "2024-08-12",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IFF",
+      "date": "2024-04-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "INCY",
+      "date": "2024-01-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "INCY",
+      "date": "2024-06-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IP",
+      "date": "2024-05-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IP",
+      "date": "2024-08-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IP",
+      "date": "2024-08-14",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IP",
+      "date": "2024-08-28",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IPG",
+      "date": "2024-08-27",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IR",
+      "date": "2024-10-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IR",
+      "date": "2024-10-17",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IR",
+      "date": "2024-11-14",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IR",
+      "date": "2024-11-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IR",
+      "date": "2024-12-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JCI",
+      "date": "2024-09-19",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JCI",
+      "date": "2024-10-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JCI",
+      "date": "2024-10-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JNPR",
+      "date": "2024-01-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JPM",
+      "date": "2024-10-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JPM",
+      "date": "2024-10-17",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JPM",
+      "date": "2024-10-25",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KDP",
+      "date": "2024-04-30",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KHC",
+      "date": "2024-04-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KHC",
+      "date": "2024-08-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KHC",
+      "date": "2024-09-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KHC",
+      "date": "2024-09-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KMX",
+      "date": "2024-07-17",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KMX",
+      "date": "2024-12-12",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KO",
+      "date": "2024-01-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KO",
+      "date": "2024-01-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KO",
+      "date": "2024-01-19",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KR",
+      "date": "2024-09-17",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KR",
+      "date": "2024-09-25",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KVUE",
+      "date": "2024-08-21",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KVUE",
+      "date": "2024-08-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LEN",
+      "date": "2024-07-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2024-01-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2024-01-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2024-08-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2024-08-28",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LUV",
+      "date": "2024-09-24",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LVS",
+      "date": "2024-12-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LYV",
+      "date": "2024-07-23",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MA",
+      "date": "2024-01-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MCD",
+      "date": "2024-01-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MCD",
+      "date": "2024-08-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MCD",
+      "date": "2024-08-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MCD",
+      "date": "2024-09-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MCHP",
+      "date": "2024-05-15",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MDLZ",
+      "date": "2024-01-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MDLZ",
+      "date": "2024-01-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MDT",
+      "date": "2024-01-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MET",
+      "date": "2024-09-17",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MET",
+      "date": "2024-10-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "META",
+      "date": "2024-08-15",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "META",
+      "date": "2024-08-23",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "META",
+      "date": "2024-09-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MGM",
+      "date": "2024-01-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MGM",
+      "date": "2024-02-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MGM",
+      "date": "2024-04-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MGM",
+      "date": "2024-07-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MGM",
+      "date": "2024-10-28",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MKC",
+      "date": "2024-08-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MMM",
+      "date": "2024-01-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MMM",
+      "date": "2024-01-11",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MMM",
+      "date": "2024-05-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MMM",
+      "date": "2024-06-27",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MMM",
+      "date": "2024-07-11",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MMM",
+      "date": "2024-07-19",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MNST",
+      "date": "2024-01-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MPC",
+      "date": "2024-01-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MRNA",
+      "date": "2024-05-01",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MRO",
+      "date": "2024-06-07",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MRO",
+      "date": "2024-07-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MRO",
+      "date": "2024-11-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MS",
+      "date": "2024-01-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MS",
+      "date": "2024-10-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MTCH",
+      "date": "2024-08-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MTCH",
+      "date": "2024-10-01",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MTCH",
+      "date": "2024-10-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MU",
+      "date": "2024-05-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MU",
+      "date": "2024-05-17",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MU",
+      "date": "2024-06-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MU",
+      "date": "2024-10-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NCLH",
+      "date": "2024-03-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NCLH",
+      "date": "2024-07-23",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NEE",
+      "date": "2024-04-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NEE",
+      "date": "2024-08-07",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NEE",
+      "date": "2024-08-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NEE",
+      "date": "2024-09-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NEM",
+      "date": "2024-05-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NFLX",
+      "date": "2024-05-24",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NFLX",
+      "date": "2024-06-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NFLX",
+      "date": "2024-08-23",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NFLX",
+      "date": "2024-09-13",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NFLX",
+      "date": "2024-09-27",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NFLX",
+      "date": "2024-10-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NI",
+      "date": "2024-01-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NRG",
+      "date": "2024-12-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2024-01-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2024-05-17",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NXPI",
+      "date": "2024-02-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NXPI",
+      "date": "2024-05-07",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NXPI",
+      "date": "2024-05-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "O",
+      "date": "2024-01-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ON",
+      "date": "2024-07-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ORCL",
+      "date": "2024-01-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ORCL",
+      "date": "2024-02-06",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PANW",
+      "date": "2024-05-24",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PANW",
+      "date": "2024-06-12",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PANW",
+      "date": "2024-06-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PANW",
+      "date": "2024-10-17",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PCAR",
+      "date": "2024-11-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PCAR",
+      "date": "2024-11-15",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PEAK",
+      "date": "2024-01-12",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PEG",
+      "date": "2024-03-13",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PEG",
+      "date": "2024-04-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PEG",
+      "date": "2024-12-02",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PEP",
+      "date": "2024-09-11",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PFE",
+      "date": "2024-07-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PLD",
+      "date": "2024-07-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PLD",
+      "date": "2024-08-23",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PNR",
+      "date": "2024-08-01",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PXD",
+      "date": "2024-03-13",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PYPL",
+      "date": "2024-03-25",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PYPL",
+      "date": "2024-04-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PYPL",
+      "date": "2024-04-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PYPL",
+      "date": "2024-08-23",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PYPL",
+      "date": "2024-09-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "QCOM",
+      "date": "2024-10-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "RCL",
+      "date": "2024-03-19",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "RF",
+      "date": "2024-08-28",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "RF",
+      "date": "2024-09-18",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "RF",
+      "date": "2024-09-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "RF",
+      "date": "2024-10-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ROL",
+      "date": "2024-05-13",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ROST",
+      "date": "2024-06-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SCHW",
+      "date": "2024-03-27",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SCHW",
+      "date": "2024-04-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SCHW",
+      "date": "2024-10-25",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SLB",
+      "date": "2024-03-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SLB",
+      "date": "2024-04-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SMCI",
+      "date": "2024-04-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SO",
+      "date": "2024-01-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SRE",
+      "date": "2024-05-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "STX",
+      "date": "2024-04-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "STX",
+      "date": "2024-06-07",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "STX",
+      "date": "2024-08-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SW",
+      "date": "2024-11-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SW",
+      "date": "2024-11-18",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SWKS",
+      "date": "2024-07-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TGT",
+      "date": "2024-09-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TGT",
+      "date": "2024-09-25",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TGT",
+      "date": "2024-10-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TPR",
+      "date": "2024-07-11",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSN",
+      "date": "2024-01-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSN",
+      "date": "2024-04-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSN",
+      "date": "2024-05-16",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSN",
+      "date": "2024-08-19",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TTWO",
+      "date": "2024-06-07",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TXN",
+      "date": "2024-01-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TXN",
+      "date": "2024-08-28",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TXN",
+      "date": "2024-09-19",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TXN",
+      "date": "2024-09-27",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UAL",
+      "date": "2024-02-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UAL",
+      "date": "2024-09-24",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UBER",
+      "date": "2024-08-19",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UBER",
+      "date": "2024-08-27",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UDR",
+      "date": "2024-05-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UDR",
+      "date": "2024-05-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UNH",
+      "date": "2024-05-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UNP",
+      "date": "2024-08-15",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UNP",
+      "date": "2024-09-17",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "USB",
+      "date": "2024-04-01",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "USB",
+      "date": "2024-07-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "VST",
+      "date": "2024-11-14",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "VTR",
+      "date": "2024-05-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "VTR",
+      "date": "2024-05-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "VTR",
+      "date": "2024-05-30",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "VTR",
+      "date": "2024-06-07",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WDC",
+      "date": "2024-05-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WDC",
+      "date": "2024-05-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WDC",
+      "date": "2024-06-06",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WDC",
+      "date": "2024-06-17",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WDC",
+      "date": "2024-12-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WMB",
+      "date": "2024-03-12",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WMB",
+      "date": "2024-03-27",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WMT",
+      "date": "2024-02-07",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WMT",
+      "date": "2024-02-15",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WRK",
+      "date": "2024-02-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WY",
+      "date": "2024-01-03",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WYNN",
+      "date": "2024-12-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ZTS",
+      "date": "2024-07-11",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ZTS",
+      "date": "2024-07-19",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ZTS",
+      "date": "2024-07-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    }
+  ],
+  "research_provenance": {
+    "schema_version": 1,
+    "membership_basis": "point_in_time",
+    "source_quality": "public_pit_unverified",
+    "manifest_name": "sp500-public-pit-daily-lagged-2023-2025",
+    "manifest_sha256": "sha256:fb74f173d52b345f7cf16567763ff16b99cf35f54205e0d692335fab621b8421",
+    "intervals": [
+      {
+        "as_of": "2023-12-18",
+        "end": "2024-02-01",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2023-12-19",
+        "symbols_count": 503,
+        "symbols_sha256": "sha256:e034646b93a1b364bb2100ca04264ef05cd6b0617c624d32e58c66d4d7c786d1"
+      },
+      {
+        "as_of": "2024-02-01",
+        "end": "2024-03-04",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2024-02-02",
+        "symbols_count": 503,
+        "symbols_sha256": "sha256:bf09806e4054957f6297f4bae2d99b1cd029f03c4baa77f28edcd27ca19653a6"
+      },
+      {
+        "as_of": "2024-03-04",
+        "end": "2024-03-18",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2024-03-05",
+        "symbols_count": 503,
+        "symbols_sha256": "sha256:abf4f493d38a65dabbe98375cfc2a07a5a49d8b490064059bda1740af321fb32"
+      },
+      {
+        "as_of": "2024-03-18",
+        "end": "2024-03-25",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2024-03-19",
+        "symbols_count": 503,
+        "symbols_sha256": "sha256:e5625961806679b9dc63c84d5b6923eb90334fff27640541af197bf53ae4c872"
+      },
+      {
+        "as_of": "2024-03-25",
+        "end": "2024-04-01",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2024-03-26",
+        "symbols_count": 503,
+        "symbols_sha256": "sha256:e94b4c837873185be724de560d5d1a8dc9e979ea42b1800fdd85ef6302ee6153"
+      },
+      {
+        "as_of": "2024-04-02",
+        "end": "2024-05-08",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2024-04-03",
+        "symbols_count": 503,
+        "symbols_sha256": "sha256:4d2f832ed101255c9915e10794c9a382a0aa63c78f724b45c4f61840f0e8bc63"
+      },
+      {
+        "as_of": "2024-05-08",
+        "end": "2024-06-24",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2024-05-09",
+        "symbols_count": 503,
+        "symbols_sha256": "sha256:560861237bbae1fc054efd6b9133ea2555c64c6b8f97ddd37dd2594447378c97"
+      },
+      {
+        "as_of": "2024-06-24",
+        "end": "2024-07-08",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2024-06-25",
+        "symbols_count": 503,
+        "symbols_sha256": "sha256:303f0d84f846cf74b4c048ca9ef4b5e5dcbd55ca2cd388add26c7cf13c8ad3fe"
+      },
+      {
+        "as_of": "2024-07-08",
+        "end": "2024-09-23",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2024-07-09",
+        "symbols_count": 503,
+        "symbols_sha256": "sha256:dbbba6fd51e75bcc7b31d52319fa0cd5646be3d1c452f79d865445a9ec996c59"
+      },
+      {
+        "as_of": "2024-09-23",
+        "end": "2024-09-30",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2024-09-24",
+        "symbols_count": 503,
+        "symbols_sha256": "sha256:5eec8c44d41889547e51c8806787df30784af07a4f40a871091b5adf5c9e4fb2"
+      },
+      {
+        "as_of": "2024-09-30",
+        "end": "2024-10-01",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2024-10-01",
+        "symbols_count": 504,
+        "symbols_sha256": "sha256:ff092c28028304929144e3c0db0dac747c31098e2e0005c91d2c2e2554a71e89"
+      },
+      {
+        "as_of": "2024-10-01",
+        "end": "2024-11-26",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2024-10-02",
+        "symbols_count": 503,
+        "symbols_sha256": "sha256:312c9c4b29286db019bb36f4d681714faa45690c89ba07cbd7ed021d4d19909c"
+      },
+      {
+        "as_of": "2024-11-26",
+        "end": "2024-12-23",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2024-11-27",
+        "symbols_count": 503,
+        "symbols_sha256": "sha256:592a4b39126f812d98e34b6fcc7f5ebc4b82af784f231219ff323cfe47dc1bdc"
+      },
+      {
+        "as_of": "2024-12-23",
+        "end": "2025-03-24",
+        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
+        "start": "2024-12-24",
+        "symbols_count": 503,
+        "symbols_sha256": "sha256:b6e27d4fe726d73d3e6a2d69f5c555118620a1264efd1529d9547f3dab7a6486"
+      }
+    ],
+    "setup_count": 381
+  },
+  "cohort": {
+    "selection": "all_eligible_rows",
+    "start": "2024-01-01",
+    "end": "2024-12-31",
+    "after": "09:30",
+    "source_entry_db": "/Users/shtylenko/Projects/trading/llm_trader/data/cup_handle/entries_pit_sp500_2023_2025.db"
+  }
+}

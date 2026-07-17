@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 
 from trading.marketdata import fetch_bars
+from trading.marketdata.calendar import trading_days_in_range
 
 from trading.llm_trader.indicators import (
     DAILY_REPLAY_PLAN_LOOKBACK_BARS,
@@ -161,6 +162,15 @@ def fetch_market_regime_features(cfg: CupHandleConfig) -> dict[date, dict[str, A
         raise MarketRegimeDataError(
             "SPY regime diagnostics have no indicator-complete trading dates in "
             f"{cfg.start.isoformat()}..{cfg.end.isoformat()}"
+        )
+    expected_dates = trading_days_in_range(cfg.start, cfg.end)
+    missing_dates = [day for day in expected_dates if day not in records]
+    if missing_dates:
+        preview = ", ".join(day.isoformat() for day in missing_dates[:5])
+        suffix = "" if len(missing_dates) <= 5 else f" (+{len(missing_dates) - 5} more)"
+        raise MarketRegimeDataError(
+            "SPY regime diagnostics are incomplete for the requested market-session scope: "
+            f"{preview}{suffix}"
         )
     return records
 
@@ -464,6 +474,7 @@ def _detect_confirmed_breakouts_from_frame(
     strategy_id: str = "cup_handle",
     market_ok_dates: Optional[set[date]] = None,
     market_regime_features: Optional[dict[date, dict[str, Any]]] = None,
+    eligible_plan_dates: Optional[set[date]] = None,
 ) -> list[Entry]:
     """Historical confirmation labels, retained for offline analysis only.
 
@@ -489,6 +500,8 @@ def _detect_confirmed_breakouts_from_frame(
         ts = frame.index[bi]
         d = _index_date(ts)
         if d < cfg.start or d > cfg.end or d in seen_days:
+            continue
+        if eligible_plan_dates is not None and d not in eligible_plan_dates:
             continue
         if cfg.require_spy_above_sma50:
             if market_ok_dates is None:
@@ -558,6 +571,7 @@ def _detect_prebreak_arms_from_frame(
     strategy_id: str = "cup_handle",
     market_ok_dates: Optional[set[date]] = None,
     market_regime_features: Optional[dict[date, dict[str, Any]]] = None,
+    eligible_plan_dates: Optional[set[date]] = None,
 ) -> list[Entry]:
     """Emit causal end-of-day plans for a completed cup-and-handle.
 
@@ -580,6 +594,12 @@ def _detect_prebreak_arms_from_frame(
     for plan_i in range(start_i, len(frame)):
         d = _index_date(frame.index[plan_i])
         if d < cfg.start or d > cfg.end:
+            continue
+        # Point-in-time research may restrict which completed sessions a ticker
+        # was eligible to arm on.  Apply that membership decision before the
+        # cooldown and formation state are updated: an ineligible plan was never
+        # actionable, so it must not suppress a later eligible one.
+        if eligible_plan_dates is not None and d not in eligible_plan_dates:
             continue
         if cfg.require_spy_above_sma50:
             if market_ok_dates is None:
@@ -639,6 +659,7 @@ def detect_from_frame(
     strategy_id: str = "cup_handle",
     market_ok_dates: Optional[set[date]] = None,
     market_regime_features: Optional[dict[date, dict[str, Any]]] = None,
+    eligible_plan_dates: Optional[set[date]] = None,
 ) -> list[Entry]:
     """Detect the configured cup-and-handle signal type over a daily frame.
 
@@ -655,6 +676,7 @@ def detect_from_frame(
             strategy_id=strategy_id,
             market_ok_dates=market_ok_dates,
             market_regime_features=market_regime_features,
+            eligible_plan_dates=eligible_plan_dates,
         )
     return _detect_confirmed_breakouts_from_frame(
         df,
@@ -663,6 +685,7 @@ def detect_from_frame(
         strategy_id=strategy_id,
         market_ok_dates=market_ok_dates,
         market_regime_features=market_regime_features,
+        eligible_plan_dates=eligible_plan_dates,
     )
 
 
@@ -673,6 +696,7 @@ def detect_ticker(
     strategy_id: str = "cup_handle",
     market_ok_dates: Optional[set[date]] = None,
     market_regime_features: Optional[dict[date, dict[str, Any]]] = None,
+    eligible_plan_dates: Optional[set[date]] = None,
 ) -> list[Entry]:
     """Fetch daily bars and detect entries for one ticker."""
     cfg.validate()
@@ -702,4 +726,5 @@ def detect_ticker(
         strategy_id=strategy_id,
         market_ok_dates=market_ok_dates,
         market_regime_features=market_regime_features,
+        eligible_plan_dates=eligible_plan_dates,
     )

@@ -18,12 +18,13 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 from trading.llm_trader.fsutils import atomic_write_json
+from trading.marketdata.calendar import trading_days_in_range
 from trading.llm_trader.store import EntryStore
 
 from .config import CupHandleConfig
@@ -61,16 +62,47 @@ def _entry_universe_provenance(
 def _stamp_scope_entries(
     scope: ScopeScan,
     universe: ResearchUniverse,
-    interval: UniverseInterval,
+    intervals: list[UniverseInterval],
 ) -> None:
     """Attach immutable membership provenance before an Entry reaches storage."""
-    provenance = _entry_universe_provenance(universe, interval)
     for entry in scope.entries:
+        interval = next(
+            (
+                candidate for candidate in intervals
+                if candidate.start <= entry.day <= candidate.end
+            ),
+            None,
+        )
+        if interval is None or entry.ticker.upper() not in interval.symbols:
+            raise RuntimeError(
+                "research scanner emitted a plan outside its point-in-time membership scope: "
+                f"{entry.ticker} {entry.day.isoformat()}"
+            )
+        provenance = _entry_universe_provenance(universe, interval)
         # Entry.features belongs to the detector result and is not shared across
         # entries.  Copy defensively anyway, because it is evidence, not a mutable
         # runtime scratchpad.
         entry.features = dict(entry.features or {})
         entry.features["research_universe"] = provenance
+
+
+def _eligible_plan_dates_by_symbol(
+    intervals: list[UniverseInterval],
+) -> dict[str, set[date]]:
+    """Return exactly the trading sessions each symbol was research-eligible.
+
+    The detector is intentionally run once per ticker across the entire scan
+    range.  That preserves its formation/cooldown state through unrelated index
+    membership-file boundaries.  A ticker that was absent on a session is not
+    allowed to create scanner state on that session, because no strategy plan
+    could have been armed then.
+    """
+    dates_by_symbol: dict[str, set[date]] = {}
+    for interval in intervals:
+        eligible_dates = set(trading_days_in_range(interval.start, interval.end))
+        for symbol in interval.symbols:
+            dates_by_symbol.setdefault(symbol, set()).update(eligible_dates)
+    return dates_by_symbol
 
 
 def run_research_scan(
@@ -93,38 +125,41 @@ def run_research_scan(
     # entire research range so interval boundaries cannot create subtly
     # different SPY warmups for the same date.
     market_regime_features = fetch_market_regime_features(cfg)
-    scope_results: list[tuple[UniverseInterval, ScopeScan]] = []
     stats = ResearchScanStats(intervals_scanned=len(intervals))
-    for interval in intervals:
-        interval_cfg = replace(cfg, start=interval.start, end=interval.end)
-        log.info(
-            "PIT interval %s → %s (as_of=%s; %d symbols; source=%s)",
-            interval.start, interval.end, interval.as_of, len(interval.symbols), interval.source,
-        )
-        scope = scan_scope(
-            interval_cfg,
-            symbols=list(interval.symbols),
-            progress_every=progress_every,
-            strategy_id=strategy_id,
-            market_regime_features=market_regime_features,
-        )
-        _stamp_scope_entries(scope, universe, interval)
-        scope_results.append((interval, scope))
-        stats.symbols_requested += len(scope.symbols_requested)
-        stats.symbols_succeeded += len(scope.symbols_scanned)
-        stats.symbols_failed += len(scope.symbols_failed)
-        stats.entries_found += len(scope.entries)
+    eligible_dates_by_symbol = _eligible_plan_dates_by_symbol(intervals)
+    symbols = sorted(eligible_dates_by_symbol)
+    log.info(
+        "PIT continuous scan %s → %s | %d intervals | %d distinct symbols",
+        cfg.start, cfg.end, len(intervals), len(symbols),
+    )
+    scope = scan_scope(
+        cfg,
+        symbols=symbols,
+        progress_every=progress_every,
+        strategy_id=strategy_id,
+        market_regime_features=market_regime_features,
+        eligible_plan_dates_by_symbol=eligible_dates_by_symbol,
+    )
+    _stamp_scope_entries(scope, universe, intervals)
+    failed_symbols = set(scope.symbols_failed)
+    stats.symbols_requested = sum(len(interval.symbols) for interval in intervals)
+    stats.symbols_failed = sum(
+        sum(symbol in failed_symbols for symbol in interval.symbols)
+        for interval in intervals
+    )
+    stats.symbols_succeeded = stats.symbols_requested - stats.symbols_failed
+    stats.entries_found = len(scope.entries)
 
     # All expensive/fallible work above has succeeded.  One transaction now
     # replaces every permitted scope, preserving prior output on any DB error.
     store = EntryStore(cfg.db_path)
     try:
         stats.stale_entries_removed = store.sync_scopes(
-            [entry for _interval, scope in scope_results for entry in scope.entries],
+            scope.entries,
             strategy=strategy_id,
             scopes=[
-                (scope.symbols_scanned, interval.start.isoformat(), interval.end.isoformat())
-                for interval, scope in scope_results
+                (list(interval.symbols), interval.start.isoformat(), interval.end.isoformat())
+                for interval in intervals
             ],
         )
         txt = store.dump_text(cfg.db_path.with_suffix(".txt"), strategy=strategy_id)
@@ -146,12 +181,19 @@ def run_research_scan(
         "interval_results": [
             {
                 **interval.provenance(),
-                "symbols_requested": len(scope.symbols_requested),
-                "symbols_succeeded": len(scope.symbols_scanned),
-                "symbols_failed": scope.symbols_failed,
-                "entries_found": len(scope.entries),
+                "symbols_requested": len(interval.symbols),
+                "symbols_succeeded": sum(
+                    symbol not in failed_symbols for symbol in interval.symbols
+                ),
+                "symbols_failed": sorted(
+                    symbol for symbol in interval.symbols if symbol in failed_symbols
+                ),
+                "entries_found": sum(
+                    interval.start <= entry.day <= interval.end
+                    for entry in scope.entries
+                ),
             }
-            for interval, scope in scope_results
+            for interval in intervals
         ],
         "entries_found": stats.entries_found,
         "stale_entries_removed": stats.stale_entries_removed,

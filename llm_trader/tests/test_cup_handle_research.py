@@ -117,7 +117,7 @@ def test_lagged_daily_csv_manifest_never_uses_same_day_membership(tmp_path):
     ]
 
 
-def test_research_scan_publishes_all_intervals_once_and_stamps_entries(tmp_path, monkeypatch):
+def test_research_scan_preserves_detector_state_across_intervals_and_stamps_entries(tmp_path, monkeypatch):
     from trading.llm_trader.strategies.cup_handle import research_scan
 
     db = tmp_path / "entries.db"
@@ -131,8 +131,19 @@ def test_research_scan_publishes_all_intervals_once_and_stamps_entries(tmp_path,
     universe = load_research_universe(manifest_path)
     cfg = CupHandleConfig(start=date(2025, 1, 1), end=date(2025, 2, 28), db_path=db)
 
-    def fake_scan(cfg, *, symbols, **_kwargs):
-        return _scope(symbols[0], cfg.start + (date(2025, 1, 3) - date(2025, 1, 1)))
+    calls = []
+
+    def fake_scan(cfg, *, symbols, eligible_plan_dates_by_symbol, **_kwargs):
+        calls.append((cfg.start, cfg.end, tuple(symbols), eligible_plan_dates_by_symbol))
+        entries = [
+            _scope("AAA", date(2025, 1, 3)).entries[0],
+            _scope("BBB", date(2025, 2, 3)).entries[0],
+        ]
+        return ScopeScan(
+            stats=ScanStats(symbols_scanned=2, entries_found=2),
+            symbols_requested=list(symbols), symbols_scanned=list(symbols),
+            symbols_failed=[], entries=entries,
+        )
 
     monkeypatch.setattr(
         research_scan,
@@ -144,6 +155,13 @@ def test_research_scan_publishes_all_intervals_once_and_stamps_entries(tmp_path,
 
     assert stats.intervals_scanned == 2
     assert stats.stale_entries_removed == 2
+    assert len(calls) == 1
+    scanned_start, scanned_end, symbols, eligible = calls[0]
+    assert (scanned_start, scanned_end, symbols) == (
+        date(2025, 1, 1), date(2025, 2, 28), ("AAA", "BBB"),
+    )
+    assert date(2025, 1, 3) in eligible["AAA"]
+    assert date(2025, 2, 3) in eligible["BBB"]
     with EntryStore(db) as store:
         rows = store.all_rows(strategy="cup_handle")
     assert [(r["ticker"], r["date"]) for r in rows] == [
@@ -174,10 +192,8 @@ def test_research_scan_provider_failure_in_later_interval_leaves_database_unchan
     calls = []
 
     def fake_scan(cfg, *, symbols, **_kwargs):
-        calls.append(tuple(symbols))
-        if symbols == ["BBB"]:
-            raise RuntimeError("provider coverage failed")
-        return _scope("AAA", date(2025, 1, 3))
+        calls.append((cfg.start, cfg.end, tuple(symbols)))
+        raise RuntimeError("provider coverage failed")
 
     monkeypatch.setattr(
         research_scan,
@@ -188,7 +204,7 @@ def test_research_scan_provider_failure_in_later_interval_leaves_database_unchan
     with pytest.raises(RuntimeError, match="provider coverage failed"):
         research_scan.run_research_scan(cfg, universe=universe)
 
-    assert calls == [("AAA",), ("BBB",)]
+    assert calls == [(date(2025, 1, 1), date(2025, 2, 28), ("AAA", "BBB"))]
     with EntryStore(db) as store:
         rows = store.all_rows(strategy="cup_handle")
     assert [(r["ticker"], r["date"], r["reason"]) for r in rows] == [

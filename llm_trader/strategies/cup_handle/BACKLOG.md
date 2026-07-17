@@ -133,6 +133,27 @@ that source, and create chronological development and untouched holdout cohorts.
 Do not draw a profitability or geometry conclusion from the public-validation
 cohort alone.
 
+### Continuous detector state across PIT boundaries — completed 2026-07-17
+
+- [x] Replace interval-by-interval detector calls with one continuous scan per
+  ticker across the complete requested research period. Point-in-time membership
+  is now an eligible-plan-date map, applied before formation/cooldown state is
+  updated. An absent ticker therefore cannot create a plan or suppress a later
+  eligible arm, while an unrelated constituent-file boundary cannot reset the
+  scanner's five-bar arm cooldown.
+- [x] Stamp each emitted plan with the membership interval in effect on that
+  plan date and fail if a detector output is outside its PIT membership scope.
+  Tests cover both the continuous one-scope contract and the eligible-date
+  cooldown semantics.
+
+**Correction evidence:** the first 2023–2025 scan used 45 independent detector
+calls and produced 1,535 plans. The corrected continuous scan completed 562
+distinct symbols with zero provider failures and published 1,352 plans
+(487/381/484 in 2023/2024/2025), removing 183 boundary-reset artifacts. The
+prior 2025-only public-PIT result with 569 plans is **superseded** by the
+484-plan continuous-history cohort and must not be used for strategy selection.
+The 2026-H1 holdout remains unexecuted and unscored.
+
 ### Deterministic geometry selection
 
 **Problem:** `_find_cup_and_handle` returns the first valid geometry. Iteration currently favors short handles and short cups, despite comments suggesting a different selection policy. Changing any boundary can therefore silently choose a different formation rather than merely tighten a filter.
@@ -211,10 +232,12 @@ effective R ranged from `-0.214` to `+0.006` before Q4 fell to `-0.109`. One
 calendar year is not stable enough to infer an all-regime market rule or to
 optimize a portfolio priority from these descriptive bands.
 
-**Data-integrity enforcement:** any missing shared SPY diagnostic now aborts
-the scanner immediately rather than being counted as an isolated ticker
-failure. Before a future holdout refresh, repair the shared SPY daily-series
-coverage through the holdout end; never impute or carry forward a regime value.
+**Data-integrity enforcement — completed 2026-07-17:** any missing shared SPY
+diagnostic now aborts the scanner immediately rather than being counted as an
+isolated ticker failure. The SPY raw cache tail was repaired with actual
+provider bars (no imputation or carry-forward), and the regime fetch now
+preflights every expected market session in the complete requested scope
+before scanning a single ticker.
 
 ### Single-name relative performance versus SPY
 
@@ -341,9 +364,12 @@ for `$7,231.14` / `+0.482` portfolio effective R and `-$1,521.19` realized-P&L
 maximum drawdown. The higher constrained outcome is selection, not alpha: all
 four mechanically rejected entries happened to be losers in this small cohort.
 This is a validation-only safety check, not an optimization target or promotion
-result.
+result. **It is additionally superseded as performance evidence by the
+continuous-state correction:** its scanner population was built before PIT
+boundary cooldown resets were removed. Retain it only as historical harness
+smoke evidence.
 
-**Full 2025 development baseline — completed 2026-07-17:** the sealed
+**Superseded 2025 development baseline — 2026-07-17:** the formerly sealed
 `testset_sp500_public_pit_dev_2025` contains every eligible causal plan from
 2025 (569 setups); the sealed 249-setup 2026-H1 cohort remains untouched.
 The strict deterministic run completed all 569 leaves with zero voids and zero
@@ -357,6 +383,32 @@ The ticker-exclusive control was also negative (`-0.011` effective R). Treat
 the independent-session gain as non-investable; do not open the 2026-H1
 holdout or tune thresholds until a predeclared development-only selection
 hypothesis is implemented.
+
+**Why superseded:** that scanner run reset formation and cooldown state at PIT
+interval boundaries. Keep its artifacts for audit history only; do not compare a
+candidate with this 569-plan baseline or treat its P&L as a valid development
+result.
+
+**Continuous multi-year development baseline — completed 2026-07-17:** the
+replacement public-PIT cohort,
+`testset_sp500_public_pit_dev_2023_2025_continuous`, seals all 1,352 causal
+plans from 2023–2025 under continuous ticker state. Deterministic v0.7
+completed 1,352/1,352 leaves with zero voids: 940 trades / 412 no-trades,
+`$16,924.78`, and `+0.025` independent effective R. Under the unchanged
+3-position / `$1,500`-risk / `$50,000`-gross contract, only 151 trades were
+feasible (789 capacity/ticker/gross rejections), for `$-23,212.76`, `-0.034`
+effective R, and `$-27,213.38` realized-P&L maximum drawdown. By year, portfolio
+effective R was `+0.016` (2023), `-0.077` (2024), and `-0.057` (corrected 2025).
+The strategy is not investable under this contract; do not promote v0.7 or
+interpret its independent-session result as capacity-adjusted alpha.
+
+**Predeclared frozen-plan regime veto — rejected again:** standing down unless
+SPY was above both SMA50 and SMA200 vetoed 149 of 1,352 baseline plans. It
+improved independent effective R to `+0.049`, but portfolio P&L changed only
+from `$-23,212.76` to `$-22,953.68` (still `-0.034` effective R), with a
+`$-25,301.11` realized-P&L maximum drawdown. It remains a rejected diagnostic
+counterfactual, not a scanner gate or portfolio rule.
+
 - [ ] Extend the replay with point-in-time sector concentration and
   mark-to-market portfolio heat/drawdown. The current drawdown is realized-P&L
   only; it deliberately never invents intraday portfolio marks from leaf data.

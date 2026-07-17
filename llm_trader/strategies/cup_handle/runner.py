@@ -55,6 +55,7 @@ def scan_scope(
     progress_every: int = 50,
     strategy_id: str = "cup_handle",
     market_regime_features: Optional[dict[date, dict]] = None,
+    eligible_plan_dates_by_symbol: Optional[dict[str, set[date]]] = None,
 ) -> ScopeScan:
     """Detect one scanner scope without writing the database.
 
@@ -107,6 +108,10 @@ def scan_scope(
                 strategy_id=strategy_id,
                 market_ok_dates=market_ok_dates,
                 market_regime_features=market_regime_features,
+                eligible_plan_dates=(
+                    eligible_plan_dates_by_symbol.get(sym)
+                    if eligible_plan_dates_by_symbol is not None else None
+                ),
             )
         except MarketRegimeDataError as exc:
             # This is a required shared indicator stream, not an isolated ticker

@@ -232,6 +232,32 @@ With a point-in-time earnings calendar, test a no-new-entry window before earnin
 
 Independent session backtests do not model simultaneous positions. Add portfolio-level maximum open risk, sector concentration limits, and regime-adjusted portfolio heat before paper/live portfolio use.
 
+**Priority escalation — observed 2026-07-17:** the deterministic 59-plan
+exploratory panel contained 11 overlapping same-ticker position pairs (three
+concurrent ABBV positions alone). A causal one-open-position-per-ticker control
+removed eight entries and reduced the panel's effective R from `+0.288` to
+`+0.142`; the independent sessions also reached seven concurrent positions / about
+`$3,484` initial risk on a nominal `$500` per-trade budget. Before any geometry/filter experiment, complete a
+portfolio replay that enforces at least one open position per ticker; do not
+interpret independent-session P&L as portfolio P&L.
+
+- [x] Add a reproducible ticker-exclusive shadow control to `batchsim
+  diagnostics`: it identifies every overlap, reports the causal one-open-
+  position-per-ticker result, and reports maximum independent concurrent risk.
+- [x] Add the deterministic post-fill chronological portfolio replayer
+  (`batchsim portfolio`): it consumes sealed action records only, fails closed
+  when actions and persisted P&L disagree, applies stable same-timestamp
+  priority, enforces one open position per ticker, maximum open positions,
+  maximum initial risk, and gross-notional buying-power limits, and writes an
+  auditable `portfolio.json` artifact. On `cup-59x-v070`, the predeclared
+  3-position / $1,500-risk / $50,000-gross contract accepted 25 of 37 leaf
+  trades, rejected eight same-ticker overlaps and four capacity conflicts, and
+  produced `$3,624.62` / `+0.123` effective R (versus `$8,497.49` / `+0.288`
+  independently). This cohort is still exploratory and non-promotable.
+- [ ] Extend the replay with point-in-time sector concentration and
+  mark-to-market portfolio heat/drawdown. The current drawdown is realized-P&L
+  only; it deliberately never invents intraday portfolio marks from leaf data.
+
 ### Exit-policy research
 
 The v0.6 engine-owned half-at-T1/remainder-at-T2 plus breakeven stop is the baseline. Only on frozen scanner plans, compare a small pre-registered set of execution policies (for example current ladder versus a trailing remainder). Use the same conservative OHLC, gap, slippage, fee, and participation model.

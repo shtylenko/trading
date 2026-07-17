@@ -167,6 +167,12 @@ def test_cup_holdout_requires_and_records_one_pit_universe_manifest(tmp_path):
     out.write_text(json.dumps({"setups": setups}), encoding="utf-8")
     with pytest.raises(ValueError, match="lacks research_provenance"):
         batchsim._cup_handle_testset_research_provenance(out, setups)
+    exploratory, tier = batchsim._cup_handle_research_tier(
+        out, setups, exploratory=True,
+    )
+    assert tier == "exploratory"
+    assert exploratory["membership_basis"] == "unverified_exploratory"
+    assert exploratory["promotion_eligible"] is False
 
 
 def test_causal_batch_preflight_rejects_a_stale_exact_setup(tmp_path):
@@ -384,6 +390,24 @@ def test_audit_rederives_deterministic_policy_without_hermes_transcript(tmp_path
     assert batchsim.audit("deterministic-clean") == 0
     session = json.loads((sdir / "session.json").read_text())
     assert "void" not in session
+
+
+def test_audit_clears_agent_abandoned_stamp_from_a_deterministic_policy_leaf(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    sdir = _deterministic_policy_session(tmp_path, "deterministic-no-agent-abandon")
+    session_path = sdir / "session.json"
+    session = json.loads(session_path.read_text())
+    session["agent_abandoned"] = "stale generic agent heuristic"
+    session_path.write_text(json.dumps(session))
+    monkeypatch.setattr(
+        batchsim, "_resolve_batch_commands",
+        lambda _sids: (_ for _ in ()).throw(AssertionError("policy leaves must not query Hermes")),
+    )
+
+    assert batchsim.audit("deterministic-no-agent-abandon") == 0
+    cleaned = json.loads(session_path.read_text())
+    assert "agent_abandoned" not in cleaned
 
 
 def test_audit_voids_tampered_deterministic_policy_leaf_without_hermes(tmp_path, monkeypatch):
@@ -1582,3 +1606,64 @@ def test_diagnostics_reports_grade_order_behavior_and_in_position_mfe(tmp_path, 
     assert result["by_exit"]["protective stop"]["trades"] == 1
     assert result["adds"] == {"attempted": 1, "filled": 1}
     assert result["in_position_mfe_per_share"]["mean"] == pytest.approx(2.0)
+    assert result["ticker_exclusive_portfolio_control"]["available"] is False
+
+
+def test_ticker_exclusive_portfolio_control_skips_later_overlapping_fill():
+    control = batchsim._ticker_exclusive_portfolio_control([
+        {
+            "ticker": "AAA", "setup": "2025-01-01", "entry_day": "2025-01-02",
+            "exit_day": "2025-01-10", "r_multiple": 1.0, "realized_pnl": 100.0,
+            "initial_risk": 100.0,
+        },
+        {
+            "ticker": "AAA", "setup": "2025-01-05", "entry_day": "2025-01-06",
+            "exit_day": "2025-01-15", "r_multiple": 3.0, "realized_pnl": 300.0,
+            "initial_risk": 100.0,
+        },
+        {
+            "ticker": "BBB", "setup": "2025-01-04", "entry_day": "2025-01-06",
+            "exit_day": "2025-01-08", "r_multiple": -1.0, "realized_pnl": -100.0,
+            "initial_risk": 100.0,
+        },
+    ], setup_count=4, unresolved_trades=0)
+
+    assert control["available"] is True
+    assert control["ticker_exclusive_trades"] == 2
+    assert control["skipped_overlapping_trades"] == 1
+    assert control["ticker_exclusive_pnl"] == 0.0
+    assert control["ticker_exclusive_effective_r"] == 0.0
+    assert control["max_independent_concurrent_positions"] == 3
+
+
+def test_portfolio_replay_writes_an_auditable_batch_artifact(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path / "simulations")
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", recorder.SIM_ROOT / "_batch")
+    tag, sid = "portfolio", "20260717120000-AAA-abc123"
+    sdir = recorder.SIM_ROOT / sid
+    sdir.mkdir(parents=True)
+    (sdir / "session.json").write_text(json.dumps({
+        "id": sid, "status": "complete", "batch": tag, "ticker": "AAA",
+        "historical_date": "2025-01-02", "real_run_ts": "2026-07-17T12:00:00",
+    }))
+    (sdir / "pnl.json").write_text(json.dumps({
+        "traded": True, "initial_risk": 100.0, "r_multiple": 1.0,
+        "realized_pnl": 100.0,
+    }))
+    (sdir / "actions.json").write_text(json.dumps([
+        {"date": "2025-01-03", "time": "16:00", "side": "buy", "price": 10.0,
+         "shares": 100, "position_after": 100, "realized_delta": -0.5},
+        {"date": "2025-01-06", "time": "16:00", "side": "sell", "price": 11.005,
+         "shares": 100, "position_after": 0, "realized_delta": 100.5},
+    ]))
+    batchsim._write_batch_meta(
+        tag, status="complete", strategy="cup_handle", decision_source="deterministic_policy",
+        planned=1, repeats=1, testset_hash="sha256:test", version="0.7.0",
+    )
+
+    result, artifact = batchsim.portfolio_replay(tag)
+
+    assert artifact == batchsim.BATCH_LOGS / tag / "portfolio.json"
+    assert json.loads(artifact.read_text()) == result
+    assert result["summary"]["portfolio_realized_pnl"] == 100.0
+    assert result["source"]["testset_hash"] == "sha256:test"

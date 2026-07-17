@@ -23,6 +23,7 @@ Subcommands
     run         spawn the agents for one skill version, tagged as one batch cohort
     audit       scan agent transcripts; mark any peeking session void (excluded from stats)
     report      thin wrapper over ``recorder report --batch`` for one cohort
+    portfolio   chronologically replay sealed deterministic cup-handle fills under shared limits
 
 Design choices (per the harness spec):
 - **Local executor model** by default (`--model`) — we measure what actually trades live.
@@ -624,6 +625,33 @@ def _cup_handle_testset_research_provenance(path: Path, setups: list[dict]) -> d
     if not isinstance(provenance.get("intervals"), list) or not provenance["intervals"]:
         raise ValueError("cup_handle batch testset research provenance has no interval evidence")
     return provenance
+
+
+def _cup_handle_research_tier(
+    path: Path,
+    setups: list[dict],
+    *,
+    exploratory: bool,
+) -> tuple[dict, str]:
+    """Return testset provenance plus an explicit promotion-eligibility tier.
+
+    The normal path never accepts an unproven universe.  ``--exploratory`` is a
+    deliberate escape hatch for fast deterministic *diagnostics* over legacy or
+    current-snapshot data; it stamps the batch as non-promotable and the compare
+    gate refuses to treat it as validation evidence.
+    """
+    try:
+        return _cup_handle_testset_research_provenance(path, setups), "promotion_eligible"
+    except ValueError as exc:
+        if not exploratory:
+            raise
+        return {
+            "schema_version": 1,
+            "membership_basis": "unverified_exploratory",
+            "promotion_eligible": False,
+            "reason": str(exc),
+            "setup_count": len(setups),
+        }, "exploratory"
 
 
 # ───────────────────────────── run ──────────────────────────────────────────
@@ -1570,7 +1598,7 @@ def run(
     retries: int = _DEFAULT_RETRIES, max_reentries: int = 1,
     trade_until: Optional[str] = None,
     resume: bool = False, dry_run: bool = False, session: Optional[str] = None,
-    strategy: str = "warrior",
+    strategy: str = "warrior", exploratory: bool = False,
 ) -> str:
     """Run the batch: spawn agents for every (setup × repeat), then audit + report."""
     resume_meta: dict = {}
@@ -1616,6 +1644,8 @@ def run(
             max_reentries = 1 if bmeta["reentry"] else 0
         if "trade_until" in bmeta:
             trade_until = bmeta["trade_until"]
+        if bmeta.get("research_tier") == "exploratory":
+            exploratory = True
         print(f"--resume: using version={version} model={model} "
               f"set={testset} repeats={repeats} max_reentries={max_reentries} "
               f"trade_until={trade_until} (from batch.json)", file=sys.stderr)
@@ -1701,9 +1731,9 @@ def run(
                 "cannot resume with different skill bytes than the batch's recorded skill_hash"
             )
     setups = load_testset(testset)
-    research_provenance = (
-        _cup_handle_testset_research_provenance(testset, setups)
-        if strategy_id == "cup_handle" else None
+    research_provenance, research_tier = (
+        _cup_handle_research_tier(testset, setups, exploratory=exploratory)
+        if strategy_id == "cup_handle" else (None, "not_applicable")
     )
 
     # Do this before allocating a batch id, staging a session, or starting an
@@ -1773,6 +1803,7 @@ def run(
     )
     print(f"batch {tag} (session {session_id}): version {version}, {len(setups)} setups × {repeats} "
           f"= {len(work)} runs (parallel {parallel}, {executor_desc})"
+          f"{' [EXPLORATORY — NON-PROMOTABLE]' if research_tier == 'exploratory' else ''}"
           f"{' [DRY RUN]' if dry_run else ''}", file=sys.stderr)
 
     if dry_run:
@@ -1833,6 +1864,7 @@ def run(
         tag, version=version, model=model, testset=str(testset),
         testset_hash=testset_hash, skill_hash=skill_meta.get("content_hash"),
         research_provenance=research_provenance,
+        research_tier=research_tier,
         runner_contract=current_runner_contract,
         decision_source=("deterministic_policy" if decision_policy else "agent"),
         decision_policy=decision_policy,
@@ -2507,15 +2539,24 @@ def audit(tag: str) -> int:
             _stamp_no_decision_log(d)
         session = recorder._load_json(d / "session.json", {}) or {}
         if session.get("status") == "complete":
-            abandoned = _agent_abandoned_stream(d)
-            if abandoned:
-                if session.get("agent_abandoned") != abandoned:
-                    _stamp_agent_abandoned(d, abandoned)
-            elif session.pop("agent_abandoned", None) is not None:
-                # A newer deterministic replay can prove that a prior ARM was
-                # cancelled (manually or by the gap/expiry guard). Clear the old
-                # heuristic stamp so valid no-trade outcomes are scored normally.
-                atomic_write_json(d / "session.json", session, indent=2)
+            if _is_deterministic_policy_session(session):
+                # This heuristic infers an *agent* stopped requesting ticks.  A
+                # deterministic policy intentionally writes its complete intent
+                # log in one pass, so applying the heuristic here corrupts a
+                # valid in-position leaf into an infrastructure failure.  Policy
+                # replay below is the stronger, exact integrity proof.
+                if session.pop("agent_abandoned", None) is not None:
+                    atomic_write_json(d / "session.json", session, indent=2)
+            else:
+                abandoned = _agent_abandoned_stream(d)
+                if abandoned:
+                    if session.get("agent_abandoned") != abandoned:
+                        _stamp_agent_abandoned(d, abandoned)
+                elif session.pop("agent_abandoned", None) is not None:
+                    # A newer deterministic replay can prove that a prior ARM was
+                    # cancelled (manually or by the gap/expiry guard). Clear the old
+                    # heuristic stamp so valid no-trade outcomes are scored normally.
+                    atomic_write_json(d / "session.json", session, indent=2)
 
     sessions = [d for d in all_dirs
                 if (recorder._load_json(d / "session.json", {}) or {}).get("status") == "complete"]
@@ -2693,6 +2734,14 @@ def _require_matching_batch_metadata(tag_a: str, tag_b: str) -> None:
     other stamped condition has to match before a paired result is meaningful.
     """
     meta_a, meta_b = _read_batch_meta(tag_a), _read_batch_meta(tag_b)
+    if {meta_a.get("strategy"), meta_b.get("strategy")} & {"cup_handle"}:
+        tiers = (meta_a.get("research_tier"), meta_b.get("research_tier"))
+        if tiers != ("promotion_eligible", "promotion_eligible"):
+            raise ValueError(
+                "cannot compare a non-promotable cup_handle cohort. Both batches must be "
+                "built from point-in-time universe provenance; exploratory runs are for "
+                "diagnostics only."
+            )
     fields = (
         ("model", "model"),
         ("testset_hash", "test-set hash"),
@@ -3094,6 +3143,126 @@ def _in_position_mfe(sdir: Path, actions: list[dict]) -> Optional[float]:
     return round(max(ticks) - float(entry["price"]), 4) if ticks else None
 
 
+def _trade_interval_for_portfolio(
+    session: dict,
+    pnl: dict,
+    actions: list[dict],
+) -> Optional[dict]:
+    """Extract one executed position interval for a portfolio-control shadow.
+
+    Batch leaves remain intentionally independent.  This helper does not invent
+    a portfolio P&L; it provides the minimum causal control needed to expose
+    same-ticker overlap: once a prior fill is open, a later signal in that
+    ticker cannot open a second position.  Action dates are required because
+    setup dates alone do not establish whether an arm was actually filled.
+    """
+    if not pnl.get("traded"):
+        return None
+    buys = [a for a in actions if a.get("side") == "buy"]
+    exits = [
+        a for a in actions
+        if a.get("side") == "sell" and a.get("position_after") == 0
+    ]
+    if not buys or not exits:
+        return None
+    entry, exit_ = buys[0], exits[-1]
+    ticker = str(session.get("ticker") or "").upper()
+    setup = str(session.get("historical_date") or "")
+    entry_day, exit_day = entry.get("date"), exit_.get("date")
+    if not ticker or not setup or not entry_day or not exit_day:
+        return None
+    # ISO dates are deliberately compared as strings: the engine emits YYYY-MM-DD
+    # and that preserves chronological order without locale/time-zone ambiguity.
+    if not isinstance(entry_day, str) or not isinstance(exit_day, str) or entry_day > exit_day:
+        return None
+    risk = pnl.get("initial_risk")
+    return {
+        "ticker": ticker,
+        "setup": setup,
+        "entry_day": entry_day,
+        "exit_day": exit_day,
+        "r_multiple": float(pnl.get("r_multiple") or 0.0),
+        "realized_pnl": float(pnl.get("realized_pnl") or 0.0),
+        "initial_risk": float(risk) if isinstance(risk, (int, float)) else None,
+    }
+
+
+def _ticker_exclusive_portfolio_control(
+    intervals: list[dict],
+    *,
+    setup_count: int,
+    unresolved_trades: int,
+) -> dict:
+    """Causal one-open-position-per-ticker shadow portfolio summary.
+
+    For each ticker, fills are processed in entry-date order.  A later fill on
+    or before the prior position's exit date is skipped.  This is deliberately
+    conservative on a same-day turnover: independent daily leaves lack a
+    globally ordered close, so counting both would reintroduce the ambiguity
+    this control is meant to reveal.
+    """
+    accepted: list[dict] = []
+    skipped: list[dict] = []
+    by_ticker: dict[str, list[dict]] = defaultdict(list)
+    for interval in intervals:
+        by_ticker[interval["ticker"]].append(interval)
+    for ticker, rows in by_ticker.items():
+        occupied_until: Optional[str] = None
+        for row in sorted(rows, key=lambda r: (r["entry_day"], r["setup"])):
+            if occupied_until is not None and row["entry_day"] <= occupied_until:
+                skipped.append({
+                    "ticker": ticker,
+                    "setup": row["setup"],
+                    "entry_day": row["entry_day"],
+                    "exit_day": row["exit_day"],
+                    "r_multiple": round(row["r_multiple"], 3),
+                    "reason": f"ticker already open through {occupied_until}",
+                })
+                continue
+            accepted.append(row)
+            occupied_until = row["exit_day"]
+
+    # Conservative concurrency: an entry and a close printed on the same daily
+    # timestamp count as overlapping until a true portfolio event ordering exists.
+    events: dict[str, list[tuple[str, dict]]] = defaultdict(list)
+    for row in intervals:
+        events[row["entry_day"]].append(("open", row))
+        events[row["exit_day"]].append(("close", row))
+    open_positions: dict[tuple[str, str], dict] = {}
+    max_positions = 0
+    max_risk = 0.0
+    max_risk_known = False
+    for day in sorted(events):
+        for kind, row in events[day]:
+            if kind == "open":
+                open_positions[(row["ticker"], row["setup"])] = row
+        max_positions = max(max_positions, len(open_positions))
+        known_risks = [r["initial_risk"] for r in open_positions.values()]
+        if all(risk is not None for risk in known_risks):
+            max_risk_known = True
+            max_risk = max(max_risk, sum(known_risks))
+        for kind, row in events[day]:
+            if kind == "close":
+                open_positions.pop((row["ticker"], row["setup"]), None)
+
+    return {
+        "available": bool(intervals) and unresolved_trades == 0,
+        "setup_count": setup_count,
+        "raw_trades": len(intervals) + unresolved_trades,
+        "unresolved_trades": unresolved_trades,
+        "ticker_exclusive_trades": len(accepted),
+        "skipped_overlapping_trades": len(skipped),
+        "ticker_exclusive_pnl": round(sum(r["realized_pnl"] for r in accepted), 2),
+        "ticker_exclusive_effective_r": (
+            round(sum(r["r_multiple"] for r in accepted) / setup_count, 3)
+            if setup_count else None
+        ),
+        "max_independent_concurrent_positions": max_positions,
+        "max_independent_initial_risk": round(max_risk, 2) if max_risk_known else None,
+        "skipped": skipped,
+    }
+
+
 def diagnostics(tag: str) -> dict:
     """Describe frozen batch behavior by grade, entry, exit, adds, and in-trade MFE."""
     chosen: dict[tuple, tuple[Path, dict, dict]] = {}
@@ -3114,12 +3283,19 @@ def diagnostics(tag: str) -> dict:
     by_exit: dict[str, dict] = defaultdict(_diagnostic_group)
     adds_attempted = adds_filled = 0
     in_position_mfes: list[float] = []
+    portfolio_intervals: list[dict] = []
+    unresolved_portfolio_trades = 0
 
     for sdir, session, pnl in chosen.values():
         _add_diagnostic_row(by_grade[_diagnostic_grade(session)], pnl)
         if not pnl.get("traded"):
             continue
         actions = recorder._load_json(sdir / "actions.json", []) or []
+        interval = _trade_interval_for_portfolio(session, pnl, actions)
+        if interval is None:
+            unresolved_portfolio_trades += 1
+        else:
+            portfolio_intervals.append(interval)
         decisions = []
         try:
             decisions = [json.loads(line) for line in (sdir / "decisions.jsonl").read_text().splitlines() if line]
@@ -3158,7 +3334,111 @@ def diagnostics(tag: str) -> dict:
             "mean": round(_statistics.mean(in_position_mfes), 4) if in_position_mfes else None,
             "median": round(_statistics.median(in_position_mfes), 4) if in_position_mfes else None,
         },
+        "ticker_exclusive_portfolio_control": _ticker_exclusive_portfolio_control(
+            portfolio_intervals,
+            setup_count=len(chosen),
+            unresolved_trades=unresolved_portfolio_trades,
+        ),
     }
+
+
+def portfolio_replay(
+    tag: str,
+    *,
+    max_open_positions: int = 3,
+    max_open_risk: float = 1_500.0,
+    max_gross_notional: float = 50_000.0,
+    out: str | Path | None = None,
+) -> tuple[dict, Path]:
+    """Replay one completed deterministic cup-handle batch as a shared portfolio.
+
+    Leaf sessions are selected by their immutable ``(ticker, historical_date)``
+    identity, retaining the newest finalized run if an operator re-ran a leaf.
+    Invalid/void/infrastructure-failed leaves are excluded just as they are from
+    the regular batch report.  The replay module independently checks the
+    actions-to-P&L identity before it permits a result.
+    """
+    from .strategies.cup_handle import portfolio as cup_portfolio
+
+    meta = _read_batch_meta(tag)
+    if not meta:
+        raise ValueError(f"unknown batch tag {tag!r}: missing batch.json")
+    if meta.get("strategy") != "cup_handle":
+        raise ValueError(
+            f"portfolio replay is currently cup_handle-only; batch {tag!r} has "
+            f"strategy={meta.get('strategy')!r}"
+        )
+    if meta.get("decision_source") != "deterministic_policy":
+        raise ValueError(
+            "portfolio replay requires a deterministic-policy batch; "
+            f"batch {tag!r} has decision_source={meta.get('decision_source')!r}"
+        )
+    if meta.get("status") != "complete":
+        raise ValueError(
+            f"portfolio replay requires a completed batch; {tag!r} has status={meta.get('status')!r}"
+        )
+
+    chosen: dict[tuple[str, str], tuple[Path, dict, dict]] = {}
+    for sdir in _sessions_for_batch(tag):
+        session = recorder._load_json(sdir / "session.json", {}) or {}
+        if (session.get("status") != "complete" or recorder._is_infra_fail(session)
+                or session.get("void")):
+            continue
+        ticker = str(session.get("ticker") or "").upper()
+        setup_day = str(session.get("historical_date") or "")
+        if not ticker or not setup_day:
+            continue
+        pnl = recorder._load_json(sdir / "pnl.json", {}) or {}
+        key = (ticker, setup_day)
+        previous = chosen.get(key)
+        if previous is None or (session.get("real_run_ts") or "") > (previous[1].get("real_run_ts") or ""):
+            chosen[key] = (sdir, session, pnl)
+    if not chosen:
+        raise ValueError(f"batch {tag!r} has no finalized, replayable leaf sessions")
+    planned = meta.get("planned")
+    repeats = meta.get("repeats")
+    if (not isinstance(planned, int) or planned < 1
+            or not isinstance(repeats, int) or repeats < 1 or planned % repeats):
+        raise ValueError(
+            f"batch {tag!r} has invalid planned/repeats metadata: "
+            f"planned={planned!r}, repeats={repeats!r}"
+        )
+    expected_setups = planned // repeats
+    if len(chosen) != expected_setups:
+        raise ValueError(
+            f"batch {tag!r} is incomplete for portfolio replay: expected {expected_setups} "
+            f"unique setup leaves from planned={planned}, repeats={repeats}; found {len(chosen)} "
+            "complete, non-void, non-infrastructure-failed leaves"
+        )
+
+    leaves = []
+    for sdir, session, pnl in chosen.values():
+        leaves.append({
+            "sid": sdir.name,
+            "ticker": session.get("ticker"),
+            "setup_day": session.get("historical_date"),
+            "pnl": pnl,
+            "actions": recorder._load_json(sdir / "actions.json", []) or [],
+        })
+    config = cup_portfolio.PortfolioConfig(
+        max_open_positions=max_open_positions,
+        max_open_risk=max_open_risk,
+        max_gross_notional=max_gross_notional,
+    )
+    result = cup_portfolio.replay(leaves, config)
+    result["source"] = {
+        "batch_tag": tag,
+        "strategy": meta.get("strategy"),
+        "decision_source": meta.get("decision_source"),
+        "research_tier": meta.get("research_tier"),
+        "testset_hash": meta.get("testset_hash"),
+        "skill_version": meta.get("version"),
+        "leaf_sessions": sorted(row["sid"] for row in leaves),
+    }
+    artifact = Path(out) if out else BATCH_LOGS / tag / "portfolio.json"
+    artifact = artifact.expanduser().resolve()
+    atomic_write_json(artifact, result, indent=2)
+    return result, artifact
 
 
 def _print_diagnostics(result: dict) -> None:
@@ -3174,6 +3454,15 @@ def _print_diagnostics(result: dict) -> None:
     mfe = result["in_position_mfe_per_share"]
     print(f"\n  adds attempted/filled: {adds['attempted']}/{adds['filled']}")
     print(f"  in-position MFE/share: n={mfe['n']}, mean={mfe['mean']}, median={mfe['median']}")
+    portfolio = result["ticker_exclusive_portfolio_control"]
+    status = "available" if portfolio["available"] else "incomplete action-date evidence"
+    print(
+        "  ticker-exclusive control: "
+        f"{portfolio['ticker_exclusive_trades']}/{portfolio['raw_trades']} trades, "
+        f"skipped overlap={portfolio['skipped_overlapping_trades']}, "
+        f"P&L ${portfolio['ticker_exclusive_pnl']:.2f}, "
+        f"effR {portfolio['ticker_exclusive_effective_r']} ({status})"
+    )
 
 
 # ───────────────────────────── CLI ──────────────────────────────────────────
@@ -3245,6 +3534,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pr.add_argument("--resume", action="store_true", help="skip already-finalized items")
     pr.add_argument("--dry-run", action="store_true",
                     help="print the hermes commands without spawning agents")
+    pr.add_argument("--exploratory", action="store_true",
+                    help="cup_handle only: permit an unproven/current-universe testset for "
+                    "deterministic diagnostics. The batch is stamped non-promotable and "
+                    "cannot be used by the comparison gate.")
 
     pa = sub.add_parser("audit", help="scan transcripts; void peeking sessions")
     pa.add_argument("--tag", required=True)
@@ -3273,6 +3566,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pd = sub.add_parser("diagnostics", help="behavior breakdown for one completed batch")
     pd.add_argument("--tag", required=True)
     pd.add_argument("--format", choices=["table", "json"], default="table")
+
+    ppf = sub.add_parser(
+        "portfolio",
+        help="chronologically replay a deterministic cup-handle batch under shared limits",
+    )
+    ppf.add_argument("--tag", required=True)
+    ppf.add_argument("--max-open-positions", type=int, default=3,
+                     help="maximum simultaneous positions (default: 3)")
+    ppf.add_argument("--max-open-risk", type=float, default=1_500.0,
+                     help="maximum simultaneous initial risk in dollars (default: 1500)")
+    ppf.add_argument("--max-gross-notional", type=float, default=50_000.0,
+                     help="maximum simultaneous long gross notional in dollars (default: 50000)")
+    ppf.add_argument("--out", default=None,
+                     help="artifact path (default: simulations/_batch/<tag>/portfolio.json)")
+    ppf.add_argument("--format", choices=["table", "json"], default="table")
 
     pn = sub.add_parser("new-version", help="fork a new, unsealed candidate skill file")
     pn.add_argument("--strategy", default="warrior",
@@ -3333,7 +3641,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             trade_until=args.trade_until,
             resume=args.resume, dry_run=args.dry_run,
             session=args.session,
-            strategy=getattr(args, "strategy", None) or "warrior")
+            strategy=getattr(args, "strategy", None) or "warrior",
+            exploratory=args.exploratory)
     elif args.cmd == "audit":
         n = audit(args.tag)
         print(f"voided {n} session(s) in batch {args.tag}")
@@ -3367,6 +3676,32 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(json.dumps(result, indent=2, default=list))
         else:
             _print_diagnostics(result)
+    elif args.cmd == "portfolio":
+        result, artifact = portfolio_replay(
+            args.tag,
+            max_open_positions=args.max_open_positions,
+            max_open_risk=args.max_open_risk,
+            max_gross_notional=args.max_gross_notional,
+            out=args.out,
+        )
+        if args.format == "json":
+            print(json.dumps(result, indent=2, default=list))
+        else:
+            summary = result["summary"]
+            print(f"=== portfolio replay — {args.tag} ===")
+            print(
+                f"accepted {summary['accepted_trades']}/{summary['raw_trades']} trades "
+                f"({summary['skipped_entries']} skipped); "
+                f"realized P&L ${summary['portfolio_realized_pnl']:.2f}; "
+                f"effective R {summary['portfolio_effective_r']:.3f}"
+            )
+            print(
+                f"peaks: {summary['max_open_positions']} positions, "
+                f"${summary['max_open_risk']:.2f} initial risk, "
+                f"${summary['max_gross_notional']:.2f} gross; "
+                f"realized-P&L max drawdown ${summary['realized_pnl_max_drawdown']:.2f}"
+            )
+            print(f"artifact: {artifact}")
     elif args.cmd == "new-version":
         reg, tdir, _, _ = _strategy_paths(getattr(args, "strategy", None) or "warrior")
         dest = skillmeta.new_version(

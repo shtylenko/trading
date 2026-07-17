@@ -1,0 +1,6 @@
+Title: Performance Comparison of  Trading Systems (PROC, PIVOT, Retracement) by Means of the Backtest.
+Channel: 
+Views: 100
+URL: https://youtube.com/watch?v=XVC_Hx7yog0
+
+{"message":"The API provider has disabled request access to the API. Please contact API Provider."}

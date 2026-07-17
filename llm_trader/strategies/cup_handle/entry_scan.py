@@ -30,6 +30,8 @@ import argparse
 import json
 import logging
 import sys
+import tempfile
+import webbrowser
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from pathlib import Path
@@ -92,6 +94,22 @@ def _arm_row(e: Entry) -> dict:
     }
 
 
+def _progress_iter(seq, enabled: bool):
+    """Wrap ``seq`` in a tqdm bar when enabled and tqdm is importable.
+
+    tqdm writes to stderr and ``disable=None`` auto-hides it when stderr is not
+    a TTY, so it never corrupts the stdout table or the ``--json`` payload.
+    Falls back to the bare sequence if tqdm is unavailable.
+    """
+    if not enabled:
+        return seq
+    try:
+        from tqdm import tqdm
+    except Exception:
+        return seq
+    return tqdm(seq, desc="scanning", unit="tkr", disable=None)
+
+
 def scan_asof(
     day: date,
     symbols: Sequence[str],
@@ -99,6 +117,7 @@ def scan_asof(
     *,
     strategy_id: str = STRATEGY_ID,
     market_ok_dates: Optional[set] = None,
+    progress: bool = False,
 ) -> AsofScanResult:
     """Return the cup-and-handle arms published at ``day``'s close.
 
@@ -124,7 +143,8 @@ def scan_asof(
     arms: list[Entry] = []
     scanned: list[str] = []
     failed: list[str] = []
-    for sym in ordered:
+    bar = _progress_iter(ordered, progress)
+    for sym in bar:
         try:
             found = detect_ticker(
                 sym, scan_cfg, strategy_id=strategy_id, market_ok_dates=market_ok_dates
@@ -132,9 +152,11 @@ def scan_asof(
         except Exception:
             log.exception("as-of scan failed for %s", sym)
             failed.append(sym)
-            continue
-        scanned.append(sym)
-        arms.extend(found)
+        else:
+            scanned.append(sym)
+            arms.extend(found)
+        if hasattr(bar, "set_postfix_str"):
+            bar.set_postfix_str(f"{sym} arms={len(arms)} fail={len(failed)}", refresh=False)
 
     failure_rate = len(failed) / len(ordered)
     if failure_rate > scan_cfg.max_scan_failure_rate:
@@ -281,7 +303,21 @@ def _build_parser() -> argparse.ArgumentParser:
             "a few names may not resolve on a given date."
         ),
     )
+    p.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable the tqdm progress bar (it is also auto-hidden when stderr is not a TTY).",
+    )
     p.add_argument("--json", help="Also write the structured result to this path.")
+    p.add_argument(
+        "--html",
+        help="Write a self-contained chart page (candles + SMAs + cup geometry + plan levels).",
+    )
+    p.add_argument(
+        "--open",
+        action="store_true",
+        help="Open the chart page in a browser when the scan finishes (implies --html).",
+    )
     return p
 
 
@@ -313,11 +349,25 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("error: resolved universe is empty", file=sys.stderr)
         return 2
 
-    result = scan_asof(day, universe, cfg)
+    result = scan_asof(day, universe, cfg, progress=not args.no_progress)
     _print_table(result)
     if args.json:
         atomic_write_json(Path(args.json), result.to_dict())
         print(f"wrote {args.json}", file=sys.stderr)
+
+    if args.html or args.open:
+        from . import scan_report
+
+        html_path = args.html or str(
+            Path(tempfile.gettempdir()) / f"cup_scan_{day.isoformat()}.html"
+        )
+        if not result.arms:
+            print("no arms — chart page not written", file=sys.stderr)
+        else:
+            written = scan_report.write_report(result, cfg, html_path)
+            print(f"wrote chart page {written}", file=sys.stderr)
+            if args.open:
+                webbrowser.open(written.resolve().as_uri())
     return 0
 
 

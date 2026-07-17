@@ -443,6 +443,65 @@ def test_sp500_universe_file_is_loadable_and_deduped():
     assert doc["count"] == len(syms)
 
 
+def test_scan_report_builds_chart_payload_from_arms(monkeypatch):
+    import pandas as pd
+
+    from trading.llm_trader.strategies.cup_handle import entry_scan, scan_report
+    from trading.llm_trader.strategies.cup_handle import patterns as cup_patterns
+    from trading.llm_trader.strategies.cup_handle.patterns import detect_from_frame
+
+    df, _breakout, _hh = _synthetic_cup_breakout()
+    base = _asof_base_cfg()
+    d = detect_from_frame(df, "T", base)[0].day
+
+    # the report re-fetches per ticker; serve the same synthetic frame, honoring `end`
+    def fake_fetch(ticker, resolution, *, start, end, adjustment="raw", **kwargs):
+        return df[df.index <= pd.Timestamp(end)]
+
+    monkeypatch.setattr(cup_patterns, "fetch_bars", fake_fetch)
+    monkeypatch.setattr(scan_report, "fetch_bars", fake_fetch)
+
+    result = entry_scan.scan_asof(d, ["T"], base)
+    report = scan_report.build_report(result, base)
+
+    assert report["as_of"] == d.isoformat()
+    assert len(report["tickers"]) == 1
+    t = report["tickers"][0]
+    assert t["ticker"] == "T"
+    # the labels the user asked for are present
+    assert t["cup_depth_pct"] is not None
+    assert t["arm_expiry_bars"] == base.arm_expiry_bars
+    # chart series and overlays are populated
+    assert len(t["bars"]) > 20
+    assert t["sma50"], "SMA overlay should be present"
+    assert {pl["title"] for pl in t["priceLines"]} >= {"trigger", "stop", "T1", "T2"}
+    # cup-geometry markers plus the ARM marker
+    assert any(m["text"] == "ARM" for m in t["markers"])
+    assert sum(1 for m in t["markers"] if "lip" in m["text"] or "cup low" in m["text"]) == 3
+    # markers land on real bar dates in the window
+    bar_times = {b["time"] for b in t["bars"]}
+    assert all(m["time"] in bar_times for m in t["markers"])
+
+    # self-contained HTML: library + data inlined, no external resource loads
+    # (an SVG xmlns="http://www.w3.org/..." inside the inlined lib is not a fetch)
+    page = scan_report.render_html(report)
+    assert "LightweightCharts" in page and "createChart" in page
+    assert "unpkg" not in page
+    assert 'src="http' not in page and "href=\"http" not in page
+    assert '"ticker":"T"' in page
+
+
+def test_scan_asof_progress_bar_does_not_change_results(monkeypatch):
+    from trading.llm_trader.strategies.cup_handle import entry_scan
+
+    base = _asof_base_cfg()
+    monkeypatch.setattr(entry_scan, "detect_ticker", lambda *_a, **_k: [])
+    result = entry_scan.scan_asof(date(2025, 6, 2), ["AAA", "BBB"], base, progress=True)
+    assert result.symbols_scanned == ["AAA", "BBB"]
+    assert result.symbols_failed == []
+    assert result.arms == []
+
+
 def test_load_universe_file_missing_path_is_a_clean_error(tmp_path):
     from trading.llm_trader.strategies.cup_handle import entry_scan
 

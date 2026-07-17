@@ -748,6 +748,8 @@ def init(
             "armed_entry_expiry_required": m.get("armed_entry_expiry_required"),
             "arm_on_scanner_plan_required": m.get("arm_on_scanner_plan_required"),
             "scanner_plan_targets_engine_owned": m.get("scanner_plan_targets_engine_owned"),
+            "decision_source": m.get("decision_source"),
+            "decision_policy": m.get("decision_policy"),
             "session_from_open": m.get("session_from_open"),
             "five_minute_context": m.get("five_minute_context"),
             "completed_five_minute_entry_required": m.get(

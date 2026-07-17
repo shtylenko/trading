@@ -50,6 +50,33 @@ def test_build_set_deterministic_and_deduped(tmp_path):
     assert 0 < len(a) <= 15
 
 
+def test_build_set_exact_request_uses_largest_remainder_apportionment(tmp_path):
+    db = tmp_path / "entries.db"
+    # Three strata whose independently rounded quotas would total 9 for n=10.
+    rows = []
+    for i in range(31):
+        time_et = "09:35" if i < 11 else "11:20"
+        float_shares = 2e6 if i % 2 else 9e6
+        rows.append((f"TK{i:02d}", f"2025-01-{(i % 27) + 1:02d}", time_et,
+                     "acd_orb", float_shares, 20.0))
+    _make_entries_db(db, rows)
+
+    setups = batchsim.build_set(n=10, db=db, seed=7, require_exact=True)
+    assert len(setups) == 10
+
+
+def test_build_set_exact_request_fails_if_unique_pool_is_too_small(tmp_path):
+    db = tmp_path / "entries.db"
+    _make_entries_db(db, [
+        ("AAA", "2025-01-01", "11:20", "acd_orb", 9e6, 20.0),
+        ("AAA", "2025-01-02", "11:20", "acd_orb", 9e6, 20.0),
+        ("BBB", "2025-01-01", "11:20", "acd_orb", 9e6, 20.0),
+    ])
+
+    with pytest.raises(ValueError, match="only 2 unique tickers"):
+        batchsim.build_set(n=3, db=db, unique_ticker=True, require_exact=True)
+
+
 def test_build_set_different_seed_differs(tmp_path):
     db = tmp_path / "entries.db"
     _make_entries_db(db, _rows())
@@ -97,6 +124,49 @@ def test_build_set_causal_only_excludes_legacy_cup_labels(tmp_path):
     assert [(s["ticker"], s["date"], s["time_et"]) for s in setups] == [
         ("CAUSAL", "2025-02-03", "16:00"),
     ]
+
+
+def test_cup_holdout_requires_and_records_one_pit_universe_manifest(tmp_path):
+    db = tmp_path / "entries.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "CREATE TABLE entries (ticker TEXT, date TEXT, time_et TEXT, pattern TEXT, "
+        "features_json TEXT, entry_px REAL, gap_pct REAL, rvol REAL, "
+        "float_shares REAL, reason TEXT)"
+    )
+    plan = {
+        "signal_kind": "prebreak_arm", "signal_as_of": "2025-02-03",
+        "entry_trigger": 11.0, "stop_px": 9.0, "target1_px": 12.0,
+        "target2_px": 13.0, "atr": 1.0, "cup_depth_px": 3.0,
+        "arm_expiry_bars": 5, "max_entry_gap_atr": 0.5,
+        "research_universe": {
+            "schema_version": 1, "membership_basis": "point_in_time",
+            "manifest_name": "sp500-pit", "manifest_sha256": "sha256:manifest",
+            "interval": {
+                "start": "2025-01-01", "end": "2025-03-31", "as_of": "2024-12-31",
+                "source": "fixture", "symbols_sha256": "sha256:symbols",
+            },
+        },
+    }
+    conn.execute(
+        "INSERT INTO entries (ticker,date,time_et,pattern,features_json) VALUES (?,?,?,?,?)",
+        ("CAUSAL", "2025-02-03", "16:00", "cup_handle", json.dumps(plan)),
+    )
+    conn.commit()
+    conn.close()
+
+    setups = batchsim.build_set(
+        n=1, db=db, causal_only=True, require_research_provenance=True, require_exact=True,
+    )
+    provenance = batchsim.research_provenance_for_setups(db, setups)
+    out = tmp_path / "pit_set.json"
+    batchsim.write_testset(setups, out, seed=7, research_provenance=provenance)
+
+    assert provenance["manifest_sha256"] == "sha256:manifest"
+    assert batchsim._cup_handle_testset_research_provenance(out, setups) == provenance
+    out.write_text(json.dumps({"setups": setups}), encoding="utf-8")
+    with pytest.raises(ValueError, match="lacks research_provenance"):
+        batchsim._cup_handle_testset_research_provenance(out, setups)
 
 
 def test_causal_batch_preflight_rejects_a_stale_exact_setup(tmp_path):
@@ -148,6 +218,70 @@ def _fake_session(root, tag, sid="20250102000000-TK-abc123", ticker="TK",
          "skill_version": "9.9.9", "batch": tag}))
     (d / "decisions.jsonl").write_text('{"i": 0, "action": "OBSERVE"}\n')
     return d
+
+
+def _deterministic_policy_session(root, tag, *, sid="20250102000000-TK-policy1"):
+    """A finalized v0.7 leaf with policy-generated, recorder-validated intents."""
+    from trading.llm_trader.strategies.cup_handle.policy import apply_to_session
+
+    skill = Path(__file__).parents[1] / "strategies/cup_handle/skills/trade_skills/0.7.0.md"
+    sdir = recorder.init(
+        "TK", "2025-03-11", root=root, skill=skill, pin_version="0.7.0",
+        batch=tag, strategy="cup_handle", now=datetime(2026, 7, 17, 10, 0, 0),
+    )
+    daily = {
+        "sma20": 9.0, "sma50": 8.0, "sma200": 7.0, "atr14": 1.0, "rvol": 1.2,
+        "above_sma20": True, "above_sma50": True, "above_sma200": True,
+        "sma50_rising": True,
+    }
+    plan = {
+        "signal_as_of": "2025-03-11", "trigger": 10.1, "stop": 9.0,
+        "target1": 11.2, "target2": 12.3, "atr": 1.0, "cup_depth_px": 2.0,
+        "max_entry_gap_atr": 0.5, "arm_expiry_bars": 5,
+    }
+    rows = [
+        {"type": "meta", "ticker": "TK", "date": "2025-03-11", "strategy": "cup_handle",
+         "horizon": "multi_day", "bar_resolution": "1day"},
+        {"type": "tick", "i": 0, "date": "2025-03-10", "time": "16:00",
+         "o": 10.0, "h": 10.2, "l": 9.8, "c": 10.0, "v": 10_000, **daily},
+        {"type": "tick", "i": 1, "date": "2025-03-11", "time": "16:00",
+         "o": 10.0, "h": 10.2, "l": 9.8, "c": 10.0, "v": 10_000,
+         "is_setup_day": True, "scanner_plan": plan, **daily},
+        {"type": "tick", "i": 2, "date": "2025-03-12", "time": "16:00",
+         "o": 10.0, "h": 10.4, "l": 9.9, "c": 10.2, "v": 10_000, **daily},
+        {"type": "end", "bars": 3, "close": 10.2},
+    ]
+    (sdir / "stream.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    apply_to_session(sdir)
+    recorder.finalize(sdir)
+    return sdir
+
+
+def _deterministic_policy_stream(sdir):
+    """Publish the minimal valid multi-day causal stream into a staged session."""
+    daily = {
+        "sma20": 9.0, "sma50": 8.0, "sma200": 7.0, "atr14": 1.0, "rvol": 1.2,
+        "above_sma20": True, "above_sma50": True, "above_sma200": True,
+        "sma50_rising": True,
+    }
+    plan = {
+        "signal_as_of": "2025-03-11", "trigger": 10.1, "stop": 9.0,
+        "target1": 11.2, "target2": 12.3, "atr": 1.0, "cup_depth_px": 2.0,
+        "max_entry_gap_atr": 0.5, "arm_expiry_bars": 5,
+    }
+    rows = [
+        {"type": "meta", "ticker": "TK", "date": "2025-03-11", "strategy": "cup_handle",
+         "horizon": "multi_day", "bar_resolution": "1day"},
+        {"type": "tick", "i": 0, "date": "2025-03-10", "time": "16:00",
+         "o": 10.0, "h": 10.2, "l": 9.8, "c": 10.0, "v": 10_000, **daily},
+        {"type": "tick", "i": 1, "date": "2025-03-11", "time": "16:00",
+         "o": 10.0, "h": 10.2, "l": 9.8, "c": 10.0, "v": 10_000,
+         "is_setup_day": True, "scanner_plan": plan, **daily},
+        {"type": "tick", "i": 2, "date": "2025-03-12", "time": "16:00",
+         "o": 10.0, "h": 10.4, "l": 9.9, "c": 10.2, "v": 10_000, **daily},
+        {"type": "end", "bars": 3, "close": 10.2},
+    ]
+    (sdir / "stream.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n")
 
 
 # --- the false-positive fix: scan only executed commands, never prose ---
@@ -236,6 +370,73 @@ def test_audit_passes_clean_commands(tmp_path, monkeypatch):
     assert "void" not in json.loads((d / "session.json").read_text())
     rows = recorder.report_by_version(batch="b3")
     assert rows and rows[0]["n"] == 1 and rows[0]["n_void"] == 0
+
+
+def test_audit_rederives_deterministic_policy_without_hermes_transcript(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    sdir = _deterministic_policy_session(tmp_path, "deterministic-clean")
+    monkeypatch.setattr(
+        batchsim, "_resolve_batch_commands",
+        lambda _sids: (_ for _ in ()).throw(AssertionError("policy leaves must not query Hermes")),
+    )
+
+    assert batchsim.audit("deterministic-clean") == 0
+    session = json.loads((sdir / "session.json").read_text())
+    assert "void" not in session
+
+
+def test_audit_voids_tampered_deterministic_policy_leaf_without_hermes(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path)
+    monkeypatch.setattr(batchsim, "BATCH_LOGS", tmp_path / "_batch")
+    sdir = _deterministic_policy_session(tmp_path, "deterministic-tampered")
+    decisions = [json.loads(line) for line in (sdir / "decisions.jsonl").read_text().splitlines()]
+    decisions[2]["action"] = "STAND_DOWN"
+    (sdir / "decisions.jsonl").write_text("\n".join(json.dumps(row) for row in decisions) + "\n")
+    monkeypatch.setattr(
+        batchsim, "_resolve_batch_commands",
+        lambda _sids: (_ for _ in ()).throw(AssertionError("policy leaves must not query Hermes")),
+    )
+
+    assert batchsim.audit("deterministic-tampered") == 1
+    session = json.loads((sdir / "session.json").read_text())
+    assert "deterministic-policy-integrity" in session["void"]
+
+
+def test_policy_runner_publishes_finalizes_and_promotes_without_an_agent(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "SIM_ROOT", tmp_path / "durable")
+    skill = Path(__file__).parents[1] / "strategies/cup_handle/skills/trade_skills/0.7.0.md"
+    staged = recorder.init(
+        "TK", "2025-03-11", root=tmp_path / "staging", skill=skill, pin_version="0.7.0",
+        batch="policy-worker", strategy="cup_handle", now=datetime(2026, 7, 17, 10, 1, 0),
+    )
+    _deterministic_policy_stream(staged)
+
+    class Gateway:
+        published = False
+        closed = False
+
+        def publish(self):
+            self.published = True
+
+        def close(self):
+            self.closed = True
+
+    gateway = Gateway()
+    result = batchsim._run_policy_one({
+        "sdir": str(staged), "gateway": gateway, "item": "TK_2025-03-11#r0",
+        "ticker": "TK", "date": "2025-03-11", "rep": 0,
+        "decision_policy": "cup_handle_auto_arm_v1",
+    })
+
+    assert result["status"] == "ok"
+    assert result["decisions"] == 3
+    assert gateway.published and gateway.closed
+    durable = recorder.SIM_ROOT / staged.name
+    assert durable.exists()
+    session = json.loads((durable / "session.json").read_text())
+    assert session["status"] == "complete"
+    assert session["decision_policy"]["id"] == "cup_handle_auto_arm_v1"
 
 
 def test_audit_voids_daily_indicator_integrity_before_transcript_lookup(tmp_path, monkeypatch):

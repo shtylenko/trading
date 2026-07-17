@@ -1,10 +1,11 @@
 {
  "name": "sp500",
+ "membership_basis": "current_snapshot",
  "description": "S&P 500 constituents \u2014 current membership snapshot for entry_scan --universe-file.",
  "source": "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv",
  "fetched": "2026-07-16",
  "count": 503,
- "survivorship_note": "Current membership only. Correct for a live / recent --date; survivorship-biased for a historical --date (missing names delisted or removed since fetch). entry_scan bypasses its date guard when --universe-file is passed, so this is the caller's responsibility. All symbols were verified fetchable via marketdata.fetch_bars on the fetch date.",
+ "survivorship_note": "Current membership only. Correct for a live / recent --date; survivorship-biased for a historical --date (missing names delisted or removed since fetch). entry_scan rejects this raw file for historical research unless the caller explicitly marks the scan exploratory; it must never be used for validation or promotion. All symbols were verified fetchable via marketdata.fetch_bars on the fetch date.",
  "symbols": [
   "MMM",
   "AOS",

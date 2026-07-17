@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from trading.llm_trader.fsutils import atomic_write_json
+from trading.llm_trader.models import Entry
 from trading.llm_trader.store import EntryStore
 from trading.llm_trader.universe import fetch_symbols
 
@@ -25,19 +26,46 @@ class ScanStats:
     stale_entries_removed: int = 0
 
 
-def run_scan(
+@dataclass
+class ScopeScan:
+    """A fully detected scope that has not yet been published to ``EntryStore``.
+
+    Keeping detection separate from publication lets a point-in-time research
+    scan validate *all* of its membership intervals before one transaction
+    replaces any database rows.
+    """
+
+    stats: ScanStats
+    symbols_requested: list[str]
+    symbols_scanned: list[str]
+    symbols_failed: list[str]
+    entries: list[Entry]
+
+
+def normalize_symbols(symbols: list[str]) -> list[str]:
+    """Return a stable, uppercase, de-duplicated scan scope."""
+    return list(dict.fromkeys(sym.strip().upper() for sym in symbols if sym and sym.strip()))
+
+
+def scan_scope(
     cfg: CupHandleConfig,
     *,
     symbols: list[str] | None = None,
     max_symbols: int | None = None,
     progress_every: int = 50,
     strategy_id: str = "cup_handle",
-) -> ScanStats:
+) -> ScopeScan:
+    """Detect one scanner scope without writing the database.
+
+    Provider failures are checked before returning.  Callers therefore never
+    receive a partially successful scope unless their explicitly configured
+    failure budget permits it; in that case only successful symbols are safe to
+    replace at publish time.
+    """
     cfg.validate()
     if symbols is None:
         symbols = fetch_symbols(cfg.exchanges)
-    # A stable, de-duplicated scope is important for replacement semantics.
-    symbols = list(dict.fromkeys(sym.strip().upper() for sym in symbols if sym.strip()))
+    symbols = normalize_symbols(symbols)
     if max_symbols is not None:
         symbols = symbols[:max_symbols]
     if not symbols:
@@ -50,7 +78,7 @@ def run_scan(
     )
     market_ok_dates = fetch_market_regime(cfg) if cfg.require_spy_above_sma50 else None
     scanned_symbols: list[str] = []
-    detected = []
+    detected: list[Entry] = []
     failures: list[str] = []
     for i, sym in enumerate(symbols, 1):
         stats.symbols_scanned += 1
@@ -78,14 +106,39 @@ def run_scan(
             f"({failure_rate:.2%}) failed, exceeding max_scan_failure_rate="
             f"{cfg.max_scan_failure_rate:.2%}; database was not changed"
         )
+    stats.entries_found = len(detected)
+    return ScopeScan(
+        stats=stats,
+        symbols_requested=symbols,
+        symbols_scanned=scanned_symbols,
+        symbols_failed=failures,
+        entries=detected,
+    )
+
+
+def run_scan(
+    cfg: CupHandleConfig,
+    *,
+    symbols: list[str] | None = None,
+    max_symbols: int | None = None,
+    progress_every: int = 50,
+    strategy_id: str = "cup_handle",
+) -> ScanStats:
+    scope = scan_scope(
+        cfg,
+        symbols=symbols,
+        max_symbols=max_symbols,
+        progress_every=progress_every,
+        strategy_id=strategy_id,
+    )
+    stats = scope.stats
 
     store = EntryStore(cfg.db_path)
     try:
-        stats.entries_found = len(detected)
         stats.stale_entries_removed = store.sync_scope(
-            detected,
+            scope.entries,
             strategy=strategy_id,
-            tickers=scanned_symbols,
+            tickers=scope.symbols_scanned,
             start_day=cfg.start.isoformat(),
             end_day=cfg.end.isoformat(),
         )
@@ -101,9 +154,9 @@ def run_scan(
             "completed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "strategy": strategy_id,
             "config": cfg.to_dict(),
-            "symbols_requested": len(symbols),
-            "symbols_succeeded": len(scanned_symbols),
-            "symbols_failed": failures,
+            "symbols_requested": len(scope.symbols_requested),
+            "symbols_succeeded": len(scope.symbols_scanned),
+            "symbols_failed": scope.symbols_failed,
             "entries_found": stats.entries_found,
             "stale_entries_removed": stats.stale_entries_removed,
         },

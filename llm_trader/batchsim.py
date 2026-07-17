@@ -52,6 +52,7 @@ import statistics as _statistics
 import subprocess
 import sys
 import tempfile
+from math import floor
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -372,10 +373,103 @@ def _causal_entry_feature_errors(row: dict) -> list[str]:
     return replay.causal_plan_feature_errors(setup)
 
 
+def _research_universe_feature(row: dict) -> Optional[dict]:
+    """Return validated PIT provenance embedded by ``research_scan``, if any."""
+    raw_features = row.get("features_json")
+    try:
+        features = json.loads(raw_features) if isinstance(raw_features, str) else raw_features
+    except json.JSONDecodeError:
+        return None
+    provenance = features.get("research_universe") if isinstance(features, dict) else None
+    if not isinstance(provenance, dict):
+        return None
+    interval = provenance.get("interval")
+    if (
+        provenance.get("membership_basis") != "point_in_time"
+        or not isinstance(provenance.get("manifest_sha256"), str)
+        or not provenance["manifest_sha256"].startswith("sha256:")
+        or not isinstance(interval, dict)
+    ):
+        return None
+    required_interval = {"start", "end", "as_of", "source", "symbols_sha256"}
+    if not required_interval.issubset(interval):
+        return None
+    return provenance
+
+
+def research_provenance_for_setups(db: Path, setups: list[dict]) -> dict:
+    """Build one immutable PIT-provenance stamp for a selected test set.
+
+    Test sets are validated against scanner rows twice: here, when they are
+    created, and again before a cup-handle batch runs.  Both checks reject a
+    mixture of different universe manifests so a result cannot accidentally
+    combine current-snapshot and historical-PIT scans.
+    """
+    expected = {
+        (str(s.get("ticker") or "").upper(), str(s.get("date") or ""), str(s.get("time_et") or ""))
+        for s in setups
+    }
+    if not expected:
+        raise ValueError("cannot stamp research provenance for an empty test set")
+    with sqlite3.connect(str(db)) as conn:
+        conn.row_factory = sqlite3.Row
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(entries)").fetchall()}
+        if "features_json" not in cols:
+            raise ValueError("entries database has no features_json; re-run the PIT research scanner")
+        rows = [dict(r) for r in conn.execute("SELECT * FROM entries")]
+    by_key = {
+        (str(r.get("ticker") or "").upper(), str(r.get("date") or ""), str(r.get("time_et") or "")): r
+        for r in rows
+    }
+    missing: list[str] = []
+    provenance_rows: list[dict] = []
+    for key in sorted(expected):
+        provenance = _research_universe_feature(by_key.get(key, {}))
+        if provenance is None:
+            missing.append(" ".join(key))
+        else:
+            provenance_rows.append(provenance)
+    if missing:
+        preview = ", ".join(missing[:4])
+        suffix = f" (+{len(missing) - 4} more)" if len(missing) > 4 else ""
+        raise ValueError(
+            "selected cup_handle setups lack valid point-in-time universe provenance: "
+            f"{preview}{suffix}. Re-run research_scan with a PIT manifest first."
+        )
+
+    identities = {
+        (
+            p.get("manifest_sha256"),
+            p.get("manifest_name"),
+            p.get("membership_basis"),
+        )
+        for p in provenance_rows
+    }
+    if len(identities) != 1:
+        raise ValueError(
+            "selected cup_handle setups span multiple research universe manifests; "
+            "build a holdout from one immutable PIT scan corpus"
+        )
+    manifest_sha256, manifest_name, membership_basis = identities.pop()
+    intervals = {
+        json.dumps(p["interval"], sort_keys=True, separators=(",", ":"))
+        for p in provenance_rows
+    }
+    return {
+        "schema_version": 1,
+        "membership_basis": membership_basis,
+        "manifest_name": manifest_name,
+        "manifest_sha256": manifest_sha256,
+        "intervals": [json.loads(value) for value in sorted(intervals)],
+        "setup_count": len(setups),
+    }
+
+
 def build_set(
     n: int = 30, *, seed: int = 13, db: Path = ENTRIES_DB, after: str = "09:30",
     exclude: Optional[set] = None, unique_ticker: bool = False,
-    causal_only: bool = False,
+    causal_only: bool = False, require_exact: bool = False,
+    require_research_provenance: bool = False,
 ) -> list[dict]:
     """Stratified, deterministic sample of ~``n`` setups from ``entries.db``.
 
@@ -396,7 +490,13 @@ def build_set(
     ``causal_only`` is for execution holdouts of plan-first strategies.  It excludes
     legacy labels and incomplete scanner rows instead of allowing them to turn into
     agent stand-downs or invalid pseudo-results later in the batch.
+
+    ``require_exact`` makes the request a hard contract.  The CLI enables it so a
+    file called ``testset_10`` can never silently contain nine rows because the
+    eligible (or unique-ticker) pool was too small.
     """
+    if n < 1:
+        raise ValueError("testset size n must be positive")
     exclude = exclude or set()
     with sqlite3.connect(str(db)) as conn:
         conn.row_factory = sqlite3.Row
@@ -404,6 +504,8 @@ def build_set(
     rows = [r for r in rows if _hhmm_after(r.get("time_et", ""), after)]
     if causal_only:
         rows = [r for r in rows if not _causal_entry_feature_errors(r)]
+    if require_research_provenance:
+        rows = [r for r in rows if _research_universe_feature(r) is not None]
 
     # dedupe to one per (ticker, date), skipping excluded keys
     seen: dict[tuple, dict] = {}
@@ -425,6 +527,13 @@ def build_set(
                 by_ticker[r["ticker"]] = r
         rows = list(by_ticker.values())
 
+    if require_exact and len(rows) < n:
+        scope = "unique tickers" if unique_ticker else "eligible setup rows"
+        raise ValueError(
+            f"requested {n} setup(s), but only {len(rows)} {scope} are available "
+            "after filters; expand the scan universe or request fewer setups"
+        )
+
     def bucket(r: dict) -> tuple:
         tb = "early" if (r.get("time_et") or "") < "10:30" else "late"
         fb = "lowfloat" if (r.get("float_shares") or 0) < 5e6 else "midfloat"
@@ -436,15 +545,29 @@ def build_set(
 
     rng = random.Random(seed)
     total = len(rows)
-    picks: list[dict] = []
+    wanted = min(n, total)
+    shuffled_groups: dict[tuple, list[dict]] = {}
+    quotas: dict[tuple, int] = {}
+    remainders: dict[tuple, float] = {}
     for key in sorted(groups):
         grp = sorted(groups[key], key=lambda r: (r["ticker"], r["date"]))
         rng.shuffle(grp)
-        k = max(1, round(n * len(grp) / total)) if total else 0
-        picks.extend(grp[:k])
+        shuffled_groups[key] = grp
+        exact = wanted * len(grp) / total if total else 0.0
+        quotas[key] = floor(exact)
+        remainders[key] = exact - quotas[key]
 
+    # Largest-remainder apportionment preserves the stratified mix *and* makes
+    # the requested count exact whenever the pool is large enough.  The previous
+    # independent round() allocation could sum to n-1 (the testset_10 failure).
+    remaining = wanted - sum(quotas.values())
+    for key in sorted(quotas, key=lambda k: (-remainders[k], k)):
+        if remaining <= 0:
+            break
+        quotas[key] += 1
+        remaining -= 1
+    picks = [row for key in sorted(shuffled_groups) for row in shuffled_groups[key][:quotas[key]]]
     rng.shuffle(picks)
-    picks = picks[:n]
     return [
         {
             "ticker": r["ticker"], "date": r["date"], "time_et": r.get("time_et"),
@@ -455,18 +578,52 @@ def build_set(
     ]
 
 
-def write_testset(setups: list[dict], out: Path, seed: int) -> None:
+def write_testset(
+    setups: list[dict],
+    out: Path,
+    seed: int,
+    *,
+    research_provenance: Optional[dict] = None,
+) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({
+    doc = {
         "created": datetime.now().isoformat(timespec="seconds"),
         "seed": seed,
         "n": len(setups),
         "setups": setups,
-    }, indent=2) + "\n")
+    }
+    if research_provenance is not None:
+        doc["research_provenance"] = research_provenance
+    out.write_text(json.dumps(doc, indent=2) + "\n")
 
 
 def load_testset(path: Path) -> list[dict]:
-    return json.loads(Path(path).read_text())["setups"]
+    data = json.loads(Path(path).read_text())
+    return data.get("setups", data) if isinstance(data, dict) else data
+
+
+def _cup_handle_testset_research_provenance(path: Path, setups: list[dict]) -> dict:
+    """Fail closed unless a cup-handle holdout is bound to one PIT manifest."""
+    data = json.loads(Path(path).read_text())
+    provenance = data.get("research_provenance") if isinstance(data, dict) else None
+    if not isinstance(provenance, dict):
+        raise ValueError(
+            "cup_handle batch testset lacks research_provenance. Rebuild it from a "
+            "point-in-time research scan; legacy/current-universe cohorts remain "
+            "readable but are not promotion-eligible."
+        )
+    if provenance.get("membership_basis") != "point_in_time":
+        raise ValueError("cup_handle batch testset is not backed by point-in-time membership")
+    manifest_hash = provenance.get("manifest_sha256")
+    if not isinstance(manifest_hash, str) or not manifest_hash.startswith("sha256:"):
+        raise ValueError("cup_handle batch testset has no valid universe manifest hash")
+    if provenance.get("setup_count") != len(setups):
+        raise ValueError(
+            "cup_handle batch testset research provenance setup_count does not match its setups"
+        )
+    if not isinstance(provenance.get("intervals"), list) or not provenance["intervals"]:
+        raise ValueError("cup_handle batch testset research provenance has no interval evidence")
+    return provenance
 
 
 # ───────────────────────────── run ──────────────────────────────────────────
@@ -868,7 +1025,7 @@ def _preseal(work: dict, skill_path: Path, version: str, session_id: str) -> tup
         # Multi-day: harness auto-OBSERVEs deep lookback so the agent starts nearer
         # the plan/arm window (cuts ~20–40 LLM turns of pure narration).
         multi_day = bool(work.get("multi_day"))
-        if multi_day:
+        if multi_day and not work.get("decision_policy"):
             llm_lb = int(work.get("llm_lookback", _DEFAULT_MULTI_DAY_LLM_LOOKBACK))
             work["auto_lookback"] = _auto_observe_multi_day_lookback(
                 sdir, gateway, work["date"], llm_lookback=llm_lb,
@@ -1206,6 +1363,51 @@ def _run_one(work: dict) -> dict:
         return _result("isolation-error", error=str(e))
 
 
+def _run_policy_one(work: dict) -> dict:
+    """Execute one sealed deterministic-policy leaf without starting an agent.
+
+    The gateway still owns disclosure and publishes the same sealed stream used by
+    an agent batch.  Once complete, the policy materializes recorder-validated
+    intents, the normal engine finalizes them, and the durable leaf is promoted.
+    There is deliberately no prompt, model process, sandbox, or transcript.
+    """
+    from .strategies.cup_handle import policy as cup_handle_policy
+
+    sdir = Path(work["sdir"])
+    sid = sdir.name
+    gateway: step.IsolatedStreamGateway = work["gateway"]
+    status = "ok"
+    extra: dict = {}
+    final_sdir = sdir
+    try:
+        gateway.publish()
+        records = cup_handle_policy.apply_to_session(sdir)
+        recorder.finalize(sdir)
+        extra["decisions"] = len(records)
+    except Exception as e:  # noqa: BLE001 — preserve a visible, re-runnable leaf
+        status = "policy-error"
+        extra["finalize_error"] = str(e)
+        _stamp_finalize_error(sdir, str(e))
+    finally:
+        gateway.close()
+    try:
+        final_sdir = _promote_staged_session(sdir)
+    except Exception as e:  # noqa: BLE001 — an unpromoted leaf is not a usable result
+        status = "promotion-error"
+        extra["promotion_error"] = str(e)
+    return {
+        "item": work["item"],
+        "session_name": None,
+        "sid": sid,
+        "ticker": work["ticker"],
+        "date": work["date"],
+        "rep": work["rep"],
+        "status": status,
+        "policy_id": work.get("decision_policy"),
+        **extra,
+    }
+
+
 def _source_hash(*subjects: object) -> str:
     """Hash the relevant runner source without depending on a Git checkout at runtime."""
     digest = hashlib.sha256()
@@ -1235,6 +1437,29 @@ def runner_contract() -> dict:
             _write_agent_sandbox,
             _preseal,
             _run_one,
+            step.IsolatedStreamGateway,
+            step.start_isolated,
+        ),
+    }
+
+
+def deterministic_policy_runner_contract(policy_id: str) -> dict:
+    """Immutable provenance for a no-agent deterministic policy runner."""
+    from .strategies.cup_handle import policy as cup_handle_policy
+
+    if policy_id != cup_handle_policy.POLICY_ID:
+        raise ValueError(f"unsupported deterministic policy {policy_id!r}")
+    return {
+        "harness_version": "deterministic_policy_v1",
+        "decision_source": cup_handle_policy.DECISION_SOURCE,
+        "policy_id": policy_id,
+        "policy_hash": _source_hash(
+            cup_handle_policy.decisions_for_ticks,
+            cup_handle_policy.apply_to_session,
+        ),
+        "harness_hash": _source_hash(
+            _preseal,
+            _run_policy_one,
             step.IsolatedStreamGateway,
             step.start_isolated,
         ),
@@ -1272,6 +1497,31 @@ def _tag_for_session(session_id: str) -> Optional[str]:
 def _requires_causal_scanner_plan(skill_meta: dict) -> bool:
     value = skill_meta.get("arm_on_scanner_plan_required")
     return value is True or str(value).strip().lower() in {"1", "true", "yes"}
+
+
+def _deterministic_policy_id(skill_meta: dict, strategy_id: str) -> Optional[str]:
+    """Return the named supported deterministic policy, or None for an agent skill.
+
+    A frontmatter declaration is an executable contract, not a hint.  Reject an
+    unknown source/policy at batch setup rather than silently falling back to an
+    LLM or running a policy for the wrong strategy family.
+    """
+    source = str(skill_meta.get("decision_source") or "").strip().lower()
+    if not source or source in {"agent", "llm"}:
+        return None
+    if source != "deterministic_policy":
+        raise ValueError(f"unsupported decision_source {source!r}")
+    if strategy_id != "cup_handle":
+        raise ValueError("deterministic_policy is currently implemented only for cup_handle")
+    from .strategies.cup_handle import policy as cup_handle_policy
+
+    policy_id = skill_meta.get("decision_policy")
+    if policy_id != cup_handle_policy.POLICY_ID:
+        raise ValueError(
+            "cup_handle deterministic_policy requires decision_policy "
+            f"{cup_handle_policy.POLICY_ID!r}, got {policy_id!r}"
+        )
+    return policy_id
 
 
 def _validate_causal_testset(
@@ -1414,6 +1664,7 @@ def run(
             )
     skill_meta = skillmeta.read_skill_meta(skill_path)
     execution_model = skill_meta.get("execution_model") or "reported_fill_v1"
+    decision_policy = _deterministic_policy_id(skill_meta, strategy_id)
     session_from_open = str(skill_meta.get("session_from_open")).lower() == "true"
     five_minute_context = str(skill_meta.get("five_minute_context")).lower() == "true"
     engine_owned_targets = str(
@@ -1424,7 +1675,10 @@ def run(
     horizon = skill_meta.get("horizon") or strat.horizon.kind
     bar_resolution = skill_meta.get("bar_resolution") or strat.horizon.bar_resolution
     skill_text = skill_path.read_text(encoding="utf-8")
-    current_runner_contract = runner_contract()
+    current_runner_contract = (
+        deterministic_policy_runner_contract(decision_policy)
+        if decision_policy else runner_contract()
+    )
     testset_hash = _file_hash(testset)
     if resume:
         recorded_runner_contract = resume_meta.get("runner_contract")
@@ -1447,6 +1701,10 @@ def run(
                 "cannot resume with different skill bytes than the batch's recorded skill_hash"
             )
     setups = load_testset(testset)
+    research_provenance = (
+        _cup_handle_testset_research_provenance(testset, setups)
+        if strategy_id == "cup_handle" else None
+    )
 
     # Do this before allocating a batch id, staging a session, or starting an
     # agent.  v0.5 needs scanner-produced plans; historical confirmed labels are
@@ -1491,6 +1749,7 @@ def run(
                 "tag": tag,
                 "session": session_id,
                 "runner_contract": current_runner_contract,
+                "decision_policy": decision_policy,
                 "model": model, "timeout": timeout, "retries": retries,
                 "max_reentries": max_reentries, "trade_until": trade_until,
                 "dry_run": dry_run,
@@ -1508,11 +1767,22 @@ def run(
 
     reentry_desc = (f"reentry-budget {max_reentries}" if max_reentries > 0 else "reentry OFF") + \
         (f" until {trade_until} ET" if trade_until else "")
+    executor_desc = (
+        f"deterministic policy {decision_policy}; no LLM"
+        if decision_policy else f"model {model}, {reentry_desc}"
+    )
     print(f"batch {tag} (session {session_id}): version {version}, {len(setups)} setups × {repeats} "
-          f"= {len(work)} runs (parallel {parallel}, model {model}, {reentry_desc})"
+          f"= {len(work)} runs (parallel {parallel}, {executor_desc})"
           f"{' [DRY RUN]' if dry_run else ''}", file=sys.stderr)
 
     if dry_run:
+        if decision_policy:
+            print(json.dumps([
+                {"item": w["item"], "status": "dry-run-deterministic-policy",
+                 "policy_id": decision_policy, "model_used": False}
+                for w in work
+            ], indent=2))
+            return tag
         # Don't create real sessions in a dry run — show the agent prompt with a
         # placeholder SDIR so the plan is inspectable without touching the provider.
         for w in work:
@@ -1538,15 +1808,16 @@ def run(
             sdir, gateway = _preseal(w, skill_path, version, session_id)
             w["sdir"] = str(sdir)
             w["gateway"] = gateway
-            w["prompt"] = _prompt(version, skill_text, tag, session_id, w["ticker"],
-                                  w["date"], w.get("time_et"), w["sdir"],
-                                  max_reentries=w["max_reentries"], trade_until=w["trade_until"],
-                                  execution_model=execution_model,
-                                  session_from_open=w["session_from_open"],
-                                  horizon=w.get("horizon") or "intraday",
-                                  bar_resolution=w.get("bar_resolution") or "1min",
-                                  auto_lookback=w.get("auto_lookback"),
-                                  engine_owned_targets=w.get("engine_owned_targets", False))
+            if not decision_policy:
+                w["prompt"] = _prompt(version, skill_text, tag, session_id, w["ticker"],
+                                      w["date"], w.get("time_et"), w["sdir"],
+                                      max_reentries=w["max_reentries"], trade_until=w["trade_until"],
+                                      execution_model=execution_model,
+                                      session_from_open=w["session_from_open"],
+                                      horizon=w.get("horizon") or "intraday",
+                                      bar_resolution=w.get("bar_resolution") or "1min",
+                                      auto_lookback=w.get("auto_lookback"),
+                                      engine_owned_targets=w.get("engine_owned_targets", False))
             ready.append(w)
         except Exception as e:  # noqa: BLE001 — one bad setup shouldn't sink the batch
             print(f"  [preseal-err] {w['item']}: {e}", file=sys.stderr)
@@ -1561,7 +1832,10 @@ def run(
     _write_batch_meta(
         tag, version=version, model=model, testset=str(testset),
         testset_hash=testset_hash, skill_hash=skill_meta.get("content_hash"),
+        research_provenance=research_provenance,
         runner_contract=current_runner_contract,
+        decision_source=("deterministic_policy" if decision_policy else "agent"),
+        decision_policy=decision_policy,
         strategy=strategy_id,
         planned=len(setups) * repeats, repeats=repeats,
         reentry=(max_reentries > 0),  # kept for back-compat display / compare guardrail
@@ -1574,9 +1848,10 @@ def run(
     # one write at the end), so a crash mid-batch can't strand finalized sessions with
     # no manifest entry — which the audit would then void as unverifiable.
     results: list[dict] = []
+    run_leaf = _run_policy_one if decision_policy else _run_one
     if parallel <= 1:
         for w in work:
-            r = _run_one(w)
+            r = run_leaf(w)
             _append_manifest(tag, r)
             results.append(r)
             print(f"  [{r['status']}] {r['item']}", file=sys.stderr)
@@ -1586,7 +1861,7 @@ def run(
                     print(summ, file=sys.stderr)
     else:
         with _cf.ThreadPoolExecutor(max_workers=parallel) as ex:
-            for r in ex.map(_run_one, work):     # yielded in the main thread → serial writes
+            for r in ex.map(run_leaf, work):     # yielded in the main thread → serial writes
                 _append_manifest(tag, r)
                 results.append(r)
                 print(f"  [{r['status']}] {r['item']}", file=sys.stderr)
@@ -1598,8 +1873,9 @@ def run(
     n_void = audit(tag)
     n_ooc = sum(r.get("status") == "out-of-credits" for r in results)
     n_timeout = sum(r.get("status") == "timeout" for r in results)
+    runner_label = "policy runs" if decision_policy else "agents"
     print(f"\nbatch {tag} done: {sum(r['status']=='ok' for r in results)}/{len(results)} "
-          f"agents ok, {n_void} sessions voided by audit"
+          f"{runner_label} ok, {n_void} sessions voided by audit"
           + (f", {n_ooc} out of credits (excluded, not void)" if n_ooc else "")
           + (f", {n_timeout} timed out (excluded, not complete)" if n_timeout else ""),
           file=sys.stderr)
@@ -2139,6 +2415,68 @@ def _ran_out_of_credits(tag: str, session: dict, session_name: Optional[str]) ->
         return False
 
 
+def _is_deterministic_policy_session(session: dict) -> bool:
+    """Whether a leaf claims the no-agent deterministic-policy decision path."""
+    skill = session.get("skill") or {}
+    policy = session.get("decision_policy") or {}
+    return (
+        str(skill.get("decision_source") or "").strip().lower() == "deterministic_policy"
+        or str(policy.get("source") or "").strip().lower() == "deterministic_policy"
+    )
+
+
+def _deterministic_policy_integrity_errors(sdir: Path, session: dict) -> list[str]:
+    """Verify a deterministic leaf directly against its published sealed stream.
+
+    This replaces the Hermes command-log proof for this explicitly no-agent path.
+    It is deliberately stricter than ordinary record validation: every persisted
+    intent, including policy metadata and engine-owned targets, must equal the
+    output re-derived from the sealed stream.
+    """
+    from .strategies.cup_handle import policy as cup_handle_policy
+
+    errors: list[str] = []
+    skill = session.get("skill") or {}
+    stamp = session.get("decision_policy")
+    if str(skill.get("decision_source") or "").strip().lower() != cup_handle_policy.DECISION_SOURCE:
+        errors.append("skill is missing decision_source: deterministic_policy")
+    if skill.get("decision_policy") != cup_handle_policy.POLICY_ID:
+        errors.append(f"skill is missing decision_policy: {cup_handle_policy.POLICY_ID}")
+    if not isinstance(stamp, dict):
+        errors.append("session is missing deterministic policy provenance stamp")
+    else:
+        if stamp.get("source") != cup_handle_policy.DECISION_SOURCE:
+            errors.append("session deterministic policy source does not match the supported policy")
+        if stamp.get("id") != cup_handle_policy.POLICY_ID:
+            errors.append("session deterministic policy id does not match the supported policy")
+    if errors:
+        return errors
+
+    try:
+        _meta, ticks, _end = recorder._parse_stream(Path(sdir) / "stream.jsonl")
+        expected = cup_handle_policy.decisions_for_ticks(ticks)
+        plan_by_i = {
+            tick.get("i"): tick.get("scanner_plan")
+            for tick in ticks if isinstance(tick, dict)
+        }
+        for record in expected:
+            if record.get("action") != "ARM_BUY_STOP":
+                continue
+            plan = plan_by_i.get(record["i"])
+            if not isinstance(plan, dict):
+                raise cup_handle_policy.PolicyError("expected ARM tick has no scanner_plan")
+            record["engine_targets"] = {
+                "target1": float(plan["target1"]),
+                "target2": float(plan["target2"]),
+            }
+        actual = recorder._read_jsonl(Path(sdir) / "decisions.jsonl")
+    except Exception as e:  # noqa: BLE001 — audit must fail closed, never crash a cohort
+        return [f"unable to re-derive deterministic policy decisions: {e}"]
+    if actual != expected:
+        errors.append("persisted decisions do not exactly match the deterministic policy replay")
+    return errors
+
+
 def audit(tag: str) -> int:
     """Void any session in the batch whose executed tool-call commands show look-ahead
     or a determinism break, or that can't be verified. Returns the number voided.
@@ -2186,13 +2524,22 @@ def audit(tag: str) -> int:
     # command log cannot legitimize a stream that should never have traded.
     voided = 0
     integrity_invalid: set[Path] = set()
+    deterministic_policy_sessions: set[Path] = set()
     for d in sessions:
         session = recorder._load_json(d / "session.json", {}) or {}
         integrity_errors = recorder.batch_integrity_errors(d, session)
-        if not integrity_errors:
+        reason = None
+        if integrity_errors:
+            reason = "data-integrity: " + "; ".join(integrity_errors)
+        elif _is_deterministic_policy_session(session):
+            policy_errors = _deterministic_policy_integrity_errors(d, session)
+            if policy_errors:
+                reason = "deterministic-policy-integrity: " + "; ".join(policy_errors)
+            else:
+                deterministic_policy_sessions.add(d)
+        if reason is None:
             continue
         integrity_invalid.add(d)
-        reason = "data-integrity: " + "; ".join(integrity_errors)
         if session.get("void") != reason:
             session["void"] = reason
             atomic_write_json(d / "session.json", session, indent=2)
@@ -2201,7 +2548,8 @@ def audit(tag: str) -> int:
     # Do not invoke the external transcript exporter for an empty cohort.  Besides
     # avoiding needless work, this keeps a failed data-integrity preflight entirely
     # local: no agent artifact is consulted once every leaf was rejected.
-    cmd_map = _resolve_batch_commands([d.name for d in sessions]) if sessions else {}
+    agent_sessions = [d for d in sessions if d not in deterministic_policy_sessions]
+    cmd_map = _resolve_batch_commands([d.name for d in agent_sessions]) if agent_sessions else {}
     # sid → session_name, so a run with no command log can still be matched to its
     # captured agent log to distinguish out-of-credits from genuinely unverifiable.
     manifest = _load_manifest(tag)
@@ -2211,6 +2559,8 @@ def audit(tag: str) -> int:
     timeout_sids = {r.get("sid") for r in manifest if r.get("status") == "timeout"}
     for d in sessions:
         session = recorder._load_json(d / "session.json", {}) or {}
+        if d in deterministic_policy_sessions:
+            continue  # policy replay above is the complete no-agent audit proof
         if session.get("no_decision_log") or session.get("agent_abandoned"):
             continue  # infra failure; excludes from stats and is re-run by --resume
         if session.get("timed_out") or d.name in timeout_sids:
@@ -2851,6 +3201,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pb.add_argument("--unique-ticker", action="store_true",
                     help="one setup per ticker (most-recent date) — a single-entry, "
                     "max-diversity set with no repeated tickers.")
+    pb.add_argument("--exploratory", action="store_true",
+                    help="cup_handle only: allow a non-PIT source for an explicitly "
+                    "non-promotable exploratory set. Such a set is rejected by batch run.")
 
     pr = sub.add_parser("run", help="spawn agents for one version/batch")
     pr.add_argument("--strategy", default="warrior",
@@ -2953,12 +3306,24 @@ def main(argv: Optional[list[str]] = None) -> int:
             n=args.n, seed=args.seed, db=db_path, exclude=exclude,
             unique_ticker=args.unique_ticker,
             causal_only=(strategy_id == "cup_handle"),
+            require_research_provenance=(strategy_id == "cup_handle" and not args.exploratory),
+            require_exact=True,
         )
-        write_testset(setups, out_path, args.seed)
+        research_provenance = (
+            research_provenance_for_setups(db_path, setups)
+            if strategy_id == "cup_handle" and not args.exploratory else None
+        )
+        write_testset(
+            setups, out_path, args.seed, research_provenance=research_provenance,
+        )
         extra = f" (excluded {len(exclude)} keys)" if exclude else ""
         if args.unique_ticker:
             extra += f" ({len({s['ticker'] for s in setups})} unique tickers)"
-        print(f"wrote {len(setups)} setups → {out_path}{extra}  [strategy={strategy_id}]")
+        suffix = (
+            " [PIT provenance sealed]" if research_provenance
+            else (" [exploratory only]" if strategy_id == "cup_handle" else "")
+        )
+        print(f"wrote {len(setups)} setups → {out_path}{extra}  [strategy={strategy_id}]{suffix}")
     elif args.cmd == "run":
         run(args.version, model=args.model,
             testset=args.testset,  # bare name or path; resolved inside run()

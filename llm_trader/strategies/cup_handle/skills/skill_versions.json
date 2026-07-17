@@ -27,6 +27,10 @@
     "0.6.0": {
       "content_hash": "sha256:00f7b316",
       "first_seen": "2026-07-16T16:37:24"
+    },
+    "0.7.0": {
+      "content_hash": "sha256:c26a6be1",
+      "first_seen": "2026-07-17T10:29:50"
     }
   }
 }

@@ -206,51 +206,89 @@ class EntryStore:
 
         Returns the number of stale rows removed.
         """
-        scope = sorted({str(t).upper() for t in tickers if str(t).strip()})
-        if not scope:
+        return self.sync_scopes(
+            entries,
+            strategy=strategy,
+            scopes=[(tickers, start_day, end_day)],
+        )
+
+    def sync_scopes(
+        self,
+        entries: list[Entry],
+        *,
+        strategy: str,
+        scopes: list[tuple[list[str], str, str]],
+    ) -> int:
+        """Atomically replace several successfully-scanned ticker/date scopes.
+
+        Historical point-in-time scans often need a different membership list for
+        each date interval.  Publishing each interval independently would let a
+        later provider failure leave the database half refreshed.  This method
+        therefore performs every upsert and stale-row deletion in *one* SQLite
+        transaction.  A failed interval leaves all prior database contents intact.
+
+        Each scope is ``(tickers, start_day, end_day)``.  Empty ticker scopes are
+        ignored, matching :meth:`sync_scope`'s long-standing behavior.
+        """
+        normalized_scopes = []
+        for tickers, start_day, end_day in scopes:
+            tickers = sorted({str(t).upper() for t in tickers if str(t).strip()})
+            if tickers:
+                normalized_scopes.append((tickers, str(start_day), str(end_day)))
+        if not normalized_scopes:
             return 0
+
         self.conn.execute("BEGIN IMMEDIATE")
         try:
+            # First upsert the complete candidate output.  The deletion pass below
+            # is constrained to each individual scope, so an entry can never make
+            # a different interval appear freshly scanned.
+            for entry in entries:
+                self._upsert(entry)
+
+            removed = 0
             self.conn.execute(
                 "CREATE TEMP TABLE IF NOT EXISTS _scan_scope "
                 "(ticker TEXT PRIMARY KEY)"
-            )
-            self.conn.execute("DELETE FROM _scan_scope")
-            self.conn.executemany(
-                "INSERT OR IGNORE INTO _scan_scope(ticker) VALUES (?)",
-                [(ticker,) for ticker in scope],
             )
             self.conn.execute(
                 "CREATE TEMP TABLE IF NOT EXISTS _scan_keys "
                 "(ticker TEXT, date TEXT, pattern TEXT, PRIMARY KEY(ticker, date, pattern))"
             )
-            self.conn.execute("DELETE FROM _scan_keys")
-            self.conn.executemany(
-                "INSERT OR IGNORE INTO _scan_keys(ticker, date, pattern) VALUES (?,?,?)",
-                [
-                    (e.ticker.upper(), e.day.isoformat(), e.pattern)
-                    for e in entries
-                    if (getattr(e, "strategy", None) or "warrior") == strategy
-                ],
-            )
-            for entry in entries:
-                self._upsert(entry)
-            cur = self.conn.execute(
-                """
-                DELETE FROM entries
-                WHERE strategy=?
-                  AND date >= ? AND date <= ?
-                  AND ticker IN (SELECT ticker FROM _scan_scope)
-                  AND NOT EXISTS (
-                    SELECT 1 FROM _scan_keys k
-                    WHERE k.ticker=entries.ticker
-                      AND k.date=entries.date
-                      AND k.pattern=entries.pattern
-                  )
-                """,
-                (strategy, start_day, end_day),
-            )
-            removed = cur.rowcount if cur.rowcount >= 0 else 0
+            for scope, start_day, end_day in normalized_scopes:
+                self.conn.execute("DELETE FROM _scan_scope")
+                self.conn.executemany(
+                    "INSERT OR IGNORE INTO _scan_scope(ticker) VALUES (?)",
+                    [(ticker,) for ticker in scope],
+                )
+                self.conn.execute("DELETE FROM _scan_keys")
+                self.conn.executemany(
+                    "INSERT OR IGNORE INTO _scan_keys(ticker, date, pattern) VALUES (?,?,?)",
+                    [
+                        (e.ticker.upper(), e.day.isoformat(), e.pattern)
+                        for e in entries
+                        if (getattr(e, "strategy", None) or "warrior") == strategy
+                        and e.ticker.upper() in scope
+                        and start_day <= e.day.isoformat() <= end_day
+                    ],
+                )
+                cur = self.conn.execute(
+                    """
+                    DELETE FROM entries
+                    WHERE strategy=?
+                      AND date >= ? AND date <= ?
+                      AND ticker IN (SELECT ticker FROM _scan_scope)
+                      AND NOT EXISTS (
+                        SELECT 1 FROM _scan_keys k
+                        WHERE k.ticker=entries.ticker
+                          AND k.date=entries.date
+                          AND k.pattern=entries.pattern
+                      )
+                    """,
+                    (strategy, start_day, end_day),
+                )
+                removed += cur.rowcount if cur.rowcount >= 0 else 0
+
             self.conn.commit()
             return removed
         except Exception:

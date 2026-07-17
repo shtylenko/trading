@@ -127,6 +127,10 @@ def read_skill_meta(path: str | Path) -> dict:
         "armed_entry_expiry_required": fm.get("armed_entry_expiry_required"),
         "arm_on_scanner_plan_required": fm.get("arm_on_scanner_plan_required"),
         "scanner_plan_targets_engine_owned": fm.get("scanner_plan_targets_engine_owned"),
+        # Decision-path contract.  A deterministic policy is named explicitly so
+        # batch execution and audit never infer behavior from mutable prose.
+        "decision_source": fm.get("decision_source"),
+        "decision_policy": fm.get("decision_policy"),
         # Optional market-data contract. A major version can begin at the open,
         # hide the scanner's already-known trigger, and receive completed 5-minute
         # candles without changing historical replay contracts.

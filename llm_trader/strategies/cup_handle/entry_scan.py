@@ -42,6 +42,7 @@ from trading.llm_trader.models import Entry
 
 from .config import CupHandleConfig
 from .patterns import detect_ticker, fetch_market_regime
+from .research_universe import UniverseManifestError, load_research_universe
 
 log = logging.getLogger("llm_trader.cup_handle.entry_scan")
 
@@ -210,25 +211,53 @@ def resolve_universe(
     symbols: Optional[Sequence[str]],
     universe_file: Optional[str],
     exchanges: Sequence[str],
+    universe_manifest: Optional[str] = None,
     today: Optional[date] = None,
+    allow_unverified_historical: bool = False,
 ) -> list[str]:
     """Resolve the ticker universe, refusing survivorship-biased fallbacks.
 
-    Precedence: explicit ``symbols`` → ``universe_file`` → the live listing
-    universe.  The live fallback is only permitted for a near-current ``day``;
-    for an older date the caller must pass a point-in-time universe or the scan
-    would snoop on which names survived to today.
+    ``universe_manifest`` is the promotion-eligible historical route: it is a
+    versioned point-in-time manifest whose interval must cover ``day``.  Raw
+    symbols/files are intentionally treated as *unverified* for historical
+    dates; callers can use them only with an explicit exploratory opt-in.
+
+    The live listing fallback is only permitted for a near-current ``day``.
+    Without the opt-in, an older date must use ``universe_manifest`` so the
+    scan cannot silently snoop on which names survived to today.
     """
+    today = today or date.today()
+    historical = day < today - timedelta(days=LIVE_UNIVERSE_MAX_AGE_DAYS)
+    if universe_manifest:
+        try:
+            manifest = load_research_universe(universe_manifest)
+            intervals = manifest.slices_for(day, day)
+        except UniverseManifestError as exc:
+            raise ValueError(str(exc)) from exc
+        if len(intervals) != 1:  # defensive; a one-day range cannot span valid intervals
+            raise ValueError(f"universe manifest unexpectedly returned {len(intervals)} intervals")
+        return list(intervals[0].symbols)
     if symbols:
+        if historical and not allow_unverified_historical:
+            raise ValueError(
+                f"refusing unverified explicit symbols for historical date {day.isoformat()}; "
+                "pass --universe-manifest with point-in-time constituents, or use "
+                "--allow-unverified-historical-universe only for non-promotable exploration"
+            )
         return list(symbols)
     if universe_file:
+        if historical and not allow_unverified_historical:
+            raise ValueError(
+                f"refusing unverified universe file for historical date {day.isoformat()}; "
+                "pass --universe-manifest with point-in-time constituents, or use "
+                "--allow-unverified-historical-universe only for non-promotable exploration"
+            )
         return _load_universe_file(Path(universe_file))
-    today = today or date.today()
-    if day < today - timedelta(days=LIVE_UNIVERSE_MAX_AGE_DAYS):
+    if historical:
         raise ValueError(
             f"refusing to use the current (survivorship-biased) listing universe "
             f"for the historical date {day.isoformat()}; pass --symbols or "
-            f"--universe-file with the point-in-time constituents as of that date"
+            f"--universe-manifest with the point-in-time constituents as of that date"
         )
     from trading.llm_trader.universe import fetch_symbols
 
@@ -281,11 +310,24 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
         help="As-of date YYYY-MM-DD (plans are published at this session's close).",
     )
-    g = p.add_argument_group("universe (explicit sources are required for historical dates)")
-    g.add_argument("--symbols", nargs="+", help="Explicit tickers (point-in-time universe).")
-    g.add_argument(
+    g = p.add_argument_group("universe (PIT manifest is required for promotion-eligible historical scans)")
+    sources = g.add_mutually_exclusive_group()
+    sources.add_argument("--symbols", nargs="+", help="Explicit tickers (near-current or exploratory use).")
+    sources.add_argument(
         "--universe-file",
         help="File of tickers: JSON array/object or newline/comma text ('#' comments).",
+    )
+    sources.add_argument(
+        "--universe-manifest",
+        help="Versioned point-in-time manifest JSON (required for historical research).",
+    )
+    g.add_argument(
+        "--allow-unverified-historical-universe",
+        action="store_true",
+        help=(
+            "Permit --symbols/--universe-file for an older date. Output is exploratory "
+            "only and must not be used for validation or promotion."
+        ),
     )
     p.add_argument(
         "--config",
@@ -338,7 +380,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             day,
             symbols=args.symbols,
             universe_file=args.universe_file,
+            universe_manifest=args.universe_manifest,
             exchanges=cfg.exchanges,
+            allow_unverified_historical=args.allow_unverified_historical_universe,
         )
     except (ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)

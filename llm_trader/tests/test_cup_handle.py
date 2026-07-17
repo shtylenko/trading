@@ -522,15 +522,29 @@ def test_resolve_universe_refuses_live_listings_for_historical_date():
         )
 
 
-def test_resolve_universe_prefers_explicit_symbols():
+def test_resolve_universe_rejects_unverified_explicit_historical_symbols():
+    from trading.llm_trader.strategies.cup_handle import entry_scan
+
+    with pytest.raises(ValueError, match="unverified explicit symbols"):
+        entry_scan.resolve_universe(
+            date(2020, 1, 2),
+            symbols=["aaa", "bbb"],
+            universe_file=None,
+            exchanges=("XNAS",),
+            today=date(2026, 7, 16),
+        )
+
+
+def test_resolve_universe_allows_explicit_historical_symbols_only_with_exploratory_opt_in():
     from trading.llm_trader.strategies.cup_handle import entry_scan
 
     syms = entry_scan.resolve_universe(
-        date(2020, 1, 2),  # ancient date, but explicit symbols bypass the guard
+        date(2020, 1, 2),
         symbols=["aaa", "bbb"],
         universe_file=None,
         exchanges=("XNAS",),
         today=date(2026, 7, 16),
+        allow_unverified_historical=True,
     )
     assert syms == ["aaa", "bbb"]
 

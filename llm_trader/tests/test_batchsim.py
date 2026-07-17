@@ -174,6 +174,20 @@ def test_scan_commands_flags_real_peek_but_not_prose():
     assert batchsim._scan_commands("step next\nrecorder log\nfinalize") is None  # clean
 
 
+def test_scan_commands_flags_out_of_band_network_fetch():
+    # A sealed batch agent's only price window is `step next`; any out-of-band
+    # network fetch (public price API, exfiltration) is a look-ahead vector.
+    assert batchsim._scan_commands(
+        '{"cmd": "curl https://query1.finance.yahoo.com/v8/finance/chart/GOOGL"}'
+    ) is not None
+    assert batchsim._scan_commands('{"cmd": "wget http://example.com/prices.csv"}') is not None
+    assert batchsim._scan_commands(
+        '{"cmd": "python3 -c \'import urllib.request as u; u.urlopen(x)\'"}'
+    ) is not None
+    # the sanctioned loop is untouched
+    assert batchsim._scan_commands("step next\nrecorder resolve\nrecorder log") is None
+
+
 def test_parse_export_ignores_planning_tool_mentions():
     # the agent's todo/planning tool quotes the plan ("run step start", "don't read
     # _sealed.jsonl"). Scanning it was a LIVE false-positive void — must be ignored;

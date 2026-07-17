@@ -1,0 +1,9 @@
+{
+ "name": "smoke_aapl",
+ "description": "Single-symbol smoke universe (AAPL) for exercising entry_scan end-to-end.",
+ "source": "hand-authored",
+ "count": 1,
+ "symbols": [
+  "AAPL"
+ ]
+}

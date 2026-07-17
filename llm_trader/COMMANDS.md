@@ -103,3 +103,16 @@ shtylenko@Andreys-MacBook-Air Projects % python3 -m trading.llm_trader.batchsim 
   --set trading/llm_trader/batch/cup_handle/testset_30.json \
   --parallel 10 \
   --tag cup-smoke-30
+
+ENTRY SCAN
+  python3 -m trading.llm_trader.strategies.cup_handle.entry_scan \
+    --date 2026-07-16 \
+    --universe-file batch/cup_handle/universe_sp500.json \
+    --max-scan-failure-rate 0.02 \
+    --json scans/sp500-asof-2026-07-16.json
+
+python3 -m trading.llm_trader.strategies.cup_handle.entry_scan \
+    --date 2026-07-16 \
+    --universe-file trading/llm_trader/batch/cup_handle/universe_smoke_sp500.json \
+    --max-scan-failure-rate 0.02 \
+    --json trading/llm_trader/scans/aapl-asof-2026-07-16.json

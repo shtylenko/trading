@@ -237,6 +237,21 @@ _PRIVATE_FILES = ("_sealed.jsonl", "_step.json")
 # Direct access to the raw market-data layer — reconstructing bars bypasses step next.
 _DATA_LAYER_PATTERNS = ("fetch_bars", "fetch_minute_bars", "trading.marketdata",
                         "marketdata/data", "entries.db")
+# Out-of-band network fetch: the sandbox strips provider creds and the private
+# cache, but leaves general outbound network up, so a batch agent could still
+# `curl` a public price API for the very bars the gateway is protecting. A sealed
+# batch agent has no legitimate reason to fetch a URL — its only price window is
+# `step next` — so any network-fetch verb or http(s) URL in an executed command
+# is a look-ahead vector and voids the run. (Prose is never scanned; see
+# ``_parse_export`` — this only sees tool-call action fields.)
+_NETWORK_FETCH_RE = re.compile(
+    r"\b(?:curl|wget|ncat|telnet|scp|sftp|ftp)\b"
+    r"|https?://"
+    r"|\brequests\.(?:get|post|request)\b"
+    r"|\bhttpx\.(?:get|post)\b"
+    r"|\burllib\b|\burlopen\b|\bwebbrowser\b",
+    re.I,
+)
 _REPLAY_RE = "trading.llm_trader.replay"
 _STEP_START_RE = "step start"
 _STEP_NEXT_RE = "step next"
@@ -1900,6 +1915,10 @@ def _scan_commands(commands: str) -> Optional[str]:
             return f"agent command referenced forbidden `{pat}`"
     if _REPLAY_RE in executable:
         return "agent invoked replay directly (look-ahead)"
+    # 2b) out-of-band network fetch (public price API, exfiltration) — a sealed
+    #     batch agent must only read bars through `step next`.
+    if _NETWORK_FETCH_RE.search(executable):
+        return "agent issued an out-of-band network fetch (possible look-ahead / data exfiltration)"
     # 3) re-seal AFTER revealing bars: reveal the day → reset cursor → re-trade with
     #    foreknowledge. A plain re-run of `step start` is a harmless no-op (step.start refuses
     #    to re-seal a started session); only a --force re-seal following a `step next` leaks.

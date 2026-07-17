@@ -635,6 +635,21 @@ class ExecutionEngine:
                             reason="same-bar armed-entry/stop ambiguity (adverse stop-first policy)",
                         )
                         self.pyramid = None
+                else:
+                    # The trigger was reached but the order resolved to zero shares
+                    # (participation cap, buying power, or a stop so wide that risk
+                    # sizing yields nothing).  Record it explicitly and drop the
+                    # phantom stop so this no-trade is traceable and never mistaken
+                    # for an arm that was simply never triggered.
+                    self.stop = None
+                    self.order_events.append({
+                        "i": int(bar["i"]),
+                        "action": "CANCEL_ENTRY",
+                        "reason": (
+                            "armed trigger reached but resolved order size was zero "
+                            "(capacity/buying-power/stop-distance)"
+                        ),
+                    })
 
         self._resolve_pyramid_add(bar, capacity)
 

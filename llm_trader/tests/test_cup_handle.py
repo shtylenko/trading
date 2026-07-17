@@ -296,3 +296,197 @@ def test_regime_filter_requires_explicit_market_dates():
     )
     with pytest.raises(ValueError, match="SPY regime dates"):
         detect_from_frame(df, "TEST", cfg)
+
+
+# --------------------------------------------------------------------------- #
+# As-of (single-date) entry scan
+# --------------------------------------------------------------------------- #
+def _asof_base_cfg() -> CupHandleConfig:
+    return CupHandleConfig(
+        start=date(2024, 1, 1),
+        end=date(2026, 12, 31),
+        price_min=10.0,
+        avg_vol_min=500_000,
+        cup_min_bars=15,
+        cup_max_bars=80,
+        handle_min_bars=3,
+        handle_max_bars=15,
+        require_sma50_rising=False,
+        require_spy_above_sma50=False,
+    )
+
+
+def _plan_keys(arms):
+    """Comparable identity of each arm's published plan."""
+    return sorted(
+        (
+            a.ticker,
+            a.day.isoformat(),
+            a.features["formation_key"],
+            a.features["entry_trigger"],
+            a.features["stop_px"],
+            a.features["target1_px"],
+            a.features["target2_px"],
+        )
+        for a in arms
+    )
+
+
+def test_detector_asof_is_invariant_to_future_bars():
+    """The plan for day D must not change when bars after D exist (no look-ahead)."""
+    from dataclasses import replace
+
+    from trading.llm_trader.strategies.cup_handle.patterns import detect_from_frame
+
+    df, _breakout, _hh = _synthetic_cup_breakout()
+    base = _asof_base_cfg()
+    discovered = detect_from_frame(df, "T", base)
+    assert discovered, "fixture should arm at least once"
+    d = discovered[0].day
+
+    cfg_d = replace(base, start=d, end=d)
+    with_future = detect_from_frame(df, "T", cfg_d)
+    truncated = df[df.index.date <= d]
+    without_future = detect_from_frame(truncated, "T", cfg_d)
+
+    assert with_future, "expected an arm on the as-of day"
+    assert _plan_keys(with_future) == _plan_keys(without_future)
+    # The truncated frame really did drop the post-D breakout/continuation bars.
+    assert truncated.index.date.max() == d
+    assert len(truncated) < len(df)
+
+
+def test_scan_asof_matches_detector_and_never_requests_future_bars(monkeypatch):
+    """scan_asof reuses the shared detector and only ever fetches bars <= D."""
+    import pandas as pd
+    from dataclasses import replace
+
+    from trading.llm_trader.strategies.cup_handle import entry_scan
+    from trading.llm_trader.strategies.cup_handle import patterns as cup_patterns
+    from trading.llm_trader.strategies.cup_handle.patterns import detect_from_frame
+
+    df, _breakout, _hh = _synthetic_cup_breakout()
+    base = _asof_base_cfg()
+    d = detect_from_frame(df, "T", base)[0].day
+
+    requested_ends = []
+
+    def fake_fetch(ticker, resolution, *, start, end, adjustment="raw", **kwargs):
+        requested_ends.append(end)
+        # A faithful provider never reveals a bar dated after the requested end.
+        return df[df.index <= pd.Timestamp(end)]
+
+    monkeypatch.setattr(cup_patterns, "fetch_bars", fake_fetch)
+
+    result = entry_scan.scan_asof(d, ["t"], base)  # lower-case exercises normalization
+
+    assert result.symbols_scanned == ["T"]
+    assert result.symbols_failed == []
+    assert result.arms, "expected at least one arm on the as-of day"
+
+    # Parity: identical to the shared detector run over <= D bars.
+    cfg_d = replace(base, start=d, end=d)
+    ref = detect_from_frame(df[df.index.date <= d], "T", cfg_d)
+    assert _plan_keys(result.arms) == _plan_keys(ref)
+
+    # No look-ahead: every provider request ended on or before D.
+    assert requested_ends, "detector should have fetched bars"
+    assert all(pd.Timestamp(e).date() <= d for e in requested_ends)
+
+
+def test_scan_asof_fails_closed_on_provider_error(monkeypatch):
+    from trading.llm_trader.strategies.cup_handle import entry_scan
+
+    base = _asof_base_cfg()
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(entry_scan, "detect_ticker", boom)
+    with pytest.raises(RuntimeError, match="failed closed"):
+        entry_scan.scan_asof(date(2025, 6, 2), ["AAA", "BBB"], base)
+
+
+def test_scan_asof_tolerates_failures_within_the_configured_rate(monkeypatch):
+    from trading.llm_trader.strategies.cup_handle import entry_scan
+
+    base = _asof_base_cfg()
+    base.max_scan_failure_rate = 0.5  # allow up to half the names to fail
+
+    def flaky(sym, *_args, **_kwargs):
+        if sym == "BAD":
+            raise RuntimeError("provider hiccup")
+        return []
+
+    monkeypatch.setattr(entry_scan, "detect_ticker", flaky)
+    result = entry_scan.scan_asof(date(2025, 6, 2), ["GOOD", "BAD"], base)
+    assert result.symbols_failed == ["BAD"]
+    assert result.symbols_scanned == ["GOOD"]
+    assert result.arms == []
+
+
+def test_sp500_universe_file_is_loadable_and_deduped():
+    import json
+    from pathlib import Path
+
+    from trading.llm_trader.strategies.cup_handle import entry_scan
+
+    path = Path(__file__).resolve().parents[1] / "batch" / "cup_handle" / "universe_sp500.json"
+    assert path.exists(), "S&P 500 universe file should be checked in"
+    syms = entry_scan._load_universe_file(path)
+    assert len(syms) == len(set(syms)), "no duplicate tickers"
+    assert 490 <= len(syms) <= 510, f"expected ~503 S&P 500 tickers, got {len(syms)}"
+    # class shares are kept in dot form (the provider serves BRK.B / BF.B)
+    assert "BRK.B" in syms and "BF.B" in syms
+    # the stored count matches the symbols list
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["count"] == len(syms)
+
+
+def test_load_universe_file_missing_path_is_a_clean_error(tmp_path):
+    from trading.llm_trader.strategies.cup_handle import entry_scan
+
+    with pytest.raises(ValueError, match="not found"):
+        entry_scan._load_universe_file(tmp_path / "typo_universe.json")
+
+
+def test_resolve_universe_refuses_live_listings_for_historical_date():
+    from trading.llm_trader.strategies.cup_handle import entry_scan
+
+    with pytest.raises(ValueError, match="point-in-time"):
+        entry_scan.resolve_universe(
+            date(2020, 1, 2),
+            symbols=None,
+            universe_file=None,
+            exchanges=("XNAS",),
+            today=date(2026, 7, 16),
+        )
+
+
+def test_resolve_universe_prefers_explicit_symbols():
+    from trading.llm_trader.strategies.cup_handle import entry_scan
+
+    syms = entry_scan.resolve_universe(
+        date(2020, 1, 2),  # ancient date, but explicit symbols bypass the guard
+        symbols=["aaa", "bbb"],
+        universe_file=None,
+        exchanges=("XNAS",),
+        today=date(2026, 7, 16),
+    )
+    assert syms == ["aaa", "bbb"]
+
+
+def test_load_universe_file_parses_text_and_json(tmp_path):
+    from trading.llm_trader.strategies.cup_handle import entry_scan
+
+    txt = tmp_path / "u.txt"
+    txt.write_text("AAA, BBB  # inline comment\nCCC\n# whole-line comment\n", encoding="utf-8")
+    assert entry_scan._load_universe_file(txt) == ["AAA", "BBB", "CCC"]
+
+    arr = tmp_path / "u.json"
+    arr.write_text('["DDD", "EEE"]', encoding="utf-8")
+    assert entry_scan._load_universe_file(arr) == ["DDD", "EEE"]
+
+    obj = tmp_path / "u_obj.json"
+    obj.write_text('{"symbols": ["FFF"]}', encoding="utf-8")
+    assert entry_scan._load_universe_file(obj) == ["FFF"]

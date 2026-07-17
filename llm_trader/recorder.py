@@ -273,11 +273,134 @@ def _legacy_causal_target_errors(session_dir: Path, session: dict) -> list[str]:
     return errors
 
 
+def _persisted_arm_plan_errors(
+    record: dict, tick: dict, *, require_engine_owned: bool
+) -> list[str]:
+    """Contract errors for one persisted ARM_BUY_STOP vs. its revealed scanner plan."""
+    plan = tick.get("scanner_plan")
+    if not isinstance(plan, dict):
+        return ["ARM_BUY_STOP is only permitted on the revealed scanner plan bar"]
+    errors: list[str] = []
+    plan_fields = {
+        "trigger": "trigger",
+        "stop": "stop",
+        "atr": "atr",
+        "max_entry_gap_atr": "max_entry_gap_atr",
+        "expiry_bars": "arm_expiry_bars",
+    }
+    for decision_key, plan_key in plan_fields.items():
+        expected = plan.get(plan_key)
+        actual = record.get(decision_key)
+        if expected is None or actual is None:
+            errors.append(f"armed-entry field {decision_key!r} is missing or unbound to the scanner plan")
+            continue
+        if isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
+            if not math.isclose(float(actual), float(expected), rel_tol=0.0, abs_tol=1e-8):
+                errors.append(f"ARM_BUY_STOP {decision_key} does not match the revealed scanner plan")
+        elif actual != expected:
+            errors.append(f"ARM_BUY_STOP {decision_key} does not match the revealed scanner plan")
+    if require_engine_owned:
+        engine_targets = record.get("engine_targets")
+        if not isinstance(engine_targets, dict):
+            errors.append("engine_targets is missing from a persisted engine-owned arm")
+        else:
+            for field, plan_key in (("target1", "target1"), ("target2", "target2")):
+                expected = plan.get(plan_key)
+                actual = engine_targets.get(field)
+                if (not isinstance(actual, (int, float)) or isinstance(actual, bool)
+                        or not isinstance(expected, (int, float)) or isinstance(expected, bool)
+                        or not math.isclose(float(actual), float(expected), rel_tol=0.0, abs_tol=1e-8)):
+                    errors.append(f"engine_targets.{field} does not match the revealed scanner plan")
+    return errors
+
+
+def _persisted_intent_contract_errors(
+    session: dict,
+    meta: Optional[dict],
+    ticks: list[dict],
+    decisions: list[dict],
+) -> list[str]:
+    """Re-validate every persisted decision against the session's skill contract.
+
+    ``recorder.log`` enforces the intent + causal-plan contract when each record
+    is *written*, but a batch agent has a writable staging directory: a record
+    appended straight to ``decisions.jsonl`` (bypassing ``log``) would otherwise
+    reach finalize and audit unchecked.  This read-only pass re-applies the same
+    contract post-hoc, so a forged, off-plan, engine-target-stripped, or
+    duplicate-scale arm can never become an audit-clean result.  Temporal
+    causality is guaranteed elsewhere (the agent only ever saw revealed bars);
+    this guards strategy fidelity.
+    """
+    config = session.get("config", {}) or {}
+    if config.get("execution_model") != EXECUTION_MODEL:
+        return []
+    skill = session.get("skill") or {}
+
+    def _flag(name: str) -> bool:
+        value = skill.get(name)
+        return value is True or str(value).strip().lower() in {"1", "true", "yes"}
+
+    require_entry_bracket = _flag("entry_bracket_required")
+    require_entry_pyramid = _flag("entry_pyramid_required")
+    forbid_daily_enter_close = _flag("daily_enter_close_prohibited")
+    require_gap_guard = _flag("armed_entry_gap_guard_required")
+    require_expiry = _flag("armed_entry_expiry_required")
+    require_scanner_plan_arm = _flag("arm_on_scanner_plan_required")
+    require_engine_owned_targets = _flag("scanner_plan_targets_engine_owned")
+
+    tick_by_i = {t.get("i"): t for t in ticks if isinstance(t.get("i"), int)}
+    errors: list[str] = []
+    for record in decisions:
+        if not isinstance(record, dict):
+            errors.append("decision log contains a non-object record")
+            continue
+        i = record.get("i")
+        try:
+            _validate_intent_record(
+                record,
+                require_entry_bracket=require_entry_bracket,
+                require_entry_pyramid=require_entry_pyramid,
+                forbid_daily_enter_close=forbid_daily_enter_close,
+                require_armed_entry_gap_guard=require_gap_guard,
+                require_armed_entry_expiry=require_expiry,
+            )
+        except ValueError as exc:
+            errors.append(f"decision i={i}: {exc}")
+            continue
+        action = record.get("action")
+        if require_engine_owned_targets and action == "SCALE_LIMIT":
+            errors.append(
+                f"decision i={i}: scanner targets are engine-owned; SCALE_LIMIT is not permitted"
+            )
+        tick = tick_by_i.get(i)
+        if tick is None:
+            errors.append(f"decision i={i} was never revealed in the stream")
+            continue
+        if tick.get("time") != record.get("time"):
+            errors.append(
+                f"decision i={i} time {record.get('time')} does not match revealed tick "
+                f"time {tick.get('time')}"
+            )
+        if action == "ARM_BUY_STOP" and require_scanner_plan_arm:
+            errors.extend(
+                f"decision i={i}: {msg}"
+                for msg in _persisted_arm_plan_errors(
+                    record, tick, require_engine_owned=require_engine_owned_targets
+                )
+            )
+    return errors
+
+
 def batch_integrity_errors(session_dir: str | Path, session: Optional[dict] = None) -> list[str]:
     """All input and execution-contract checks for a finalized batch leaf."""
     sdir = Path(session_dir)
     session = session or _load_json(sdir / "session.json", {}) or {}
-    return stream_integrity_errors(sdir, session) + _legacy_causal_target_errors(sdir, session)
+    errors = stream_integrity_errors(sdir, session) + _legacy_causal_target_errors(sdir, session)
+    if (session.get("config", {}) or {}).get("execution_model") == EXECUTION_MODEL:
+        meta, ticks, _end = _parse_stream(sdir / "stream.jsonl")
+        decisions = _read_jsonl(sdir / "decisions.jsonl")
+        errors += _persisted_intent_contract_errors(session, meta, ticks, decisions)
+    return errors
 
 # default account profile knobs (mirrors skill / strategy family sizing)
 PROFILE_RISK = {"small": 40.0, "main": 1350.0, "swing": 500.0}
@@ -1472,7 +1595,12 @@ def finalize(session_dir: str | Path, full_day: bool = True) -> dict:
             session["setup"]["strategy"] = session["strategy"]
         session["result"] = {
             "traded": pnl["traded"], "realized_pnl": pnl["realized_pnl"],
-            "r_multiple": pnl["r_multiple"], "win": pnl["win"],
+            "r_multiple": pnl["r_multiple"],
+            # Surface the true-risk R alongside the budget R so metric readers
+            # (``_r_from_session`` prefers it) no longer silently fall back to
+            # budget R for deterministic sessions that computed initial risk.
+            "r_multiple_actual": pnl.get("r_multiple_actual"),
+            "win": pnl["win"],
             "mfe_per_share": pnl["mfe_per_share"], "n_bars": len(bars),
             "n_decisions": len(timeline), "n_fills": len(actions),
             "skill_version": skill.get("version"),

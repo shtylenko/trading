@@ -27,12 +27,15 @@ strategies/<id>/
 |---|---|---|---|
 | `warrior` | same-day 1min | `strategies/warrior/skills/` | `data/entries.db` |
 | `cup_handle` | multi-day 1day | `strategies/cup_handle/skills/` | `data/cup_handle/entries.db` |
+| `trend_pullback` | multi-day 1day | `strategies/trend_pullback/skills/` | `data/trend_pullback/entries.db` |
 
 ```bash
 python3 -m trading.llm_trader.runner --list-strategies
 python3 -m trading.llm_trader.runner --strategy cup_handle --max-symbols 100
+python3 -m trading.llm_trader.runner --strategy trend_pullback --symbols AAPL MSFT NVDA
 python3 -m trading.llm_trader.batchsim current --strategy warrior
 python3 -m trading.llm_trader.batchsim current --strategy cup_handle
+python3 -m trading.llm_trader.batchsim current --strategy trend_pullback
 ```
 
 Top-level `config.py` / `screen.py` / `patterns.py` are **thin re-exports** of the

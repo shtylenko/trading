@@ -1,0 +1,254 @@
+{
+  "created": "2026-07-18T15:18:53",
+  "seed": 13,
+  "n": 30,
+  "setups": [
+    {
+      "ticker": "ADBE",
+      "date": "2024-08-16",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMAT",
+      "date": "2025-08-07",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMZN",
+      "date": "2025-12-23",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2024-05-30",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CMCSA",
+      "date": "2024-09-26",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRM",
+      "date": "2025-01-27",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHR",
+      "date": "2024-10-17",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2024-11-26",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HD",
+      "date": "2025-02-10",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HON",
+      "date": "2024-11-01",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IBM",
+      "date": "2025-01-22",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ISRG",
+      "date": "2025-06-26",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JNJ",
+      "date": "2025-07-11",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JPM",
+      "date": "2025-12-19",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "KO",
+      "date": "2025-12-15",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2024-10-08",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LMT",
+      "date": "2024-07-18",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LOW",
+      "date": "2024-11-25",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MA",
+      "date": "2025-10-03",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MDT",
+      "date": "2025-11-11",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "META",
+      "date": "2025-09-04",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NEE",
+      "date": "2025-08-07",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NFLX",
+      "date": "2025-10-20",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NOW",
+      "date": "2025-01-17",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2025-10-07",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ORCL",
+      "date": "2025-08-22",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PEP",
+      "date": "2025-12-18",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "QQQ",
+      "date": "2025-12-19",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SPY",
+      "date": "2025-11-25",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "XOM",
+      "date": "2025-12-18",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    }
+  ],
+  "cohort": {
+    "selection": "stratified_sample",
+    "start": null,
+    "end": null,
+    "after": "09:30",
+    "source_entry_db": "/Users/shtylenko/Projects/trading/llm_trader/data/trend_pullback/entries.db"
+  }
+}

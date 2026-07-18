@@ -347,9 +347,9 @@ def _causal_entry_feature_errors(row: dict) -> list[str]:
     """Return plan-contract errors for a raw scanner row.
 
     `entries.db` deliberately retains prior research artifacts until their scan
-    scope is refreshed.  A cup-handle holdout, however, is an execution input,
-    not a research sample: it must contain only the complete causal plans that
-    the current scanner can disclose on the setup bar.
+    scope is refreshed.  A plan-first holdout is an execution input, not a
+    research sample: it must contain only complete causal plans the current
+    scanner can disclose on the setup bar.
     """
     from . import replay
 
@@ -358,6 +358,7 @@ def _causal_entry_feature_errors(row: dict) -> list[str]:
         features = json.loads(raw_features) if isinstance(raw_features, str) else raw_features
     except json.JSONDecodeError:
         features = {}
+    strategy = str(row.get("strategy") or "cup_handle")
     setup = replay.Setup(
         ticker=str(row.get("ticker") or ""),
         day=datetime.fromisoformat(str(row.get("date"))).date(),
@@ -367,8 +368,8 @@ def _causal_entry_feature_errors(row: dict) -> list[str]:
         rvol=row.get("rvol"),
         float_shares=row.get("float_shares"),
         reason=str(row.get("reason") or ""),
-        strategy="cup_handle",
-        pattern=str(row.get("pattern") or "cup_handle"),
+        strategy=strategy,
+        pattern=str(row.get("pattern") or strategy),
         features=features if isinstance(features, dict) else {},
     )
     return replay.causal_plan_feature_errors(setup)
@@ -1429,6 +1430,18 @@ def _run_one(work: dict) -> dict:
         return _result("isolation-error", error=str(e))
 
 
+def _policy_module_for(strategy_id: str):
+    """Return the deterministic policy module for a plan-first strategy family."""
+    sid = (strategy_id or "").strip().lower().replace("-", "_")
+    if sid == "cup_handle":
+        from .strategies.cup_handle import policy as mod
+        return mod
+    if sid == "trend_pullback":
+        from .strategies.trend_pullback import policy as mod
+        return mod
+    raise ValueError(f"no deterministic policy module for strategy {strategy_id!r}")
+
+
 def _run_policy_one(work: dict) -> dict:
     """Execute one sealed deterministic-policy leaf without starting an agent.
 
@@ -1437,7 +1450,8 @@ def _run_policy_one(work: dict) -> dict:
     intents, the normal engine finalizes them, and the durable leaf is promoted.
     There is deliberately no prompt, model process, sandbox, or transcript.
     """
-    from .strategies.cup_handle import policy as cup_handle_policy
+    strategy_id = work.get("strategy") or "cup_handle"
+    policy_mod = _policy_module_for(strategy_id)
 
     sdir = Path(work["sdir"])
     sid = sdir.name
@@ -1447,7 +1461,7 @@ def _run_policy_one(work: dict) -> dict:
     final_sdir = sdir
     try:
         gateway.publish()
-        records = cup_handle_policy.apply_to_session(sdir)
+        records = policy_mod.apply_to_session(sdir)
         recorder.finalize(sdir)
         extra["decisions"] = len(records)
     except Exception as e:  # noqa: BLE001 — preserve a visible, re-runnable leaf
@@ -1509,19 +1523,21 @@ def runner_contract() -> dict:
     }
 
 
-def deterministic_policy_runner_contract(policy_id: str) -> dict:
+def deterministic_policy_runner_contract(policy_id: str, strategy_id: str = "cup_handle") -> dict:
     """Immutable provenance for a no-agent deterministic policy runner."""
-    from .strategies.cup_handle import policy as cup_handle_policy
-
-    if policy_id != cup_handle_policy.POLICY_ID:
-        raise ValueError(f"unsupported deterministic policy {policy_id!r}")
+    policy_mod = _policy_module_for(strategy_id)
+    if policy_id != policy_mod.POLICY_ID:
+        raise ValueError(
+            f"unsupported deterministic policy {policy_id!r} for strategy {strategy_id!r}"
+        )
     return {
         "harness_version": "deterministic_policy_v1",
-        "decision_source": cup_handle_policy.DECISION_SOURCE,
+        "decision_source": policy_mod.DECISION_SOURCE,
         "policy_id": policy_id,
+        "strategy": strategy_id,
         "policy_hash": _source_hash(
-            cup_handle_policy.decisions_for_ticks,
-            cup_handle_policy.apply_to_session,
+            policy_mod.decisions_for_ticks,
+            policy_mod.apply_to_session,
         ),
         "harness_hash": _source_hash(
             _preseal,
@@ -1577,15 +1593,17 @@ def _deterministic_policy_id(skill_meta: dict, strategy_id: str) -> Optional[str
         return None
     if source != "deterministic_policy":
         raise ValueError(f"unsupported decision_source {source!r}")
-    if strategy_id != "cup_handle":
-        raise ValueError("deterministic_policy is currently implemented only for cup_handle")
-    from .strategies.cup_handle import policy as cup_handle_policy
-
-    policy_id = skill_meta.get("decision_policy")
-    if policy_id != cup_handle_policy.POLICY_ID:
+    sid = (strategy_id or "").strip().lower().replace("-", "_")
+    if sid not in {"cup_handle", "trend_pullback"}:
         raise ValueError(
-            "cup_handle deterministic_policy requires decision_policy "
-            f"{cup_handle_policy.POLICY_ID!r}, got {policy_id!r}"
+            f"deterministic_policy is not implemented for strategy {strategy_id!r}"
+        )
+    policy_mod = _policy_module_for(sid)
+    policy_id = skill_meta.get("decision_policy")
+    if policy_id != policy_mod.POLICY_ID:
+        raise ValueError(
+            f"{sid} deterministic_policy requires decision_policy "
+            f"{policy_mod.POLICY_ID!r}, got {policy_id!r}"
         )
     return policy_id
 
@@ -1623,9 +1641,9 @@ def _validate_causal_testset(
         preview = "\n  - ".join(invalid[:8])
         more = f"\n  ... and {len(invalid) - 8} more" if len(invalid) > 8 else ""
         raise ValueError(
-            "batch testset is incompatible with the causal cup-handle skill:\n  - "
+            f"batch testset is incompatible with the causal {strategy_id} skill:\n  - "
             + preview + more
-            + "\nRe-run the cup_handle scanner and regenerate this test set before running agents."
+            + f"\nRe-run the {strategy_id} scanner and regenerate this test set before running agents."
         )
 
 
@@ -1758,7 +1776,7 @@ def run(
     bar_resolution = skill_meta.get("bar_resolution") or strat.horizon.bar_resolution
     skill_text = skill_path.read_text(encoding="utf-8")
     current_runner_contract = (
-        deterministic_policy_runner_contract(decision_policy)
+        deterministic_policy_runner_contract(decision_policy, strategy_id=strategy_id)
         if decision_policy else runner_contract()
     )
     testset_hash = _file_hash(testset)
@@ -2522,28 +2540,32 @@ def _deterministic_policy_integrity_errors(sdir: Path, session: dict) -> list[st
     intent, including policy metadata and engine-owned targets, must equal the
     output re-derived from the sealed stream.
     """
-    from .strategies.cup_handle import policy as cup_handle_policy
+    strategy_id = str(session.get("strategy") or "cup_handle")
+    try:
+        policy_mod = _policy_module_for(strategy_id)
+    except ValueError as e:
+        return [str(e)]
 
     errors: list[str] = []
     skill = session.get("skill") or {}
     stamp = session.get("decision_policy")
-    if str(skill.get("decision_source") or "").strip().lower() != cup_handle_policy.DECISION_SOURCE:
+    if str(skill.get("decision_source") or "").strip().lower() != policy_mod.DECISION_SOURCE:
         errors.append("skill is missing decision_source: deterministic_policy")
-    if skill.get("decision_policy") != cup_handle_policy.POLICY_ID:
-        errors.append(f"skill is missing decision_policy: {cup_handle_policy.POLICY_ID}")
+    if skill.get("decision_policy") != policy_mod.POLICY_ID:
+        errors.append(f"skill is missing decision_policy: {policy_mod.POLICY_ID}")
     if not isinstance(stamp, dict):
         errors.append("session is missing deterministic policy provenance stamp")
     else:
-        if stamp.get("source") != cup_handle_policy.DECISION_SOURCE:
+        if stamp.get("source") != policy_mod.DECISION_SOURCE:
             errors.append("session deterministic policy source does not match the supported policy")
-        if stamp.get("id") != cup_handle_policy.POLICY_ID:
+        if stamp.get("id") != policy_mod.POLICY_ID:
             errors.append("session deterministic policy id does not match the supported policy")
     if errors:
         return errors
 
     try:
         _meta, ticks, _end = recorder._parse_stream(Path(sdir) / "stream.jsonl")
-        expected = cup_handle_policy.decisions_for_ticks(ticks)
+        expected = policy_mod.decisions_for_ticks(ticks)
         plan_by_i = {
             tick.get("i"): tick.get("scanner_plan")
             for tick in ticks if isinstance(tick, dict)
@@ -2553,7 +2575,7 @@ def _deterministic_policy_integrity_errors(sdir: Path, session: dict) -> list[st
                 continue
             plan = plan_by_i.get(record["i"])
             if not isinstance(plan, dict):
-                raise cup_handle_policy.PolicyError("expected ARM tick has no scanner_plan")
+                raise policy_mod.PolicyError("expected ARM tick has no scanner_plan")
             record["engine_targets"] = {
                 "target1": float(plan["target1"]),
                 "target2": float(plan["target2"]),
@@ -3688,7 +3710,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         setups = build_set(
             n=args.n, seed=args.seed, db=db_path, exclude=exclude,
             unique_ticker=args.unique_ticker,
-            causal_only=(strategy_id == "cup_handle"),
+            causal_only=(strategy_id in {"cup_handle", "trend_pullback"}),
             require_research_provenance=(strategy_id == "cup_handle" and not args.exploratory),
             require_exact=True,
             start_date=start_date, end_date=end_date, all_rows=args.all,

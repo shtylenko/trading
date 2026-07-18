@@ -1,0 +1,25 @@
+{
+  "base": "0.4.0",
+  "versions": {
+    "0.1.0": {
+      "content_hash": "sha256:36ce48bd",
+      "first_seen": null,
+      "notes": "Loose EMA20 baseline"
+    },
+    "0.2.0": {
+      "content_hash": null,
+      "first_seen": null,
+      "notes": "Tight EMA20 admission; n30 effR -0.19"
+    },
+    "0.3.0": {
+      "content_hash": null,
+      "first_seen": null,
+      "notes": "Construction experiment REJECTED (effR -0.29)"
+    },
+    "0.4.0": {
+      "content_hash": "sha256:8b99170a",
+      "first_seen": null,
+      "notes": "SMA50 pullback + 0.2 construction; n30 effR +0.09 (best so far, one cohort)"
+    }
+  }
+}

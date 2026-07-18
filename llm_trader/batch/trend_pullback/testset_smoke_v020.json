@@ -1,0 +1,94 @@
+{
+  "created": "2026-07-18T14:57:36",
+  "seed": 7,
+  "n": 10,
+  "setups": [
+    {
+      "ticker": "AMZN",
+      "date": "2025-12-23",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "COST",
+      "date": "2025-06-23",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2025-12-19",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MA",
+      "date": "2025-10-03",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "META",
+      "date": "2025-09-15",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MSFT",
+      "date": "2025-10-20",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSLA",
+      "date": "2025-11-10",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UNH",
+      "date": "2024-11-26",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "V",
+      "date": "2025-10-24",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "XOM",
+      "date": "2025-12-22",
+      "time_et": "16:00",
+      "pattern": "trend_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    }
+  ],
+  "cohort": {
+    "selection": "stratified_sample",
+    "start": null,
+    "end": null,
+    "after": "09:30",
+    "source_entry_db": "/Users/shtylenko/Projects/trading/llm_trader/data/trend_pullback/entries.db"
+  }
+}

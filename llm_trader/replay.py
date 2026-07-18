@@ -81,6 +81,17 @@ _CAUSAL_PLAN_FEATURES = (
     "arm_expiry_bars",
     "max_entry_gap_atr",
 )
+_TREND_PULLBACK_PLAN_FEATURES = (
+    "signal_as_of",
+    "entry_trigger",
+    "stop_px",
+    "target1_px",
+    "target2_px",
+    "atr",
+    "measured_move_px",
+    "arm_expiry_bars",
+    "max_entry_gap_atr",
+)
 _GEOMETRY_SELECTION_COMPONENTS = {
     "handle_shallowness",
     "lip_alignment",
@@ -429,16 +440,30 @@ def _daily_indicator_gaps(window: pd.DataFrame, dates: list[date]) -> list[str]:
 
 
 def causal_plan_feature_errors(setup: Setup) -> list[str]:
-    """Return stale/incomplete causal-plan metadata errors for a cup setup.
+    """Return stale/incomplete causal-plan metadata errors for plan-first setups.
 
-    Version 0.5 arms only from a scanner-produced completed-handle plan.  Older
-    rows were breakout labels with a nominal 09:30 time and no causal plan; using
-    those rows with the new skill must be a loud setup error, never a zero-trade
-    pseudo-result.
+    Cup-handle v0.5+ requires geometry_selection evidence. Trend-pullback v0.1
+    requires measured_move plan fields. Non-causal families return no errors here.
     """
-    if setup.strategy != "cup_handle":
-        return []
+    strategy = (setup.strategy or "").strip().lower()
     features = setup.features or {}
+
+    if strategy == "trend_pullback":
+        if features.get("signal_kind") != "prebreak_arm":
+            actual = features.get("signal_kind")
+            return [
+                "expected features.signal_kind='prebreak_arm' "
+                f"(got {actual!r})"
+            ]
+        missing = [
+            key for key in _TREND_PULLBACK_PLAN_FEATURES if features.get(key) is None
+        ]
+        if missing:
+            return ["missing causal plan feature(s): " + ", ".join(missing)]
+        return []
+
+    if strategy != "cup_handle":
+        return []
     if features.get("signal_kind") != "prebreak_arm":
         actual = features.get("signal_kind")
         return [
@@ -628,17 +653,22 @@ def replay_daily(
             # completed plan bar is revealed.  This lets the execution agent use
             # deterministic scanner math without leaking a later confirmation.
             if d == setup.day and feats.get("signal_kind") == "prebreak_arm":
-                tick["scanner_plan"] = {
+                plan = {
                     "signal_as_of": feats.get("signal_as_of"),
                     "trigger": feats.get("entry_trigger", setup.entry_px),
                     "stop": feats.get("stop_px"),
                     "target1": feats.get("target1_px"),
                     "target2": feats.get("target2_px"),
                     "atr": feats.get("atr"),
-                    "cup_depth_px": feats.get("cup_depth_px"),
                     "arm_expiry_bars": feats.get("arm_expiry_bars"),
                     "max_entry_gap_atr": feats.get("max_entry_gap_atr"),
                 }
+                # Family-specific measured-move field (cup vs trend pullback).
+                if feats.get("cup_depth_px") is not None:
+                    plan["cup_depth_px"] = feats.get("cup_depth_px")
+                if feats.get("measured_move_px") is not None:
+                    plan["measured_move_px"] = feats.get("measured_move_px")
+                tick["scanner_plan"] = plan
             if not neutral_meta and anchor:
                 tick["vs_anchor_pct"] = round((close - anchor) / anchor * 100.0, 3)
             if fmt == "jsonl":

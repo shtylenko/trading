@@ -17,9 +17,10 @@ _REGISTRY: dict[str, "StrategySpec"] | None = None
 
 def _build_registry() -> dict[str, "StrategySpec"]:
     from .cup_handle import CupHandleStrategy
+    from .trend_pullback import TrendPullbackStrategy
     from .warrior import WarriorStrategy
 
-    specs = [WarriorStrategy(), CupHandleStrategy()]
+    specs = [WarriorStrategy(), CupHandleStrategy(), TrendPullbackStrategy()]
     return {s.id: s for s in specs}
 
 

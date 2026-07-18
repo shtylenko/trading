@@ -186,9 +186,12 @@ def _causal_plan_integrity_errors(
         ]
     required_fields = (
         "signal_as_of", "trigger", "stop", "target1", "target2", "atr",
-        "cup_depth_px", "arm_expiry_bars", "max_entry_gap_atr",
+        "arm_expiry_bars", "max_entry_gap_atr",
     )
     missing = [field for field in required_fields if plan.get(field) is None]
+    # Measured-move field name differs by family (cup depth vs pullback depth).
+    if plan.get("cup_depth_px") is None and plan.get("measured_move_px") is None:
+        missing.append("cup_depth_px|measured_move_px")
     return (["causal scanner_plan missing field(s): " + ", ".join(missing)] if missing else [])
 
 

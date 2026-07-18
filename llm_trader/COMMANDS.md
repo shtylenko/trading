@@ -116,3 +116,47 @@ python3 -m trading.llm_trader.strategies.cup_handle.entry_scan \
     --universe-file trading/llm_trader/batch/cup_handle/universe_smoke_sp500.json \
     --max-scan-failure-rate 0.02 \
     --json trading/llm_trader/scans/aapl-asof-2026-07-16.json
+
+# TREND PULLBACK (Lance MA reclaim swing)
+
+python3 -m trading.llm_trader.runner --strategy trend_pullback \
+  --start 2024-01-01 --end 2025-12-31 \
+  --symbols AAPL MSFT NVDA AMZN META GOOGL JPM
+
+python3 -m trading.llm_trader.batchsim build-set --strategy trend_pullback --n 10 --unique-ticker --seed 7 \
+  --out trading/llm_trader/batch/trend_pullback/testset_smoke.json
+
+python3 -m trading.llm_trader.batchsim run --strategy trend_pullback --version 0.1.0 \
+  --set trading/llm_trader/batch/trend_pullback/testset_smoke.json \
+  --parallel 4 --tag tp-smoke-v010
+
+python3 -m trading.llm_trader.viewer --port 8765
+
+
+# trend_pullback 0.2.0 larger cohort (30 unique tickers)
+python3 -m trading.llm_trader.batchsim run --strategy trend_pullback --version 0.2.0 \
+  --set trading/llm_trader/batch/trend_pullback/testset_30.json \
+  --parallel 6 --tag tp-v020-n30
+python3 -m trading.llm_trader.batchsim report --tag tp-v020-n30
+
+# trend_pullback 0.3.0 n30 (construction)
+python3 -m trading.llm_trader.batchsim run --strategy trend_pullback --version 0.3.0 \
+  --set trading/llm_trader/batch/trend_pullback/testset_30_v030.json \
+  --parallel 6 --tag tp-v030-n30
+
+# trend_pullback 0.4.0 n30 (SMA50 — current best)
+python3 -m trading.llm_trader.batchsim run --strategy trend_pullback --version 0.4.0 \
+  --set trading/llm_trader/batch/trend_pullback/testset_30_v040.json \
+  --parallel 6 --tag tp-v040-n30
+
+# trend_pullback 0.4.0 second key-disjoint n30
+python3 -m trading.llm_trader.batchsim build-set --strategy trend_pullback --n 30 --unique-ticker --seed 42 \
+  --exclude trading/llm_trader/batch/trend_pullback/testset_30_v040.json \
+  --out trading/llm_trader/batch/trend_pullback/testset_30_v040_b.json
+python3 -m trading.llm_trader.batchsim run --strategy trend_pullback --version 0.4.0 \
+  --set trading/llm_trader/batch/trend_pullback/testset_30_v040_b.json \
+  --parallel 6 --tag tp-v040-n30-b
+
+# multi-year 0.4.0 (parked — FAIL)
+# tags: tp-v040-y2022 .. y2025, tp-v040-2022-2025
+# results: trading/llm_trader/batch/trend_pullback/multiyear/RESULTS.md

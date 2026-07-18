@@ -229,6 +229,8 @@ def enrich_daily_for_replay(
     out["sma20"] = sma(out["close"], 20)
     out["sma50"] = sma(out["close"], 50)
     out["sma200"] = sma(out["close"], 200)
+    # EMA20 for trend-pullback families (optional on ticks; not in REQUIRED list)
+    out["ema20"] = out["close"].ewm(span=20, adjust=False).mean()
     out["atr14"] = atr(out, 14)
     if volume_lookback < 2:
         raise ValueError("volume_lookback must be at least 2")

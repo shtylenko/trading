@@ -1,27 +1,11 @@
 {
-  "created": "2026-07-17T14:17:10",
+  "created": "2026-07-17T14:56:46",
   "seed": 13,
-  "n": 487,
+  "n": 473,
   "setups": [
     {
       "ticker": "AAPL",
-      "date": "2023-02-15",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "AAPL",
-      "date": "2023-03-06",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "AAPL",
-      "date": "2023-03-14",
+      "date": "2023-02-14",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -70,14 +54,6 @@
     {
       "ticker": "ABBV",
       "date": "2023-09-13",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "ABBV",
-      "date": "2023-09-21",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -205,7 +181,15 @@
     },
     {
       "ticker": "AFL",
-      "date": "2023-07-12",
+      "date": "2023-07-11",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AFL",
+      "date": "2023-07-19",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -342,14 +326,6 @@
     {
       "ticker": "AMZN",
       "date": "2023-12-05",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "AMZN",
-      "date": "2023-12-13",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -573,7 +549,7 @@
     },
     {
       "ticker": "BK",
-      "date": "2023-08-03",
+      "date": "2023-09-01",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -621,7 +597,7 @@
     },
     {
       "ticker": "BKR",
-      "date": "2023-06-23",
+      "date": "2023-06-22",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -629,7 +605,7 @@
     },
     {
       "ticker": "BKR",
-      "date": "2023-07-03",
+      "date": "2023-06-30",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -821,7 +797,7 @@
     },
     {
       "ticker": "CMCSA",
-      "date": "2023-06-14",
+      "date": "2023-07-06",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -869,7 +845,7 @@
     },
     {
       "ticker": "CNC",
-      "date": "2023-11-20",
+      "date": "2023-11-22",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -877,7 +853,15 @@
     },
     {
       "ticker": "CNP",
-      "date": "2023-01-11",
+      "date": "2023-01-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CNP",
+      "date": "2023-01-18",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -989,14 +973,6 @@
     },
     {
       "ticker": "CSCO",
-      "date": "2023-07-13",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "CSCO",
       "date": "2023-08-02",
       "time_et": "16:00",
       "pattern": "cup_handle",
@@ -1014,6 +990,14 @@
     {
       "ticker": "CSX",
       "date": "2023-01-12",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CSX",
+      "date": "2023-01-23",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1165,7 +1149,15 @@
     },
     {
       "ticker": "DFS",
-      "date": "2023-07-07",
+      "date": "2023-07-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DFS",
+      "date": "2023-07-14",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1182,14 +1174,6 @@
     {
       "ticker": "DHI",
       "date": "2023-11-22",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "DHI",
-      "date": "2023-12-04",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1293,14 +1277,6 @@
     },
     {
       "ticker": "DUK",
-      "date": "2023-01-12",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "DUK",
       "date": "2023-12-21",
       "time_et": "16:00",
       "pattern": "cup_handle",
@@ -1310,14 +1286,6 @@
     {
       "ticker": "DXC",
       "date": "2023-06-12",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "DXCM",
-      "date": "2023-04-11",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1349,15 +1317,7 @@
     },
     {
       "ticker": "EA",
-      "date": "2023-06-06",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "EA",
-      "date": "2023-06-14",
+      "date": "2023-06-08",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1508,14 +1468,6 @@
       "gap_pct": null
     },
     {
-      "ticker": "EW",
-      "date": "2023-05-10",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
       "ticker": "EXC",
       "date": "2023-01-04",
       "time_et": "16:00",
@@ -1612,14 +1564,6 @@
       "gap_pct": null
     },
     {
-      "ticker": "FE",
-      "date": "2023-01-11",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
       "ticker": "FI",
       "date": "2023-11-28",
       "time_et": "16:00",
@@ -1645,14 +1589,6 @@
     },
     {
       "ticker": "FISV",
-      "date": "2023-01-26",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "FISV",
       "date": "2023-04-28",
       "time_et": "16:00",
       "pattern": "cup_handle",
@@ -1662,6 +1598,14 @@
     {
       "ticker": "FITB",
       "date": "2023-02-09",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "FITB",
+      "date": "2023-02-17",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1684,8 +1628,8 @@
       "gap_pct": null
     },
     {
-      "ticker": "FSLR",
-      "date": "2023-06-01",
+      "ticker": "FOXA",
+      "date": "2023-07-18",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1989,14 +1933,6 @@
     },
     {
       "ticker": "INTC",
-      "date": "2023-08-30",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "INTC",
       "date": "2023-10-09",
       "time_et": "16:00",
       "pattern": "cup_handle",
@@ -2038,14 +1974,6 @@
     {
       "ticker": "INVH",
       "date": "2023-05-18",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "INVH",
-      "date": "2023-06-02",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2102,14 +2030,6 @@
     {
       "ticker": "IR",
       "date": "2023-12-07",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "JBL",
-      "date": "2023-12-26",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2181,31 +2101,7 @@
     },
     {
       "ticker": "JPM",
-      "date": "2023-06-12",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "JPM",
-      "date": "2023-06-21",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "JPM",
-      "date": "2023-06-29",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "JPM",
-      "date": "2023-07-10",
+      "date": "2023-07-07",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2309,15 +2205,7 @@
     },
     {
       "ticker": "LULU",
-      "date": "2023-10-30",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "LULU",
-      "date": "2023-11-09",
+      "date": "2023-11-06",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2397,14 +2285,6 @@
     },
     {
       "ticker": "MAR",
-      "date": "2023-02-09",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "MAR",
       "date": "2023-05-12",
       "time_et": "16:00",
       "pattern": "cup_handle",
@@ -2414,6 +2294,14 @@
     {
       "ticker": "MCD",
       "date": "2023-12-20",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MCD",
+      "date": "2023-12-29",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2446,6 +2334,14 @@
     {
       "ticker": "MDLZ",
       "date": "2023-01-06",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MDLZ",
+      "date": "2023-01-17",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2486,14 +2382,6 @@
     {
       "ticker": "MET",
       "date": "2023-12-22",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "META",
-      "date": "2023-10-05",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2989,6 +2877,14 @@
     },
     {
       "ticker": "PEG",
+      "date": "2023-05-05",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PEG",
       "date": "2023-11-14",
       "time_et": "16:00",
       "pattern": "cup_handle",
@@ -3086,6 +2982,14 @@
     {
       "ticker": "PM",
       "date": "2023-01-06",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PM",
+      "date": "2023-01-20",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -3309,6 +3213,14 @@
     },
     {
       "ticker": "SO",
+      "date": "2023-11-29",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SO",
       "date": "2023-12-11",
       "time_et": "16:00",
       "pattern": "cup_handle",
@@ -3326,14 +3238,6 @@
     {
       "ticker": "STX",
       "date": "2023-08-10",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "STX",
-      "date": "2023-08-30",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -3429,14 +3333,6 @@
     },
     {
       "ticker": "TGT",
-      "date": "2023-04-03",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "TGT",
       "date": "2023-12-11",
       "time_et": "16:00",
       "pattern": "cup_handle",
@@ -3446,14 +3342,6 @@
     {
       "ticker": "TMUS",
       "date": "2023-09-20",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "TMUS",
-      "date": "2023-10-11",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -3581,7 +3469,7 @@
     },
     {
       "ticker": "UDR",
-      "date": "2023-07-12",
+      "date": "2023-07-14",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -3733,7 +3621,7 @@
     },
     {
       "ticker": "VTR",
-      "date": "2023-07-20",
+      "date": "2023-07-21",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -3980,15 +3868,6 @@
         "symbols_sha256": "sha256:2e5ac39e5c8c2276559b272f2599edb7998bf5de806c7e20d4a0bf52b29736ce"
       },
       {
-        "as_of": "2023-08-25",
-        "end": "2023-08-30",
-        "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
-        "source_sha256": "sha256:39a9202c9ef69a74c0ff07e2113ad41fb6da7c8c5b6cd9541f0185fb4391e717",
-        "start": "2023-08-26",
-        "symbols_count": 503,
-        "symbols_sha256": "sha256:1c8cb3df04b611a6dfee555ba01b3a7df0a362edc884ee99ee9b3eb828cbfbea"
-      },
-      {
         "as_of": "2023-08-30",
         "end": "2023-09-18",
         "source": "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
@@ -4034,7 +3913,7 @@
         "symbols_sha256": "sha256:e034646b93a1b364bb2100ca04264ef05cd6b0617c624d32e58c66d4d7c786d1"
       }
     ],
-    "setup_count": 487
+    "setup_count": 473
   },
   "cohort": {
     "selection": "all_eligible_rows",

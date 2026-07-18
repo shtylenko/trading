@@ -1,7 +1,7 @@
 {
-  "created": "2026-07-17T14:17:27",
+  "created": "2026-07-17T14:56:51",
   "seed": 13,
-  "n": 381,
+  "n": 363,
   "setups": [
     {
       "ticker": "AAPL",
@@ -45,7 +45,7 @@
     },
     {
       "ticker": "AAPL",
-      "date": "2024-10-11",
+      "date": "2024-10-15",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -53,15 +53,7 @@
     },
     {
       "ticker": "AAPL",
-      "date": "2024-10-21",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "AAPL",
-      "date": "2024-10-29",
+      "date": "2024-10-23",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -212,14 +204,6 @@
       "gap_pct": null
     },
     {
-      "ticker": "AMGN",
-      "date": "2024-06-24",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
       "ticker": "AMT",
       "date": "2024-06-24",
       "time_et": "16:00",
@@ -278,14 +262,6 @@
     {
       "ticker": "AVGO",
       "date": "2024-05-29",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "AVGO",
-      "date": "2024-06-07",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -356,22 +332,6 @@
       "gap_pct": null
     },
     {
-      "ticker": "BBWI",
-      "date": "2024-05-30",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "BBY",
-      "date": "2024-01-02",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
       "ticker": "BBY",
       "date": "2024-04-05",
       "time_et": "16:00",
@@ -414,6 +374,22 @@
     {
       "ticker": "BMY",
       "date": "2024-08-30",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BMY",
+      "date": "2024-09-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BMY",
+      "date": "2024-09-18",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -485,7 +461,7 @@
     },
     {
       "ticker": "CAT",
-      "date": "2024-01-08",
+      "date": "2024-01-10",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -526,14 +502,6 @@
     {
       "ticker": "CDNS",
       "date": "2024-11-26",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "CEG",
-      "date": "2024-07-12",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -604,6 +572,14 @@
       "gap_pct": null
     },
     {
+      "ticker": "CMS",
+      "date": "2024-01-10",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
       "ticker": "CNC",
       "date": "2024-08-19",
       "time_et": "16:00",
@@ -622,14 +598,6 @@
     {
       "ticker": "CNP",
       "date": "2024-10-15",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "CNP",
-      "date": "2024-11-08",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -781,6 +749,14 @@
     },
     {
       "ticker": "DAL",
+      "date": "2024-01-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DAL",
       "date": "2024-02-27",
       "time_et": "16:00",
       "pattern": "cup_handle",
@@ -830,14 +806,6 @@
     {
       "ticker": "DD",
       "date": "2024-05-14",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "DD",
-      "date": "2024-05-22",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -908,14 +876,6 @@
       "gap_pct": null
     },
     {
-      "ticker": "DUK",
-      "date": "2024-01-02",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
       "ticker": "DVN",
       "date": "2024-03-22",
       "time_et": "16:00",
@@ -941,15 +901,7 @@
     },
     {
       "ticker": "EIX",
-      "date": "2024-01-04",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "EIX",
-      "date": "2024-01-12",
+      "date": "2024-01-10",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1054,6 +1006,14 @@
     {
       "ticker": "EXC",
       "date": "2024-09-26",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "EXC",
+      "date": "2024-10-04",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1188,14 +1148,6 @@
       "gap_pct": null
     },
     {
-      "ticker": "GLW",
-      "date": "2024-10-23",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
       "ticker": "GM",
       "date": "2024-09-05",
       "time_et": "16:00",
@@ -1212,8 +1164,8 @@
       "gap_pct": null
     },
     {
-      "ticker": "GM",
-      "date": "2024-10-15",
+      "ticker": "GOOG",
+      "date": "2024-01-04",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1221,15 +1173,7 @@
     },
     {
       "ticker": "GOOG",
-      "date": "2024-01-09",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "GOOG",
-      "date": "2024-01-18",
+      "date": "2024-01-17",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1420,6 +1364,14 @@
       "gap_pct": null
     },
     {
+      "ticker": "HPE",
+      "date": "2024-11-25",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
       "ticker": "HPQ",
       "date": "2024-01-08",
       "time_et": "16:00",
@@ -1445,7 +1397,7 @@
     },
     {
       "ticker": "HPQ",
-      "date": "2024-11-06",
+      "date": "2024-11-08",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1621,7 +1573,7 @@
     },
     {
       "ticker": "JCI",
-      "date": "2024-10-10",
+      "date": "2024-10-11",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1652,8 +1604,8 @@
       "gap_pct": null
     },
     {
-      "ticker": "JPM",
-      "date": "2024-10-25",
+      "ticker": "KDP",
+      "date": "2024-04-30",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1661,7 +1613,7 @@
     },
     {
       "ticker": "KDP",
-      "date": "2024-04-30",
+      "date": "2024-06-03",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1678,14 +1630,6 @@
     {
       "ticker": "KHC",
       "date": "2024-08-26",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "KHC",
-      "date": "2024-09-05",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1726,14 +1670,6 @@
     {
       "ticker": "KO",
       "date": "2024-01-10",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "KO",
-      "date": "2024-01-19",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -1949,14 +1885,6 @@
     },
     {
       "ticker": "MGM",
-      "date": "2024-01-05",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "MGM",
       "date": "2024-02-02",
       "time_et": "16:00",
       "pattern": "cup_handle",
@@ -2093,14 +2021,6 @@
     },
     {
       "ticker": "MS",
-      "date": "2024-01-08",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "MS",
       "date": "2024-10-09",
       "time_et": "16:00",
       "pattern": "cup_handle",
@@ -2164,6 +2084,14 @@
       "gap_pct": null
     },
     {
+      "ticker": "MU",
+      "date": "2024-11-08",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
       "ticker": "NCLH",
       "date": "2024-03-22",
       "time_et": "16:00",
@@ -2197,15 +2125,7 @@
     },
     {
       "ticker": "NEE",
-      "date": "2024-08-29",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "NEE",
-      "date": "2024-09-09",
+      "date": "2024-09-04",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2245,7 +2165,7 @@
     },
     {
       "ticker": "NFLX",
-      "date": "2024-09-13",
+      "date": "2024-09-16",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2254,14 +2174,6 @@
     {
       "ticker": "NFLX",
       "date": "2024-09-27",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "NFLX",
-      "date": "2024-10-08",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2278,14 +2190,6 @@
     {
       "ticker": "NRG",
       "date": "2024-12-04",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "NVDA",
-      "date": "2024-01-02",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2365,22 +2269,6 @@
     },
     {
       "ticker": "PANW",
-      "date": "2024-06-12",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "PANW",
-      "date": "2024-06-26",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "PANW",
       "date": "2024-10-17",
       "time_et": "16:00",
       "pattern": "cup_handle",
@@ -2429,6 +2317,14 @@
     },
     {
       "ticker": "PEG",
+      "date": "2024-04-22",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PEG",
       "date": "2024-12-02",
       "time_et": "16:00",
       "pattern": "cup_handle",
@@ -2468,6 +2364,14 @@
       "gap_pct": null
     },
     {
+      "ticker": "PLD",
+      "date": "2024-09-04",
+      "time_et": "16:00",
+      "pattern": "cup_handle",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
       "ticker": "PNR",
       "date": "2024-08-01",
       "time_et": "16:00",
@@ -2494,14 +2398,6 @@
     {
       "ticker": "PYPL",
       "date": "2024-04-03",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "PYPL",
-      "date": "2024-04-29",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2550,22 +2446,6 @@
     {
       "ticker": "RF",
       "date": "2024-09-18",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "RF",
-      "date": "2024-09-26",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "RF",
-      "date": "2024-10-08",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2701,7 +2581,7 @@
     },
     {
       "ticker": "TGT",
-      "date": "2024-09-16",
+      "date": "2024-09-23",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2709,15 +2589,7 @@
     },
     {
       "ticker": "TGT",
-      "date": "2024-09-25",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "TGT",
-      "date": "2024-10-04",
+      "date": "2024-10-09",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2764,16 +2636,16 @@
       "gap_pct": null
     },
     {
-      "ticker": "TTWO",
-      "date": "2024-06-07",
+      "ticker": "TSN",
+      "date": "2024-12-05",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
       "gap_pct": null
     },
     {
-      "ticker": "TXN",
-      "date": "2024-01-03",
+      "ticker": "TTWO",
+      "date": "2024-06-07",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2822,14 +2694,6 @@
     {
       "ticker": "UBER",
       "date": "2024-08-19",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "UBER",
-      "date": "2024-08-27",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -2990,14 +2854,6 @@
     {
       "ticker": "WMT",
       "date": "2024-02-07",
-      "time_et": "16:00",
-      "pattern": "cup_handle",
-      "float_shares": null,
-      "gap_pct": null
-    },
-    {
-      "ticker": "WMT",
-      "date": "2024-02-15",
       "time_et": "16:00",
       "pattern": "cup_handle",
       "float_shares": null,
@@ -3186,7 +3042,7 @@
         "symbols_sha256": "sha256:b6e27d4fe726d73d3e6a2d69f5c555118620a1264efd1529d9547f3dab7a6486"
       }
     ],
-    "setup_count": 381
+    "setup_count": 363
   },
   "cohort": {
     "selection": "all_eligible_rows",

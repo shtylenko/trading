@@ -127,11 +127,21 @@ def test_build_set_causal_only_excludes_legacy_cup_labels(tmp_path):
         "entry_trigger": 11.0, "stop_px": 9.0, "target1_px": 12.0,
         "target2_px": 13.0, "atr": 1.0, "cup_depth_px": 3.0,
         "arm_expiry_bars": 5, "max_entry_gap_atr": 0.5,
+        "geometry_selection": {
+            "definition": "geometry_selection_v1", "score": 0.75, "candidate_count": 2,
+            "components": {
+                "handle_shallowness": 0.8, "lip_alignment": 0.7,
+                "trough_centrality": 0.9, "volume_dryup": 0.6,
+            },
+        },
     }
+    legacy_selectionless_plan = dict(complete_plan)
+    legacy_selectionless_plan.pop("geometry_selection")
     conn.executemany(
         "INSERT INTO entries (ticker,date,time_et,pattern,features_json) VALUES (?,?,?,?,?)",
         [
             ("CAUSAL", "2025-02-03", "16:00", "cup_handle", json.dumps(complete_plan)),
+            ("LEGACY", "2025-02-03", "16:00", "cup_handle", json.dumps(legacy_selectionless_plan)),
             ("STALE", "2025-02-04", "09:30", "cup_handle", "{}"),
         ],
     )
@@ -157,6 +167,13 @@ def test_cup_holdout_requires_and_records_one_pit_universe_manifest(tmp_path):
         "entry_trigger": 11.0, "stop_px": 9.0, "target1_px": 12.0,
         "target2_px": 13.0, "atr": 1.0, "cup_depth_px": 3.0,
         "arm_expiry_bars": 5, "max_entry_gap_atr": 0.5,
+        "geometry_selection": {
+            "definition": "geometry_selection_v1", "score": 0.75, "candidate_count": 2,
+            "components": {
+                "handle_shallowness": 0.8, "lip_alignment": 0.7,
+                "trough_centrality": 0.9, "volume_dryup": 0.6,
+            },
+        },
         "research_universe": {
             "schema_version": 1, "membership_basis": "point_in_time",
             "manifest_name": "sp500-pit", "manifest_sha256": "sha256:manifest",

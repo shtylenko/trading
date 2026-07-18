@@ -154,13 +154,27 @@ prior 2025-only public-PIT result with 569 plans is **superseded** by the
 484-plan continuous-history cohort and must not be used for strategy selection.
 The 2026-H1 holdout remains unexecuted and unscored.
 
-### Deterministic geometry selection
+### Deterministic geometry selection — completed 2026-07-17
 
-**Problem:** `_find_cup_and_handle` returns the first valid geometry. Iteration currently favors short handles and short cups, despite comments suggesting a different selection policy. Changing any boundary can therefore silently choose a different formation rather than merely tighten a filter.
+- [x] Enumerate every valid cup/handle geometry visible on a plan date. Select
+  by the fixed `geometry_selection_v1` structural score (handle shallowness,
+  lip alignment, trough centrality, and handle-volume dry-up); ties resolve by
+  longer cup, shorter handle, then earlier geometry indices.
+- [x] Persist selection score, components, candidate count, tie-break order,
+  and selected indices in every plan. The causal-plan contract now rejects a
+  legacy row that lacks this evidence, forcing an explicit rescan rather than
+  silently replaying the prior first-match geometry.
+- [x] Add adversarial tests proving candidate enumeration order cannot change
+  the selected formation and that the stable longer-cup tie-breaker applies.
 
-**Plan:** enumerate all valid cup/handle candidates for a plan date, compute a fixed, explainable quality score, select the highest-scoring candidate with stable tie-breaking, and persist both chosen geometry and score components.
-
-**Acceptance:** unit tests prove candidate order does not affect the selected formation; historical replays remain causal and reproducible.
+**Development correction:** after continuous-state scanning, the geometry-v1
+rescan completed 562 symbols with zero provider failures and yielded 1,305
+plans (473/363/469 in 2023/2024/2025), versus 1,352 under first-match geometry.
+Its selection candidate count had a median of 29 (maximum 675), making the
+previous implicit loop order materially consequential. The deterministic
+execution batch completed 1,305/1,305 leaves with zero voids. This is an
+outcome-independent scanner correctness change, not a feature threshold or
+entry gate.
 
 ### Parallel workstreams and dependency boundary
 
@@ -389,8 +403,8 @@ interval boundaries. Keep its artifacts for audit history only; do not compare a
 candidate with this 569-plan baseline or treat its P&L as a valid development
 result.
 
-**Continuous multi-year development baseline — completed 2026-07-17:** the
-replacement public-PIT cohort,
+**Superseded first-match continuous multi-year baseline — 2026-07-17:** the
+former replacement public-PIT cohort,
 `testset_sp500_public_pit_dev_2023_2025_continuous`, seals all 1,352 causal
 plans from 2023–2025 under continuous ticker state. Deterministic v0.7
 completed 1,352/1,352 leaves with zero voids: 940 trades / 412 no-trades,
@@ -400,14 +414,25 @@ feasible (789 capacity/ticker/gross rejections), for `$-23,212.76`, `-0.034`
 effective R, and `$-27,213.38` realized-P&L maximum drawdown. By year, portfolio
 effective R was `+0.016` (2023), `-0.077` (2024), and `-0.057` (corrected 2025).
 The strategy is not investable under this contract; do not promote v0.7 or
-interpret its independent-session result as capacity-adjusted alpha.
+interpret its independent-session result as capacity-adjusted alpha. It is
+superseded by the deterministic geometry-selection population below.
 
-**Predeclared frozen-plan regime veto — rejected again:** standing down unless
-SPY was above both SMA50 and SMA200 vetoed 149 of 1,352 baseline plans. It
-improved independent effective R to `+0.049`, but portfolio P&L changed only
-from `$-23,212.76` to `$-22,953.68` (still `-0.034` effective R), with a
-`$-25,301.11` realized-P&L maximum drawdown. It remains a rejected diagnostic
-counterfactual, not a scanner gate or portfolio rule.
+**Geometry-selection v1 multi-year development baseline — completed
+2026-07-17:** the replacement 1,305-plan cohort completed with zero voids:
+899 trades / 406 no-trades, `$18,041.91`, and `+0.028` independent effective R.
+The unchanged 3-position / `$1,500`-risk / `$50,000`-gross replay accepted 147
+trades and rejected 752, producing `$-11,822.88`, `-0.018` effective R, and a
+`$-18,693.36` realized-P&L maximum drawdown. This is materially safer than the
+first-match corpus but still loses under the declared portfolio contract. Do
+not promote it or reinterpret the independent gain as investable alpha.
+
+**Predeclared frozen-plan regime veto — still unselected:** on geometry v1,
+standing down unless SPY was above both SMA50 and SMA200 vetoed 146 of 1,305
+plans. It improved independent effective R to `+0.064` and constrained P&L to
+`$-4,545.14` / `-0.007` effective R with `$-13,365.43` realized-P&L maximum
+drawdown. This is an encouraging development-only counterfactual, but it still
+loses, changes the scanner population indirectly if made a gate, and has no
+untouched holdout result. It is not a selected portfolio or scanner rule.
 
 - [ ] Extend the replay with point-in-time sector concentration and
   mark-to-market portfolio heat/drawdown. The current drawdown is realized-P&L

@@ -9,14 +9,14 @@ Objectified Davidson checklist (mechanical subset):
 
 Entry plan fields (ATR stop, T1/T2) are attached on the breakout bar.
 
-Algorithm is O(n): for each candidate breakout bar, fix handle length band
-and locate the cup low / lips in a single backward window (no nested
-cup_len × handle_len grid search).
+For every candidate plan bar, the bounded handle/cup search enumerates all
+valid causal geometries and selects one with a fixed structural score and
+stable tie-breaker. It never uses future price or outcome information.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -58,6 +58,11 @@ class CupGeometry:
     lip_diff_pct: float
     handle_volume_fraction: float
     trough_centrality: float
+    # Filled only after all valid candidates for one plan bar are scored and
+    # selected. Raw candidates intentionally leave these at their defaults.
+    selection_score: Optional[float] = None
+    selection_components: dict[str, float] = field(default_factory=dict)
+    selection_candidate_count: int = 1
 
 
 class MarketRegimeDataError(RuntimeError):
@@ -183,6 +188,71 @@ def fetch_market_regime(cfg: CupHandleConfig) -> set[date]:
     }
 
 
+def _clamp_unit(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _geometry_selection_components(geom: CupGeometry, cfg: CupHandleConfig) -> dict[str, float]:
+    """Fixed structural score used to choose among valid causal geometries.
+
+    This is a deterministic definition, not an outcome-trained model or a
+    signal gate. Every candidate has already passed the scanner's hard cup and
+    handle constraints; the score only makes an otherwise accidental iteration
+    order explicit and reproducible.
+    """
+    return {
+        "handle_shallowness": _clamp_unit(
+            1.0 - geom.handle_depth_px / (cfg.handle_depth_max_frac * geom.cup_depth_px)
+        ),
+        "lip_alignment": _clamp_unit(1.0 - geom.lip_diff_pct / cfg.lip_tolerance_pct),
+        "trough_centrality": _clamp_unit(
+            1.0 - abs(geom.trough_centrality - 0.5) / 0.5
+        ),
+        "volume_dryup": _clamp_unit(
+            1.0 - geom.handle_volume_fraction / cfg.handle_vol_frac_max
+        ),
+    }
+
+
+def _select_cup_and_handle(
+    candidates: list[CupGeometry], cfg: CupHandleConfig,
+) -> CupGeometry:
+    """Select one valid formation with a stable, outcome-independent key.
+
+    Tie-break order is intentionally part of the strategy definition: highest
+    structural score, then longer cup, then shorter handle, then earlier
+    geometry indices.  The full selection evidence is persisted with the plan.
+    """
+    if not candidates:
+        raise ValueError("cannot select a cup-handle geometry from an empty candidate list")
+
+    scored = [
+        (geom, _geometry_selection_components(geom, cfg))
+        for geom in candidates
+    ]
+
+    def key(item: tuple[CupGeometry, dict[str, float]]) -> tuple[float, int, int, int, int, int]:
+        geom, components = item
+        score = sum(components.values()) / len(components)
+        return (
+            -score,
+            -geom.cup_window_bars,
+            geom.handle_bars,
+            geom.left_lip_i,
+            geom.cup_low_i,
+            geom.right_lip_i,
+        )
+
+    selected, components = min(scored, key=key)
+    score = sum(components.values()) / len(components)
+    return replace(
+        selected,
+        selection_score=round(score, 6),
+        selection_components={name: round(value, 6) for name, value in components.items()},
+        selection_candidate_count=len(candidates),
+    )
+
+
 def _formation_quality_features(geom: CupGeometry, cfg: CupHandleConfig) -> dict[str, Any]:
     """Log a predeclared structural quality score; it is not an entry gate.
 
@@ -190,17 +260,14 @@ def _formation_quality_features(geom: CupGeometry, cfg: CupHandleConfig) -> dict
     the setup close.  It gives development analysis a stable, inspectable ranking
     candidate without changing v0.7's decision rule or its historical outcomes.
     """
-    def clamp(value: float) -> float:
-        return max(0.0, min(1.0, value))
-
     components = {
-        "handle_high_position": clamp(
+        "handle_high_position": _clamp_unit(
             (geom.handle_low - geom.cup_low_px) / geom.cup_depth_px
         ),
-        "handle_shallowness": clamp(1.0 - geom.handle_depth_px / geom.cup_depth_px),
-        "lip_alignment": clamp(1.0 - geom.lip_diff_pct / cfg.lip_tolerance_pct),
-        "trough_centrality": clamp(1.0 - abs(geom.trough_centrality - 0.5) / 0.5),
-        "volume_dryup": clamp(
+        "handle_shallowness": _clamp_unit(1.0 - geom.handle_depth_px / geom.cup_depth_px),
+        "lip_alignment": _clamp_unit(1.0 - geom.lip_diff_pct / cfg.lip_tolerance_pct),
+        "trough_centrality": _clamp_unit(1.0 - abs(geom.trough_centrality - 0.5) / 0.5),
+        "volume_dryup": _clamp_unit(
             1.0 - geom.handle_volume_fraction / cfg.handle_vol_frac_max
         ),
     }
@@ -221,6 +288,40 @@ def _formation_quality_features(geom: CupGeometry, cfg: CupHandleConfig) -> dict
     }
 
 
+def _geometry_selection_features(geom: CupGeometry) -> dict[str, Any]:
+    """Return auditable evidence for the selected candidate, or fail closed."""
+    if (
+        geom.selection_score is None
+        or geom.selection_candidate_count < 1
+        or set(geom.selection_components) != {
+            "handle_shallowness", "lip_alignment", "trough_centrality", "volume_dryup",
+        }
+    ):
+        raise RuntimeError("cup-handle geometry is missing deterministic selection evidence")
+    return {
+        "schema_version": 1,
+        "definition": "geometry_selection_v1",
+        "score": geom.selection_score,
+        "components": dict(geom.selection_components),
+        "candidate_count": geom.selection_candidate_count,
+        "tie_break_order": [
+            "higher_score",
+            "longer_cup_window_bars",
+            "shorter_handle_bars",
+            "earlier_left_lip_index",
+            "earlier_cup_low_index",
+            "earlier_right_lip_index",
+        ],
+        "selected_geometry": {
+            "left_lip_i": geom.left_lip_i,
+            "cup_low_i": geom.cup_low_i,
+            "right_lip_i": geom.right_lip_i,
+            "cup_window_bars": geom.cup_window_bars,
+            "handle_bars": geom.handle_bars,
+        },
+    }
+
+
 def _market_regime_for_setup(
     day: date,
     market_regime_features: Optional[dict[date, dict[str, Any]]],
@@ -237,21 +338,18 @@ def _market_regime_for_setup(
     return dict(record)
 
 
-def _find_cup_and_handle(
+def _valid_cup_and_handle_geometries(
     high: np.ndarray,
     low: np.ndarray,
     volume: np.ndarray,
     end_i: int,
     cfg: CupHandleConfig,
-) -> Optional[CupGeometry]:
-    """Locate cup+handle ending at ``end_i`` (last handle bar), using numpy arrays.
-
-    For each allowed handle length, take the cup window immediately before it
-    (cup_min..cup_max bars) and score geometry — first match wins (prefer
-    shorter handles, then mid cup lengths).
-    """
+) -> list[CupGeometry]:
+    """Enumerate every valid cup+handle ending at ``end_i`` (last handle bar)."""
     if end_i < cfg.cup_min_bars + cfg.handle_min_bars + 5:
-        return None
+        return []
+
+    candidates: list[CupGeometry] = []
 
     for handle_len in range(cfg.handle_min_bars, cfg.handle_max_bars + 1):
         handle_start = end_i - handle_len + 1
@@ -332,7 +430,7 @@ def _find_cup_and_handle(
             if lip_to_lip_bars <= 0:
                 continue
 
-            return CupGeometry(
+            candidates.append(CupGeometry(
                 left_lip_i=left_lip_i,
                 cup_low_i=cup_low_i,
                 right_lip_i=right_lip_i,
@@ -352,8 +450,20 @@ def _find_cup_and_handle(
                 lip_diff_pct=round(lip_diff_pct, 4),
                 handle_volume_fraction=round(handle_vol / cup_vol, 6),
                 trough_centrality=round((cup_low_i - left_lip_i) / lip_to_lip_bars, 6),
-            )
-    return None
+            ))
+    return candidates
+
+
+def _find_cup_and_handle(
+    high: np.ndarray,
+    low: np.ndarray,
+    volume: np.ndarray,
+    end_i: int,
+    cfg: CupHandleConfig,
+) -> Optional[CupGeometry]:
+    """Return the deterministically selected geometry for a completed plan bar."""
+    candidates = _valid_cup_and_handle_geometries(high, low, volume, end_i, cfg)
+    return _select_cup_and_handle(candidates, cfg) if candidates else None
 
 
 def _room_to_run(
@@ -430,8 +540,10 @@ def _entry_from_geometry(
             round(float(row["rvol"]), 2) if pd.notna(row.get("rvol")) else None
         ),
         "horizon": "multi_day",
-        # Diagnostics only: neither record changes whether v0.7 emits a plan.
+        # Quality remains descriptive; geometry_selection records why this
+        # valid formation, rather than another valid formation, was chosen.
         "formation_quality": _formation_quality_features(geom, cfg),
+        "geometry_selection": _geometry_selection_features(geom),
     }
     if market_regime is not None:
         features["market_regime"] = dict(market_regime)

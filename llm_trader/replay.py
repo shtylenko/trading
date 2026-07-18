@@ -81,6 +81,12 @@ _CAUSAL_PLAN_FEATURES = (
     "arm_expiry_bars",
     "max_entry_gap_atr",
 )
+_GEOMETRY_SELECTION_COMPONENTS = {
+    "handle_shallowness",
+    "lip_alignment",
+    "trough_centrality",
+    "volume_dryup",
+}
 
 
 @dataclass
@@ -442,6 +448,25 @@ def causal_plan_feature_errors(setup: Setup) -> list[str]:
     missing = [key for key in _CAUSAL_PLAN_FEATURES if features.get(key) is None]
     if missing:
         return ["missing causal plan feature(s): " + ", ".join(missing)]
+    selection = features.get("geometry_selection")
+    if not isinstance(selection, dict):
+        return ["missing deterministic geometry_selection evidence; re-run the cup_handle scanner"]
+    if selection.get("definition") != "geometry_selection_v1":
+        return ["unsupported geometry_selection definition; re-run the cup_handle scanner"]
+    score = selection.get("score")
+    if not isinstance(score, (int, float)) or not math.isfinite(float(score)) or not 0 <= score <= 1:
+        return ["geometry_selection has no finite unit-range score"]
+    count = selection.get("candidate_count")
+    if not isinstance(count, int) or count < 1:
+        return ["geometry_selection has invalid candidate_count"]
+    components = selection.get("components")
+    if not isinstance(components, dict) or set(components) != _GEOMETRY_SELECTION_COMPONENTS:
+        return ["geometry_selection has incomplete score components"]
+    if any(
+        not isinstance(value, (int, float)) or not math.isfinite(float(value)) or not 0 <= value <= 1
+        for value in components.values()
+    ):
+        return ["geometry_selection has non-finite or out-of-range score components"]
     return []
 
 

@@ -12,6 +12,7 @@ from trading.llm_trader.store import EntryStore, setup_id
 from trading.llm_trader.strategies import get_strategy, list_strategies
 from trading.llm_trader.strategies.cup_handle.config import CupHandleConfig
 from trading.llm_trader.strategies.cup_handle.patterns import detect_from_frame
+from trading.llm_trader.strategies.cup_handle import patterns as cup_patterns
 
 
 def _daily_index(n: int, start: str = "2024-06-03"):
@@ -85,6 +86,40 @@ def _synthetic_cup_breakout(n_pre=100, cup=40, handle=8, post=5):
     return df, breakout_day, float(handle_high)
 
 
+def _geometry_candidate(
+    *,
+    left_lip_i: int,
+    cup_window_bars: int = 60,
+    handle_bars: int = 6,
+    handle_depth_px: float = 2.0,
+    lip_diff_pct: float = 1.0,
+    handle_volume_fraction: float = 0.4,
+    trough_centrality: float = 0.5,
+) -> cup_patterns.CupGeometry:
+    """A valid-looking candidate for order-independent selection tests."""
+    return cup_patterns.CupGeometry(
+        left_lip_i=left_lip_i,
+        cup_low_i=left_lip_i + 20,
+        right_lip_i=left_lip_i + 40,
+        handle_start_i=left_lip_i + 41,
+        handle_end_i=left_lip_i + 46,
+        left_lip_px=100.0,
+        cup_low_px=80.0,
+        right_lip_px=99.5,
+        handle_high=99.0,
+        handle_low=99.0 - handle_depth_px,
+        cup_depth_pct=20.0,
+        cup_depth_px=20.0,
+        handle_depth_px=handle_depth_px,
+        cup_window_bars=cup_window_bars,
+        lip_to_lip_bars=40,
+        handle_bars=handle_bars,
+        lip_diff_pct=lip_diff_pct,
+        handle_volume_fraction=handle_volume_fraction,
+        trough_centrality=trough_centrality,
+    )
+
+
 def test_registry_lists_cup_handle():
     ids = list_strategies()
     assert "warrior" in ids
@@ -128,6 +163,37 @@ def test_detect_synthetic_cup_breakout():
     assert e.entry_px > 0
     # entry should be near handle high
     assert abs(e.entry_px - handle_high) / handle_high < 0.05
+    selection = e.features["geometry_selection"]
+    assert selection["definition"] == "geometry_selection_v1"
+    assert selection["candidate_count"] >= 1
+    assert 0.0 <= selection["score"] <= 1.0
+
+
+def test_geometry_selection_is_order_independent_and_uses_stable_ties():
+    cfg = CupHandleConfig()
+    weak = _geometry_candidate(
+        left_lip_i=10,
+        handle_depth_px=7.0,
+        lip_diff_pct=4.5,
+        handle_volume_fraction=0.8,
+        trough_centrality=0.85,
+    )
+    strong = _geometry_candidate(left_lip_i=20)
+
+    selected = cup_patterns._select_cup_and_handle([weak, strong], cfg)
+    reversed_selected = cup_patterns._select_cup_and_handle([strong, weak], cfg)
+    assert selected.left_lip_i == reversed_selected.left_lip_i == strong.left_lip_i
+    assert selected.selection_candidate_count == reversed_selected.selection_candidate_count == 2
+    assert selected.selection_score == reversed_selected.selection_score
+    assert selected.selection_components == reversed_selected.selection_components
+
+    # Equal structural score resolves by the declared longer-cup tie-breaker,
+    # not whichever candidate happened to be enumerated first.
+    short = _geometry_candidate(left_lip_i=30, cup_window_bars=40)
+    long = _geometry_candidate(left_lip_i=40, cup_window_bars=80)
+    tied = cup_patterns._select_cup_and_handle([short, long], cfg)
+    assert tied.left_lip_i == long.left_lip_i
+    assert tied.selection_candidate_count == 2
 
 
 def test_scanner_attaches_causal_market_and_quality_diagnostics_without_gating():

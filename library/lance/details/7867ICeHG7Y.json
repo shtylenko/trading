@@ -1,0 +1,19 @@
+{
+  "video_details": {
+    "video_id": "7867ICeHG7Y",
+    "title": "The Psychological Reality of Trading (& What To Do About It)",
+    "duration": "362",
+    "channel_title": "TheOneLanceB",
+    "channel_identifier": "UCzksXiC-Ju-DTIZmMiaOVfQ",
+    "description": "",
+    "view_count": 7265,
+    "like_count": 578,
+    "published_date": "2024-10-21T11:02:30-07:00",
+    "has_transcript": true,
+    "is_member_only": false
+  },
+  "transcript": {
+    "transcript_url": "https://www.youtube.com/api/timedtext?v=7867ICeHG7Y&ei=AcFbaq6mJ_Tdy_sPxfnv-QY&caps=asr&opi=112496729&xoaf=5&xowf=1&hl=en&ip=0.0.0.0&ipbits=0&expire=1784423281&sparams=ip%2Cipbits%2Cexpire%2Cv%2Cei%2Ccaps%2Copi%2Cxoaf&signature=D33CB79CF311956C7EB6E1A87E9F6C30DE7C9991.A98F35A4638CFB1340F8B51041B52DE7ABB08A56&key=yt8&kind=asr&lang=en&fmt=srv1&_ytc_=3",
+    "language_code": "en"
+  }
+}

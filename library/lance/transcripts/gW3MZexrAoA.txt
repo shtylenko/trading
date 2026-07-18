@@ -1,0 +1,5 @@
+Title: Expected value is why some traders win long-term and others don’t 📈
+URL: https://youtube.com/watch?v=gW3MZexrAoA
+======================================================================
+
+Expected value explained in less than a minute. Expected value is what determines the profitability of a system over time. If you have positive expected value after 100 plus trades, then you can profit in the long term, even if you lose in the short term. Here's how to build a strategy with positive expected value. Step number one, define your easy money setups. Then write a list of rules you can follow to execute them and repeat. Step two, test those rules over 100 trades with backtesting and forward [music] testing. You want to track your average risk to reward ratio and your win rate. Step three, multiply your win rate by the reward to risk ratio. If your expected value is above zero, that's a real edge. If it's below zero, then you want to keep refining your strategy. If you want to stop guessing and start trading with real edge, follow me for more breakdowns.

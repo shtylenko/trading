@@ -1,0 +1,5 @@
+Title: Using trading stats correctly 📊
+URL: https://youtube.com/watch?v=nLA_RKqWPMw
+======================================================================
+
+Use win rate to understand how often your trades work, not whether your strategy is profitable. [music] Expected value is what determines profitability. Use expected value to see whether your process makes money over a large sample. Expected value is the interplay of win rate and risk reward. [music] Use average loss to study your common mistakes, and use that follow button to get more trading tips.

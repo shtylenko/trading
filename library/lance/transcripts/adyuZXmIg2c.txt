@@ -1,0 +1,5 @@
+Title: Should You Use Anchored VWAP? #trading #vwap #stocks
+URL: https://youtube.com/watch?v=adyuZXmIg2c
+======================================================================
+
+Anchored VWOP is just VWOP. But instead of starting from the beginning of the trading day, you pick the anchor point. The anchor point could be the low of a panic sell-off, an episodic pivot, Allah Christian Kalamagi, the day a trend started, or even the IPO day. From that point forward, the line tells you the average price of all volume since that moment because markets are about positioning. If price is above anchored VWOP, then the average buyer since that key moment is in profit. If it's below, they're underwater. And people who are underwater behave differently. They panic, they sell, they chase. So another reason why Anchor VWAP is so valuable is because it helps you see that psychology in real time.

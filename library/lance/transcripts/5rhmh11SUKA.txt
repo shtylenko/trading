@@ -1,0 +1,5 @@
+Title: How to Organize Your Trading Hotkeys #trading #tradinghotkeys #tradingstrategy
+URL: https://youtube.com/watch?v=5rhmh11SUKA
+======================================================================
+
+A practical framework is to start to organize hotkeys into five buckets. Bucket one is entry hotkeys, bucket two is exit hotkeys, and bucket three are order specifics like those for refreshers, hidden orders, or good till canceled qualifiers. Bucket four is risk management. Stop placement, canceling orders, closing all positions at once, and more. The fifth bucket are for hotkeys that make your life easier, such as pulling up a certain chart, or changing the chart time frame, or pulling up a web browser or AI agent.

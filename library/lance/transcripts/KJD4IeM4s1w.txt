@@ -1,0 +1,5 @@
+Title: How I Use Bollinger Bands #bollingerbands #tradingindicator #tradingstrategies
+URL: https://youtube.com/watch?v=KJD4IeM4s1w
+======================================================================
+
+Ballinger bands are a versatile tool and truthfully pretty much the main indicator I use on my intraday and daily chart. Developed by John Ballinger in the 1980s, these bands consist of three lines. A central moving average, typically the 20 period simple moving average, and two standard deviation lines plotted above and below the moving average. From the outset, I want to make it explicitly clear that I do not use Ballinger bands as exact levels. Meaning I am never buying the break above a Ballinger band or using a Ballinger band as a price target or anything else along those lines.

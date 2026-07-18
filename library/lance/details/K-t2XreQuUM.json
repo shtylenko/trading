@@ -1,0 +1,19 @@
+{
+  "video_details": {
+    "video_id": "K-t2XreQuUM",
+    "title": "$GME No Man's Land Debate",
+    "duration": "905",
+    "channel_title": "TheOneLanceB",
+    "channel_identifier": "UCzksXiC-Ju-DTIZmMiaOVfQ",
+    "description": "",
+    "view_count": 4521,
+    "like_count": 258,
+    "published_date": "2024-05-13T05:00:17-07:00",
+    "has_transcript": true,
+    "is_member_only": false
+  },
+  "transcript": {
+    "transcript_url": "https://www.youtube.com/api/timedtext?v=K-t2XreQuUM&ei=DMFbav7gHoW1kucPisfYMA&caps=asr&opi=112496729&xoaf=5&xowf=1&hl=en&ip=0.0.0.0&ipbits=0&expire=1784423292&sparams=ip%2Cipbits%2Cexpire%2Cv%2Cei%2Ccaps%2Copi%2Cxoaf&signature=6E848E370B4B5409E87741368EA17C95AC8E3C2A.1F602CF75E49AE27F12E1135278B78F766049121&key=yt8&kind=asr&lang=en&fmt=srv1&_ytc_=3",
+    "language_code": "en"
+  }
+}

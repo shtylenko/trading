@@ -1,0 +1,19 @@
+{
+  "video_details": {
+    "video_id": "XOLulRRnekU",
+    "title": "$FSLR Swing Non-Analysis: RETAIL, WAKE UP ON IMPORTANCE OF NEWS!!",
+    "duration": "404",
+    "channel_title": "TheOneLanceB",
+    "channel_identifier": "UCzksXiC-Ju-DTIZmMiaOVfQ",
+    "description": "",
+    "view_count": 5028,
+    "like_count": 380,
+    "published_date": "2024-05-28T11:29:44-07:00",
+    "has_transcript": true,
+    "is_member_only": false
+  },
+  "transcript": {
+    "transcript_url": "https://www.youtube.com/api/timedtext?v=XOLulRRnekU&ei=LMFbaoWlIf-3kucPkvTaqQM&caps=asr&opi=112496729&xoaf=5&xowf=1&hl=en&ip=0.0.0.0&ipbits=0&expire=1784423324&sparams=ip%2Cipbits%2Cexpire%2Cv%2Cei%2Ccaps%2Copi%2Cxoaf&signature=9E7C42D15CA4580C2762AD0F443460783FC867B9.0B238DED03135B84BA2E4B2BA21D3DF586CE8AAD&key=yt8&kind=asr&lang=en&fmt=srv1&_ytc_=3",
+    "language_code": "en"
+  }
+}

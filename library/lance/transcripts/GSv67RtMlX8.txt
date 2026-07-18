@@ -1,0 +1,5 @@
+Title: Options Traders Overlook This #0dte #optionstrading #trading
+URL: https://youtube.com/watch?v=GSv67RtMlX8
+======================================================================
+
+Implied volatility, [snorts] or IV, is simply the market's expectation of how much a stock or index might move. When traders expect a big move, options prices increase because there's more uncertainty and more potential for price swings. When traders expect calm conditions, options prices decrease. A simple way to think about it is this. If a stock normally moves $1 per day, and suddenly there's major news pending, traders expect it could move $5 or $10. Because the potential move is larger, options become way more expensive. You are paying for the possibility of bigger swings. That's great when it's working in your favor, but just as dangerous when it isn't. Because if the options market is expecting a massive move, and you start to run out of time, that decay happens so fast.

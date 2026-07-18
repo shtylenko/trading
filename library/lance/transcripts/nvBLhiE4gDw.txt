@@ -1,0 +1,5 @@
+Title: Trading Rules: Profit-Taking with Lance Breitstein, 9-Figure Trader #tradingcourse #trading
+URL: https://youtube.com/watch?v=nvBLhiE4gDw
+======================================================================
+
+What are my rules on profit taking? The only absolute rule is that you need to always let the expected value dictate every trading decision you make. What that means in practice is you often want to back test and find the rules that lead to the optimal trading decisions in the aggregate, not just in any specific trade. In practical terms, what does that mean for me? It means that generally when I'm long in a stock that's trending, I'm going to use prior bar lows as my trailing stop. Or if I'm short in a stock that's trending, I'm going to use prior bar highs. This is true whether I'm trading intraday or on a daily chart or regardless of my time frame.

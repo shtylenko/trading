@@ -1,0 +1,5 @@
+Title: This or that: trading edition 📈
+URL: https://youtube.com/watch?v=iiSySHMvRBs
+======================================================================
+
+Hey, Lance. Morning trades or afternoon trades? >> Both. I take trades based on them having positive expected value, not it being a certain time of day. Manual trading or algorithmic systems? >> Manual trading. Nothing against algorithms, but it's nearly impossible to code some of the subjective nuances an advanced trader can quickly process in their head. >> Trading firm or personal account? >> Working for a trading firm accelerates your learning curve. Traders at home should try their best to replicate the pro environment. >> Tight stop loss or wider stop with small size. >> Neither. It's not about a tight stop or a wider stop. It's about using the right stop based on data and [music] back testing. >> Cut winners early or let them run. >> Also, neither. Despite the clichés, expected value is what drives all trading decisions. We sell our positions when our system tells us to. Ideally, using a rule backed by data, most traders guess their way through the day.

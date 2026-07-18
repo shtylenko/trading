@@ -1,0 +1,5 @@
+Title: How I Close Trading Positions #trading #stoploss #takeprofit
+URL: https://youtube.com/watch?v=vkzbu1FZWj0
+======================================================================
+
+As a general rule, when positions go in your favor, the expected value tends to decrease. As you go higher, your reward decreases and the distance to your stop is increasing. The true stop of my system is to initially give it to the lows of the day, then use a prior daily bar low trailing

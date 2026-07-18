@@ -1,0 +1,5 @@
+Title: 3 Stop Loss Trading Mistakes #stocks #trading #stoploss
+URL: https://youtube.com/watch?v=Wzl3_kmMUNo
+======================================================================
+
+First mistake, emotion-driven stop- losses. Your stock approaches your stop, you panic, you widen it. It gets closer again, you widen it more. Eventually, you ditch the stop entirely and become a hodler against your will. All that does is destroy your expectancy and create monster losers that wipe out weeks of consistent gains. Second mistake, arbitrary placement. People put stops at fixed percentages or at whole numbers. I always stop out at minus 2%, where I'm going to give this to $10. Why? Because it feels clean. because it sounds disciplined, as if markets care about that. Third mistake, ignoring market context. Your stop makes zero sense if it doesn't incorporate volatility of the stock and the nuances of the specific pattern. Volatile markets with wider ranges often require wider stops. Looser patterns require looser stops. Tighter patterns allow for tight stops.

@@ -1,0 +1,334 @@
+{
+  "created": "2026-07-18T17:24:46",
+  "seed": 13,
+  "n": 40,
+  "setups": [
+    {
+      "ticker": "AAPL",
+      "date": "2023-02-14",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2023-05-18",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2023-07-26",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ABT",
+      "date": "2023-06-20",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ABT",
+      "date": "2023-12-12",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ADBE",
+      "date": "2023-09-14",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMAT",
+      "date": "2023-02-07",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMAT",
+      "date": "2023-05-19",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMD",
+      "date": "2023-05-11",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMD",
+      "date": "2023-12-14",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMZN",
+      "date": "2023-05-10",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CMCSA",
+      "date": "2023-01-26",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "COST",
+      "date": "2023-12-21",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRM",
+      "date": "2023-05-11",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRM",
+      "date": "2023-12-12",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CSCO",
+      "date": "2023-02-21",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHR",
+      "date": "2023-07-27",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GE",
+      "date": "2023-08-01",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GE",
+      "date": "2023-12-12",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2023-07-14",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IBM",
+      "date": "2023-12-14",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "INTC",
+      "date": "2023-06-06",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "INTC",
+      "date": "2023-08-04",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JPM",
+      "date": "2023-07-20",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "META",
+      "date": "2023-07-05",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MSFT",
+      "date": "2023-03-29",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MSFT",
+      "date": "2023-06-07",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MSFT",
+      "date": "2023-07-19",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NFLX",
+      "date": "2023-12-29",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NOW",
+      "date": "2023-04-05",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NOW",
+      "date": "2023-05-24",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NOW",
+      "date": "2023-12-05",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2023-02-27",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2023-05-24",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "QQQ",
+      "date": "2023-02-06",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "QQQ",
+      "date": "2023-03-29",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SBUX",
+      "date": "2023-05-01",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SBUX",
+      "date": "2023-11-17",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UPS",
+      "date": "2023-02-01",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "V",
+      "date": "2023-11-24",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    }
+  ],
+  "cohort": {
+    "selection": "all_eligible_rows",
+    "start": "2023-01-01",
+    "end": "2023-12-31",
+    "after": "09:30",
+    "source_entry_db": "/Users/shtylenko/Projects/trading/llm_trader/data/breakout_first_pullback/entries.db"
+  }
+}

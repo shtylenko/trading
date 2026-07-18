@@ -1,0 +1,213 @@
+{
+  "strategy": "micro_pullback",
+  "config": {
+    "start": "2022-01-01",
+    "end": "2025-12-31",
+    "price_min": 10.0,
+    "price_max": 1000.0,
+    "gap_min_pct": 0.5,
+    "gap_max_pct": 25.0,
+    "avg_vol_min": 1000000.0,
+    "rvol_min": 1.2,
+    "rvol_lookback": 20,
+    "impulse_min_bars": 2,
+    "impulse_min_pct": 0.35,
+    "require_above_vwap": true,
+    "pb_min_bars": 1,
+    "pb_max_bars": 3,
+    "pb_max_depth_frac": 0.55,
+    "pb_must_hold_vwap": true,
+    "entry_window_start": "09:45",
+    "entry_window_end": "14:00",
+    "require_green_break": true,
+    "stop_buffer_pct": 0.05,
+    "target1_r_mult": 1.0,
+    "target2_r_mult": 2.0,
+    "eod_exit_et": "15:55",
+    "fee_bps_one_way": 1.0,
+    "slippage_bps_one_way": 2.0,
+    "risk_budget": 100.0,
+    "max_scan_failure_rate": 1.0,
+    "exchanges": [
+      "XNAS",
+      "XNYS",
+      "XASE"
+    ],
+    "db_path": "/Users/shtylenko/Projects/trading/llm_trader/data/micro_pullback/entries.db"
+  },
+  "entries": 1102,
+  "trades": 1102,
+  "years": {
+    "2022": {
+      "n": 290,
+      "win_pct": 44.5,
+      "eff_r": 0.0396,
+      "pnl": 1147.92,
+      "exits": {
+        "STOP": 160,
+        "TARGET1": 0,
+        "TARGET2": 93,
+        "EOD": 37
+      }
+    },
+    "2023": {
+      "n": 294,
+      "win_pct": 49.0,
+      "eff_r": 0.027,
+      "pnl": 794.6,
+      "exits": {
+        "STOP": 145,
+        "TARGET1": 0,
+        "TARGET2": 111,
+        "EOD": 38
+      }
+    },
+    "2024": {
+      "n": 263,
+      "win_pct": 47.5,
+      "eff_r": 0.0332,
+      "pnl": 873.65,
+      "exits": {
+        "STOP": 135,
+        "TARGET1": 0,
+        "TARGET2": 97,
+        "EOD": 31
+      }
+    },
+    "2025": {
+      "n": 255,
+      "win_pct": 43.5,
+      "eff_r": 0.0156,
+      "pnl": 397.64,
+      "exits": {
+        "STOP": 143,
+        "TARGET1": 0,
+        "TARGET2": 79,
+        "EOD": 33
+      }
+    }
+  },
+  "pooled": {
+    "n": 1102,
+    "win_pct": 46.2,
+    "eff_r": 0.0292,
+    "pnl": 3213.81,
+    "exits": {
+      "STOP": 583,
+      "TARGET1": 0,
+      "TARGET2": 380,
+      "EOD": 139
+    }
+  },
+  "gates": {
+    "pooled_eff_r_gt_0": true,
+    "years_positive": 4,
+    "years_total": 4,
+    "pass": true
+  },
+  "completed_at": "2026-07-18T23:08:55+00:00",
+  "cost_stress": {
+    "baseline_1f_2s": {
+      "n": 1102,
+      "win_pct": 46.2,
+      "eff_r": 0.0292,
+      "pnl": 3213.81,
+      "exits": {
+        "STOP": 583,
+        "TARGET1": 0,
+        "TARGET2": 380,
+        "EOD": 139
+      },
+      "fee_bps": 1.0,
+      "slip_bps": 2.0,
+      "years_pos": 4,
+      "years_total": 4,
+      "pass": true
+    },
+    "slip_2x": {
+      "n": 1102,
+      "win_pct": 45.7,
+      "eff_r": 0.0096,
+      "pnl": 1060.61,
+      "exits": {
+        "STOP": 583,
+        "TARGET1": 0,
+        "TARGET2": 380,
+        "EOD": 139
+      },
+      "fee_bps": 1.0,
+      "slip_bps": 4.0,
+      "years_pos": 3,
+      "years_total": 4,
+      "pass": true
+    },
+    "slip_3x": {
+      "n": 1102,
+      "win_pct": 45.3,
+      "eff_r": -0.01,
+      "pnl": -1097.61,
+      "exits": {
+        "STOP": 583,
+        "TARGET1": 0,
+        "TARGET2": 380,
+        "EOD": 139
+      },
+      "fee_bps": 1.0,
+      "slip_bps": 6.0,
+      "years_pos": 1,
+      "years_total": 4,
+      "pass": false
+    },
+    "fee2_slip4": {
+      "n": 1102,
+      "win_pct": 45.6,
+      "eff_r": -0.0001,
+      "pnl": -12.34,
+      "exits": {
+        "STOP": 583,
+        "TARGET1": 0,
+        "TARGET2": 380,
+        "EOD": 139
+      },
+      "fee_bps": 2.0,
+      "slip_bps": 4.0,
+      "years_pos": 2,
+      "years_total": 4,
+      "pass": false
+    },
+    "fee2_slip6": {
+      "n": 1102,
+      "win_pct": 45.0,
+      "eff_r": -0.0197,
+      "pnl": -2172.41,
+      "exits": {
+        "STOP": 583,
+        "TARGET1": 0,
+        "TARGET2": 380,
+        "EOD": 139
+      },
+      "fee_bps": 2.0,
+      "slip_bps": 6.0,
+      "years_pos": 0,
+      "years_total": 4,
+      "pass": false
+    },
+    "fee5_slip5": {
+      "n": 1102,
+      "win_pct": 44.5,
+      "eff_r": -0.0392,
+      "pnl": -4321.6,
+      "exits": {
+        "STOP": 583,
+        "TARGET1": 0,
+        "TARGET2": 380,
+        "EOD": 139
+      },
+      "fee_bps": 5.0,
+      "slip_bps": 5.0,
+      "years_pos": 0,
+      "years_total": 4,
+      "pass": false
+    }
+  }
+}

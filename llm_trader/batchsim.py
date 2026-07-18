@@ -1439,6 +1439,12 @@ def _policy_module_for(strategy_id: str):
     if sid == "trend_pullback":
         from .strategies.trend_pullback import policy as mod
         return mod
+    if sid == "breakout_first_pullback":
+        from .strategies.breakout_first_pullback import policy as mod
+        return mod
+    if sid == "right_side_v":
+        from .strategies.right_side_v import policy as mod
+        return mod
     raise ValueError(f"no deterministic policy module for strategy {strategy_id!r}")
 
 
@@ -1594,7 +1600,12 @@ def _deterministic_policy_id(skill_meta: dict, strategy_id: str) -> Optional[str
     if source != "deterministic_policy":
         raise ValueError(f"unsupported decision_source {source!r}")
     sid = (strategy_id or "").strip().lower().replace("-", "_")
-    if sid not in {"cup_handle", "trend_pullback"}:
+    if sid not in {
+        "cup_handle",
+        "trend_pullback",
+        "breakout_first_pullback",
+        "right_side_v",
+    }:
         raise ValueError(
             f"deterministic_policy is not implemented for strategy {strategy_id!r}"
         )
@@ -3710,7 +3721,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         setups = build_set(
             n=args.n, seed=args.seed, db=db_path, exclude=exclude,
             unique_ticker=args.unique_ticker,
-            causal_only=(strategy_id in {"cup_handle", "trend_pullback"}),
+            causal_only=(
+                strategy_id
+                in {
+                    "cup_handle",
+                    "trend_pullback",
+                    "breakout_first_pullback",
+                    "right_side_v",
+                }
+            ),
             require_research_provenance=(strategy_id == "cup_handle" and not args.exploratory),
             require_exact=True,
             start_date=start_date, end_date=end_date, all_rows=args.all,

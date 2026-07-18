@@ -1,0 +1,2350 @@
+{
+  "created": "2026-07-18T17:38:18",
+  "seed": 13,
+  "n": 292,
+  "setups": [
+    {
+      "ticker": "AAPL",
+      "date": "2025-01-28",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2025-02-12",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2025-04-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2025-05-12",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ABT",
+      "date": "2025-04-16",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ABT",
+      "date": "2025-11-11",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ABT",
+      "date": "2025-12-15",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ACN",
+      "date": "2025-01-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ACN",
+      "date": "2025-04-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ACN",
+      "date": "2025-08-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ACN",
+      "date": "2025-09-29",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ACN",
+      "date": "2025-10-21",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ADBE",
+      "date": "2025-04-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ADBE",
+      "date": "2025-08-15",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ADBE",
+      "date": "2025-09-08",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ADBE",
+      "date": "2025-10-21",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ADP",
+      "date": "2025-03-26",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ADP",
+      "date": "2025-04-29",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMAT",
+      "date": "2025-01-03",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMAT",
+      "date": "2025-01-30",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMAT",
+      "date": "2025-04-09",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMAT",
+      "date": "2025-04-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMAT",
+      "date": "2025-06-05",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMAT",
+      "date": "2025-08-13",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMAT",
+      "date": "2025-09-11",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMAT",
+      "date": "2025-11-19",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMAT",
+      "date": "2025-12-29",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMD",
+      "date": "2025-01-06",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMD",
+      "date": "2025-03-17",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMD",
+      "date": "2025-04-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMD",
+      "date": "2025-05-27",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMD",
+      "date": "2025-07-10",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMD",
+      "date": "2025-08-07",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMD",
+      "date": "2025-10-01",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMD",
+      "date": "2025-11-12",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMZN",
+      "date": "2025-03-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMZN",
+      "date": "2025-04-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMZN",
+      "date": "2025-10-08",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AMZN",
+      "date": "2025-10-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2025-01-21",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2025-02-05",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2025-04-09",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2025-06-11",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2025-06-30",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2025-08-27",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2025-10-08",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2025-11-10",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "AVGO",
+      "date": "2025-11-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BAC",
+      "date": "2025-01-06",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BAC",
+      "date": "2025-02-28",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BAC",
+      "date": "2025-05-01",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BAC",
+      "date": "2025-07-18",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BAC",
+      "date": "2025-08-12",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BAC",
+      "date": "2025-10-15",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "BLK",
+      "date": "2025-03-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CAT",
+      "date": "2025-01-14",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CAT",
+      "date": "2025-03-07",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CAT",
+      "date": "2025-04-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CAT",
+      "date": "2025-08-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CAT",
+      "date": "2025-11-05",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CAT",
+      "date": "2025-11-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CMCSA",
+      "date": "2025-01-27",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CMCSA",
+      "date": "2025-02-18",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CMCSA",
+      "date": "2025-03-06",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CMCSA",
+      "date": "2025-03-21",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CMCSA",
+      "date": "2025-04-30",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CMCSA",
+      "date": "2025-08-15",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CMCSA",
+      "date": "2025-09-02",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "COST",
+      "date": "2025-01-21",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "COST",
+      "date": "2025-04-02",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "COST",
+      "date": "2025-04-17",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "COST",
+      "date": "2025-11-28",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRM",
+      "date": "2025-01-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRM",
+      "date": "2025-04-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRM",
+      "date": "2025-06-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRM",
+      "date": "2025-07-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRM",
+      "date": "2025-08-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRM",
+      "date": "2025-09-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRM",
+      "date": "2025-10-09",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CRM",
+      "date": "2025-12-03",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CSCO",
+      "date": "2025-04-29",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CSCO",
+      "date": "2025-08-28",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CSCO",
+      "date": "2025-09-18",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DE",
+      "date": "2025-01-13",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DE",
+      "date": "2025-03-06",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DE",
+      "date": "2025-03-26",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DE",
+      "date": "2025-04-14",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DE",
+      "date": "2025-04-30",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DE",
+      "date": "2025-10-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DE",
+      "date": "2025-12-11",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHR",
+      "date": "2025-04-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHR",
+      "date": "2025-05-16",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHR",
+      "date": "2025-06-03",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHR",
+      "date": "2025-07-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHR",
+      "date": "2025-09-30",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHR",
+      "date": "2025-10-16",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHR",
+      "date": "2025-11-12",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DIS",
+      "date": "2025-01-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DIS",
+      "date": "2025-02-28",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DIS",
+      "date": "2025-04-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DIS",
+      "date": "2025-12-11",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GE",
+      "date": "2025-02-28",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GE",
+      "date": "2025-03-17",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GE",
+      "date": "2025-04-01",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GE",
+      "date": "2025-04-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GE",
+      "date": "2025-06-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GE",
+      "date": "2025-12-12",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GILD",
+      "date": "2025-05-12",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GILD",
+      "date": "2025-09-11",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GILD",
+      "date": "2025-10-08",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GILD",
+      "date": "2025-11-03",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GILD",
+      "date": "2025-12-19",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2025-03-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2025-04-14",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2025-05-01",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2025-06-26",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GOOGL",
+      "date": "2025-12-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HD",
+      "date": "2025-01-15",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HD",
+      "date": "2025-03-31",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HD",
+      "date": "2025-04-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HD",
+      "date": "2025-06-27",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HD",
+      "date": "2025-12-11",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HON",
+      "date": "2025-01-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HON",
+      "date": "2025-03-07",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "HON",
+      "date": "2025-04-29",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IBM",
+      "date": "2025-01-16",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IBM",
+      "date": "2025-04-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IBM",
+      "date": "2025-10-20",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "IBM",
+      "date": "2025-11-28",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "INTC",
+      "date": "2025-01-17",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "INTC",
+      "date": "2025-02-11",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "INTC",
+      "date": "2025-03-13",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "INTC",
+      "date": "2025-04-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "INTC",
+      "date": "2025-05-09",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "INTC",
+      "date": "2025-06-10",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "INTC",
+      "date": "2025-08-12",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "INTC",
+      "date": "2025-10-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ISRG",
+      "date": "2025-02-05",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ISRG",
+      "date": "2025-04-09",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ISRG",
+      "date": "2025-04-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ISRG",
+      "date": "2025-06-26",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ISRG",
+      "date": "2025-10-03",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JNJ",
+      "date": "2025-04-17",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JPM",
+      "date": "2025-03-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JPM",
+      "date": "2025-04-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JPM",
+      "date": "2025-10-27",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "JPM",
+      "date": "2025-11-26",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LIN",
+      "date": "2025-01-14",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LIN",
+      "date": "2025-05-02",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LIN",
+      "date": "2025-12-12",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2025-01-10",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2025-01-30",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2025-04-17",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2025-06-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2025-08-26",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2025-09-30",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2025-10-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2025-12-15",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LMT",
+      "date": "2025-01-13",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LMT",
+      "date": "2025-04-09",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LMT",
+      "date": "2025-04-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LMT",
+      "date": "2025-05-19",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LMT",
+      "date": "2025-06-13",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LMT",
+      "date": "2025-08-13",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LMT",
+      "date": "2025-12-08",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LOW",
+      "date": "2025-01-15",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LOW",
+      "date": "2025-03-31",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LOW",
+      "date": "2025-06-27",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LOW",
+      "date": "2025-07-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LOW",
+      "date": "2025-11-21",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MA",
+      "date": "2025-04-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MA",
+      "date": "2025-07-03",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MA",
+      "date": "2025-10-21",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MA",
+      "date": "2025-11-28",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MDT",
+      "date": "2025-01-08",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MDT",
+      "date": "2025-02-28",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MDT",
+      "date": "2025-11-11",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "META",
+      "date": "2025-04-09",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "META",
+      "date": "2025-04-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "META",
+      "date": "2025-10-20",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "META",
+      "date": "2025-11-28",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MSFT",
+      "date": "2025-01-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MSFT",
+      "date": "2025-04-09",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MSFT",
+      "date": "2025-04-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MSFT",
+      "date": "2025-12-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NEE",
+      "date": "2025-01-16",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NEE",
+      "date": "2025-02-20",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NEE",
+      "date": "2025-04-03",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NEE",
+      "date": "2025-04-29",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NEE",
+      "date": "2025-05-30",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NEE",
+      "date": "2025-07-01",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NEE",
+      "date": "2025-09-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NFLX",
+      "date": "2025-03-19",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NFLX",
+      "date": "2025-04-09",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NFLX",
+      "date": "2025-08-08",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NFLX",
+      "date": "2025-10-08",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NFLX",
+      "date": "2025-11-11",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NOW",
+      "date": "2025-01-17",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NOW",
+      "date": "2025-04-09",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NOW",
+      "date": "2025-07-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NOW",
+      "date": "2025-08-28",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NOW",
+      "date": "2025-10-20",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NOW",
+      "date": "2025-12-05",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2025-01-21",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2025-02-10",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2025-04-09",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2025-04-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2025-08-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2025-09-10",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2025-09-29",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2025-10-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2025-11-10",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2025-12-08",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NVDA",
+      "date": "2025-12-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ORCL",
+      "date": "2025-01-21",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ORCL",
+      "date": "2025-02-05",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ORCL",
+      "date": "2025-04-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ORCL",
+      "date": "2025-09-08",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ORCL",
+      "date": "2025-10-13",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ORCL",
+      "date": "2025-12-10",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PEP",
+      "date": "2025-02-20",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PEP",
+      "date": "2025-11-17",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PG",
+      "date": "2025-01-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PG",
+      "date": "2025-03-31",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PG",
+      "date": "2025-04-17",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PG",
+      "date": "2025-05-15",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PG",
+      "date": "2025-12-17",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PM",
+      "date": "2025-01-17",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PM",
+      "date": "2025-05-15",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PM",
+      "date": "2025-08-20",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PM",
+      "date": "2025-09-11",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PM",
+      "date": "2025-11-07",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "QCOM",
+      "date": "2025-03-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "QCOM",
+      "date": "2025-04-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "QCOM",
+      "date": "2025-05-12",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "QCOM",
+      "date": "2025-06-03",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "QCOM",
+      "date": "2025-08-12",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "QCOM",
+      "date": "2025-10-20",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "QQQ",
+      "date": "2025-03-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "QQQ",
+      "date": "2025-04-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "QQQ",
+      "date": "2025-11-26",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "RTX",
+      "date": "2025-02-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "RTX",
+      "date": "2025-04-30",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "RTX",
+      "date": "2025-10-21",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SBUX",
+      "date": "2025-01-17",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SBUX",
+      "date": "2025-05-02",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SBUX",
+      "date": "2025-09-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SBUX",
+      "date": "2025-10-16",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SBUX",
+      "date": "2025-11-07",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SPY",
+      "date": "2025-03-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SPY",
+      "date": "2025-04-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TMO",
+      "date": "2025-05-12",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TMO",
+      "date": "2025-06-09",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TMO",
+      "date": "2025-06-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TMO",
+      "date": "2025-07-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TMO",
+      "date": "2025-08-11",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TMO",
+      "date": "2025-09-30",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSLA",
+      "date": "2025-01-15",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSLA",
+      "date": "2025-04-01",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSLA",
+      "date": "2025-04-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSLA",
+      "date": "2025-06-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSLA",
+      "date": "2025-07-16",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSLA",
+      "date": "2025-08-06",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSLA",
+      "date": "2025-08-22",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSLA",
+      "date": "2025-10-15",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSLA",
+      "date": "2025-10-31",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TSLA",
+      "date": "2025-11-28",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TXN",
+      "date": "2025-02-18",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TXN",
+      "date": "2025-04-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TXN",
+      "date": "2025-08-20",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TXN",
+      "date": "2025-10-20",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "TXN",
+      "date": "2025-11-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UNH",
+      "date": "2025-01-13",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UNH",
+      "date": "2025-01-30",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UNH",
+      "date": "2025-03-17",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UNH",
+      "date": "2025-08-13",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UNH",
+      "date": "2025-09-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UPS",
+      "date": "2025-05-12",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UPS",
+      "date": "2025-11-07",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "UPS",
+      "date": "2025-11-26",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "V",
+      "date": "2025-03-24",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "V",
+      "date": "2025-04-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "V",
+      "date": "2025-07-03",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "V",
+      "date": "2025-07-23",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "V",
+      "date": "2025-08-14",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "V",
+      "date": "2025-11-25",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WMT",
+      "date": "2025-04-02",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WMT",
+      "date": "2025-09-04",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "WMT",
+      "date": "2025-11-20",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "XOM",
+      "date": "2025-06-09",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "XOM",
+      "date": "2025-07-02",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "XOM",
+      "date": "2025-07-28",
+      "time_et": "16:00",
+      "pattern": "right_side_v",
+      "float_shares": null,
+      "gap_pct": null
+    }
+  ],
+  "cohort": {
+    "selection": "all_eligible_rows",
+    "start": "2025-01-01",
+    "end": "2025-12-31",
+    "after": "09:30",
+    "source_entry_db": "/Users/shtylenko/Projects/trading/llm_trader/data/right_side_v/entries.db"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "base": "0.1.0",
+  "versions": {
+    "0.1.0": {
+      "content_hash": null,
+      "first_seen": null,
+      "notes": "Micro-pullback continuation short-hold (liquid multi-year gate)"
+    }
+  }
+}

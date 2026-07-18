@@ -160,3 +160,40 @@ python3 -m trading.llm_trader.batchsim run --strategy trend_pullback --version 0
 # multi-year 0.4.0 (parked — FAIL)
 # tags: tp-v040-y2022 .. y2025, tp-v040-2022-2025
 # results: trading/llm_trader/batch/trend_pullback/multiyear/RESULTS.md
+
+
+# BREAKOUT FIRST PULLBACK (Lance swing #2)
+python3 -m trading.llm_trader.runner --strategy breakout_first_pullback \
+  --start 2024-01-01 --end 2025-12-31 --symbols AAPL MSFT NVDA AMZN META
+python3 -m trading.llm_trader.batchsim build-set --strategy breakout_first_pullback --n 10 --unique-ticker --seed 7 \
+  --out trading/llm_trader/batch/breakout_first_pullback/testset_smoke.json
+python3 -m trading.llm_trader.batchsim run --strategy breakout_first_pullback --version 0.1.0 \
+  --set trading/llm_trader/batch/breakout_first_pullback/testset_smoke.json \
+  --parallel 4 --tag bfp-smoke-v010
+
+# breakout_first_pullback n30 + multi-year
+python3 -m trading.llm_trader.batchsim run --strategy breakout_first_pullback --version 0.1.0 \
+  --set trading/llm_trader/batch/breakout_first_pullback/testset_30.json --parallel 6 --tag bfp-v010-n30
+# multi-year tags: bfp-v010-y2022..y2025, bfp-v010-2022-2025
+# results: batch/breakout_first_pullback/multiyear/RESULTS.md
+
+# right_side_v (PARKED multi-year FAIL)
+# tags: rsv-v010-n30, rsv-v010-y2022..y2025, rsv-v010-2022-2025
+
+
+# SHORT-HOLD paper books (portfolio ON, NML OFF)
+# primary: micro_pullback
+python3 -m trading.llm_trader.strategies.micro_pullback.paper \
+  --start 2022-01-01 --end 2025-12-31
+# results: batch/micro_pullback/paper/PAPER_BOOK.md
+# second book: vwap_pullback
+python3 -m trading.llm_trader.strategies.vwap_pullback.paper \
+  --start 2022-01-01 --end 2025-12-31
+# results: batch/vwap_pullback/paper/PAPER_BOOK.md
+# structural A/B (NML + portfolio): batch/admission/structural_ab/RESULTS.md
+
+# micro_pullback warrior-universe probe (current float only; not multi-year)
+python3 -m trading.llm_trader.strategies.micro_pullback.probe_warrior \
+  --start 2025-01-01 --end 2026-06-30
+# results: batch/micro_pullback/warrior_probe/RESULTS.md  (probe FAIL years+)
+

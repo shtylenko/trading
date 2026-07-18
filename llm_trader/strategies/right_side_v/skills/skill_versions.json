@@ -1,0 +1,10 @@
+{
+  "base": "0.1.0",
+  "versions": {
+    "0.1.0": {
+      "content_hash": "sha256:1826b191",
+      "first_seen": null,
+      "notes": "Right-side-V confirmed reclaim baseline"
+    }
+  }
+}

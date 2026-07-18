@@ -448,7 +448,7 @@ def causal_plan_feature_errors(setup: Setup) -> list[str]:
     strategy = (setup.strategy or "").strip().lower()
     features = setup.features or {}
 
-    if strategy == "trend_pullback":
+    if strategy in {"trend_pullback", "breakout_first_pullback", "right_side_v"}:
         if features.get("signal_kind") != "prebreak_arm":
             actual = features.get("signal_kind")
             return [

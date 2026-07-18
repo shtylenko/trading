@@ -261,6 +261,8 @@ header {
 .badge.strat-warrior { color: #93c5fd; border-color: #3b82f6; }
 .badge.strat-cup_handle { color: #fcd34d; border-color: #d97706; }
 .badge.strat-trend_pullback { color: #86efac; border-color: #16a34a; }
+.badge.strat-breakout_first_pullback { color: #c4b5fd; border-color: #7c3aed; }
+.badge.strat-right_side_v { color: #f9a8d4; border-color: #db2777; }
 .badge.strat-mixed { color: var(--muted); border-color: var(--line); }
 
 .sidebar-strategy-filter {
@@ -276,6 +278,7 @@ header {
 .sidebar-strategy-filter b.strat-warrior { color: #93c5fd; }
 .sidebar-strategy-filter b.strat-cup_handle { color: #fcd34d; }
 .sidebar-strategy-filter b.strat-trend_pullback { color: #86efac; }
+.sidebar-strategy-filter b.strat-breakout_first_pullback { color: #c4b5fd; }
 .lg-stop::before { color: var(--stop); } .lg-pm::before { color: var(--pm); }
 
 #blotter-wrap {

@@ -6,8 +6,10 @@ the Lance Breitstein strategy inventory (`library/lance/lance_strategies.md`) vs
 coverage in `llm_trader` + `lab`.
 
 **Constraints (product mandate):** long-only equities · no shorting · no futures · no options.
-Preferred first pass for new families: **short-hold** (same-day or multi-day with explicit
-time exit). Multi-day swing families are in scope when the short-hold mold is a poor fit.
+
+**Active focus (2026-07):** **short-hold / same-day only.** Multi-day Lance scanners
+(`trend_pullback`, `breakout_first_pullback`, multi-day `right_side_v`) are **PARKED**
+after multi-year FAILs. Do not prioritize new multi-day TA families unless evidence changes.
 
 **How to add a family:** follow [`MULTI_STRATEGY.md`](MULTI_STRATEGY.md) (symmetric
 `strategies/<id>/` layout, skills tree, batch holdouts). Do not fold new patterns into
@@ -32,6 +34,8 @@ time exit). Multi-day swing families are in scope when the short-hold mold is a 
 | Dominance-flip / flush reversal | `lab` `dominance_flip_reversal` | **Killed** (knife-catch / left-side-of-V) |
 | Gao intraday momentum | `lab` `intraday_momentum` | **Exhausted** Stage 0 |
 | Cross-sectional residual momentum | `lab` `xsec_momentum` (x03) | Promoted elsewhere; not an llm_trader scanner family |
+| Breakout first pullback | `llm_trader` `breakout_first_pullback` | **v0.1.0** smoke only |
+| Trend pullback SMA50 | `llm_trader` `trend_pullback` | **PARKED** multi-year FAIL |
 
 ---
 
@@ -50,7 +54,7 @@ duplicate a killed lab family and fit sealed scan + paper-trade in this package.
 | **Horizon** | Same-day preferred; optional overnight if reclaim is late-day |
 | **Scanner sketch** | Prior sharp down leg → pivot low → reclaim trigger (e.g. prior bar high or VWAP/EMA) with volume confirmation; liquid universe |
 | **Skill focus** | Entry only after confirmation; hard invalidation under pivot; no averaging down into the left side |
-| **Status** | Not implemented |
+| **Status** | **PARKED** — multi-year FAIL (pooled effR −0.03). See `batch/right_side_v/multiyear/RESULTS.md` |
 
 ### 2. `vwap_pullback` — Trend-day VWAP pullback / reclaim long
 
@@ -62,7 +66,7 @@ duplicate a killed lab family and fit sealed scan + paper-trade in this package.
 | **Horizon** | Same-day |
 | **Scanner sketch** | RVOL + gap or trend filter → first clean VWAP touch/reclaim in defined window (e.g. 10:00–14:00) |
 | **Skill focus** | One primary entry; no chase far above VWAP; flatten EOD |
-| **Status** | Not implemented (warrior phase-2) |
+| **Status** | **Research only** — multi-year PASS thin (+0.024); **fails cost stress** at 3× slip / fee2+slip4. See multiyear RESULTS + COST_STRESS |
 
 ### 3. `bb_squeeze_long` — Bollinger squeeze → long expansion only
 
@@ -74,7 +78,7 @@ duplicate a killed lab family and fit sealed scan + paper-trade in this package.
 | **Horizon** | Same-day (intraday bands) or multi-day (daily bands) — pick one horizon per release |
 | **Scanner sketch** | Width percentile low → directional break + RVOL; SPY regime optional |
 | **Skill focus** | Enter on expansion confirmation; stop mid-band or squeeze low; no mean-revert shorts |
-| **Status** | Not implemented |
+| **Status** | **PARKED** — v0.1.1 multi-year FAIL (pooled effR −0.011; **0/4** years > 0; n=7149). Cost stress all fail. See `batch/bb_squeeze_long/multiyear/RESULTS.md` |
 
 ### 4. `no_mans_land` filter family (or shared admission module)
 
@@ -85,18 +89,18 @@ duplicate a killed lab family and fit sealed scan + paper-trade in this package.
 | **Why not done** | Concept never codified as scanner rules or a reusable filter used by multiple families. |
 | **Horizon** | Cross-cutting — module first, optional thin family later |
 | **Implementation sketch** | Detect consolidation box after a directional leg; emit only edge events; attach as gate to `vwap_pullback` / `right_side_v` / warrior variants |
-| **Status** | Not implemented |
+| **Status** | **Shipped as shared module** `admission/no_mans_land.py` + portfolio overlay. Structural A/B on sealed micro/VWAP: **NML hurts** (micro effR +0.029→+0.006; VWAP FAIL). **Do not enable as default.** Portfolio concurrency **keep** as packaging. See `batch/admission/structural_ab/RESULTS.md` + `PREREG.md`. |
 
 ### 5. Warrior phase-2 patterns (extend `warrior`, not a new family id unless needed)
 
 | Pattern | Lance / Ross adjacency | Status |
 |---|---|---|
-| **Micro-pullback long** | Short-hold continuation after first pause | Deferred in warrior SPEC |
-| **VWAP reclaim after washout** | Overlaps `vwap_pullback` — prefer one shared pattern module | Deferred |
+| **Micro-pullback long** | Short-hold continuation after first pause | **Shipped as `micro_pullback` family** — multi-year PASS (+0.029; 4/4 years); cost-fragile. See `batch/micro_pullback/multiyear/RESULTS.md`. Liquid-universe gate (not warrior pennies). |
+| **VWAP reclaim after washout** | Overlaps `vwap_pullback` — prefer one shared pattern module | Covered by `vwap_pullback` research baseline |
 | **Flat-top / multi-bar base** beyond single ACD | Still long breakout, better structure | Thin / partial |
 
-Ship as additional `pattern` values + skill branches under `warrior` **or** extract shared
-pattern detectors if `vwap_pullback` becomes its own family.
+Optional later: port `micro_pullback` detector onto warrior small-cap gap screen once
+point-in-time float multi-year is available.
 
 ---
 
@@ -114,9 +118,11 @@ Highest Lance parity for **swing** content. Better economic fit with lab evidenc
 | **Thesis** | Daily uptrend (price above rising MA) → pullback into 20 EMA or 50 SMA → exhaustion / reclaim → long; stop under pullback low; target prior high / measured move. |
 | **Why not done** | No family. `cup_handle` is a different geometry. Lab `x03` is monthly residual **rank**, not MA pullback entries. |
 | **Horizon** | Multi-day (days–weeks) |
-| **Status** | Not implemented |
+| **Status** | **Implemented → multi-year FAIL → PARKED** (`trend_pullback` 0.4.0) |
 
 ### 7. `breakout_first_pullback` — Breakout continuation on first retest
+
+> **v0.1.0 implemented** — smoke `bfp-smoke-v010` (10/10 ok, n=6 traded, effR +0.22 — tiny sample).
 
 | | |
 |---|---|
@@ -124,7 +130,7 @@ Highest Lance parity for **swing** content. Better economic fit with lab evidenc
 | **Thesis** | Multi-week base break on volume → **wait for first pullback** to breakout level as support → long on hold; tighter stop than chase. |
 | **Why not done** | `cup_handle` is one base pattern with handle arm; not the generic “break then first retest” rule. |
 | **Horizon** | Multi-day |
-| **Status** | Not implemented |
+| **Status** | **PARKED** — 0.1.0 multi-year FAIL (−0.02); 0.2.0 structural **worse** (−0.12). See multiyear RESULTS*.md |
 
 ### 8. `anchored_vwap` — Event-anchored VWAP pullback
 
@@ -180,15 +186,26 @@ parity; list so they are not confused with the above.
 ## Suggested implementation order
 
 ```text
-1. warrior phase-2: micro-pullback + VWAP reclaim   (reuse warrior infra; fastest)
-2. right_side_v                                      (new family; falsify left-side trap cleanly)
-3. vwap_pullback  OR promote phase-2 into own family if skill diverges
-4. bb_squeeze_long                                   (orthogonal signal)
-5. no_mans_land admission module                     (shared gate)
-6. trend_pullback                                    (swing; highest Lance “core” gap)
-7. breakout_first_pullback
-8. anchored_vwap                                     (needs event data)
-9. multi_tf_trend gate on 6–8
+DONE  micro_pullback     multi-year PASS thin (+0.029; 4/4); cost-fragile
+DONE  vwap_pullback      multi-year PASS thin (+0.024; 3/4); cost-fragile
+DONE  bb_squeeze_long    multi-year FAIL (−0.011; 0/4) — PARKED
+DONE  right_side_v / trend_pullback / breakout_first_pullback — multi-year FAIL PARKED
+
+Structural gates (done):
+5. no_mans_land A/B                                  NML: do not default-on; portfolio: keep packaging
+
+Paper path (done):
+6. micro_pullback paper book                         `batch/micro_pullback/paper/PAPER_BOOK.md` (primary)
+7. vwap_pullback paper book                          `batch/vwap_pullback/paper/PAPER_BOOK.md` (2nd)
+
+Warrior port (done as limited probe):
+8. micro_pullback warrior probe 2025–H1'26             **FAIL** years+ (2025 −0.08 / 2026 +0.16); not multi-year; current float only. See `batch/micro_pullback/warrior_probe/RESULTS.md`
+
+Freeze liquid short-hold track:
+9. prefer micro paper book; VWAP optional second; no more detector retunes
+
+Swing (parked unless structural change):
+9. trend_pullback / BFP / anchored_vwap / multi_tf_trend
 ```
 
 Each new family should ship with:
@@ -208,14 +225,14 @@ Do **not** re-open SIP-ORB, gap-and-go, or dominance-flip under new names withou
 
 | Priority | Id | Type | Status |
 |:--:|---|---|---|
-| 1 | `right_side_v` | new family | not started |
-| 1 | `vwap_pullback` | new family or warrior phase-2 | not started |
-| 1 | `bb_squeeze_long` | new family | not started |
-| 1 | `no_mans_land` | shared module / filter | not started |
-| 1 | warrior micro-pullback | warrior pattern | not started |
-| 1 | warrior VWAP reclaim | warrior pattern | not started |
-| 2 | `trend_pullback` | new family (swing) | **PARKED** — multi-year 2022–25 FAIL (pooled effR −0.02; only 2024 > 0). See `batch/trend_pullback/multiyear/RESULTS.md` |
-| 2 | `breakout_first_pullback` | new family (swing) | not started |
+| 1 | `right_side_v` | new family | **PARKED** multi-year FAIL (−0.03) |
+| 1 | `vwap_pullback` | new family | **Paper-optional (2nd book)** — multi-year PASS thin; paper book + portfolio; more cost-fragile than micro |
+| 1 | `bb_squeeze_long` | new family | **PARKED** — multi-year FAIL (−0.011; 0/4 years); n=7149 |
+| 1 | `micro_pullback` | new family (warrior phase-2) | **Paper-optional (liquid)** — multi-year PASS + paper book; warrior probe **FAIL** years+ (see warrior_probe/) |
+| 1 | `no_mans_land` | shared module / filter | **Shipped** — A/B: NML hurts micro/VWAP; **default OFF**; portfolio caps **keep** |
+| 1 | warrior VWAP reclaim | warrior pattern | deferred (prefer `vwap_pullback`) |
+| 2 | `trend_pullback` | new family (swing) | **PARKED** — multi-year FAIL (−0.02) |
+| 2 | `breakout_first_pullback` | new family (swing) | **PARKED** — 0.1.0 FAIL (−0.02); 0.2.0 worse (−0.12) |
 | 2 | `anchored_vwap` | new family | not started |
 | 2 | `multi_tf_trend` | gate / family | not started |
 | 3 | `offer_take_scalp` | blocked (L2) | parked |

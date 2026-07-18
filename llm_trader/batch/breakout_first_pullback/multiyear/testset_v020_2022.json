@@ -1,0 +1,86 @@
+{
+  "created": "2026-07-18T17:24:45",
+  "seed": 13,
+  "n": 9,
+  "setups": [
+    {
+      "ticker": "CAT",
+      "date": "2022-01-11",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "COST",
+      "date": "2022-04-04",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CSCO",
+      "date": "2022-12-02",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "ISRG",
+      "date": "2022-12-02",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2022-01-03",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2022-03-24",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LLY",
+      "date": "2022-12-02",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LOW",
+      "date": "2022-11-30",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MA",
+      "date": "2022-01-05",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    }
+  ],
+  "cohort": {
+    "selection": "all_eligible_rows",
+    "start": "2022-01-01",
+    "end": "2022-12-31",
+    "after": "09:30",
+    "source_entry_db": "/Users/shtylenko/Projects/trading/llm_trader/data/breakout_first_pullback/entries.db"
+  }
+}

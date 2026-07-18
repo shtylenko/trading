@@ -28,6 +28,11 @@ strategies/<id>/
 | `warrior` | same-day 1min | `strategies/warrior/skills/` | `data/entries.db` |
 | `cup_handle` | multi-day 1day | `strategies/cup_handle/skills/` | `data/cup_handle/entries.db` |
 | `trend_pullback` | multi-day 1day | `strategies/trend_pullback/skills/` | `data/trend_pullback/entries.db` |
+| `breakout_first_pullback` | multi-day 1day | `strategies/breakout_first_pullback/skills/` | `data/breakout_first_pullback/entries.db` |
+| `right_side_v` | multi-day 1day | `strategies/right_side_v/skills/` | `data/right_side_v/entries.db` |
+| `vwap_pullback` | same-day 5min | `strategies/vwap_pullback/skills/` | `data/vwap_pullback/entries.db` |
+| `bb_squeeze_long` | same-day 5min | `strategies/bb_squeeze_long/skills/` | `data/bb_squeeze_long/entries.db` |
+| `micro_pullback` | same-day 5min | `strategies/micro_pullback/skills/` | `data/micro_pullback/entries.db` |
 
 ```bash
 python3 -m trading.llm_trader.runner --list-strategies

@@ -1,0 +1,15 @@
+{
+  "base": "0.1.0",
+  "versions": {
+    "0.1.0": {
+      "content_hash": null,
+      "first_seen": null,
+      "notes": "Baseline; multi-year FAIL (pooled -0.02) — best of failed pair"
+    },
+    "0.2.0": {
+      "content_hash": null,
+      "first_seen": null,
+      "notes": "Structural REJECTED multi-year (pooled -0.12); park family"
+    }
+  }
+}

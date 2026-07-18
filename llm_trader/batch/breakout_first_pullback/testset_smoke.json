@@ -1,0 +1,94 @@
+{
+  "created": "2026-07-18T17:15:46",
+  "seed": 7,
+  "n": 10,
+  "setups": [
+    {
+      "ticker": "AAPL",
+      "date": "2025-10-23",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "CAT",
+      "date": "2025-11-13",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "COST",
+      "date": "2025-01-30",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "DHR",
+      "date": "2024-02-01",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "GILD",
+      "date": "2025-10-21",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "LIN",
+      "date": "2025-06-12",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "MA",
+      "date": "2025-01-30",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "NOW",
+      "date": "2025-01-24",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "PM",
+      "date": "2025-06-03",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    },
+    {
+      "ticker": "SPY",
+      "date": "2024-11-18",
+      "time_et": "16:00",
+      "pattern": "breakout_first_pullback",
+      "float_shares": null,
+      "gap_pct": null
+    }
+  ],
+  "cohort": {
+    "selection": "stratified_sample",
+    "start": null,
+    "end": null,
+    "after": "09:30",
+    "source_entry_db": "/Users/shtylenko/Projects/trading/llm_trader/data/breakout_first_pullback/entries.db"
+  }
+}

@@ -16,11 +16,25 @@ _REGISTRY: dict[str, "StrategySpec"] | None = None
 
 
 def _build_registry() -> dict[str, "StrategySpec"]:
+    from .bb_squeeze_long import BbSqueezeLongStrategy
+    from .breakout_first_pullback import BreakoutFirstPullbackStrategy
     from .cup_handle import CupHandleStrategy
+    from .micro_pullback import MicroPullbackStrategy
+    from .right_side_v import RightSideVStrategy
     from .trend_pullback import TrendPullbackStrategy
+    from .vwap_pullback import VwapPullbackStrategy
     from .warrior import WarriorStrategy
 
-    specs = [WarriorStrategy(), CupHandleStrategy(), TrendPullbackStrategy()]
+    specs = [
+        WarriorStrategy(),
+        CupHandleStrategy(),
+        TrendPullbackStrategy(),
+        BreakoutFirstPullbackStrategy(),
+        RightSideVStrategy(),
+        VwapPullbackStrategy(),
+        BbSqueezeLongStrategy(),
+        MicroPullbackStrategy(),
+    ]
     return {s.id: s for s in specs}
 
 

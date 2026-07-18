@@ -1,0 +1,15 @@
+{
+  "base": "0.1.1",
+  "versions": {
+    "0.1.0": {
+      "content_hash": null,
+      "first_seen": null,
+      "notes": "BB squeeze → long expansion short-hold (detection start bug)"
+    },
+    "0.1.1": {
+      "content_hash": null,
+      "first_seen": null,
+      "notes": "Fix entry-window start + strict-lt width pctile; multi-year + cost stress"
+    }
+  }
+}

@@ -1,0 +1,214 @@
+{
+  "strategy": "bb_squeeze_long",
+  "config": {
+    "start": "2022-01-01",
+    "end": "2025-12-31",
+    "price_min": 10.0,
+    "price_max": 1000.0,
+    "avg_vol_min": 1000000.0,
+    "rvol_min": 1.15,
+    "rvol_lookback": 20,
+    "gap_min_pct": -2.0,
+    "gap_max_pct": 20.0,
+    "bb_period": 20,
+    "bb_std": 2.0,
+    "squeeze_lookback": 36,
+    "squeeze_pctile_max": 0.25,
+    "entry_window_start": "09:45",
+    "entry_window_end": "14:30",
+    "require_green": true,
+    "require_width_expanding": true,
+    "require_close_above_mid": true,
+    "require_close_above_prior_high": true,
+    "stop_lookback_bars": 6,
+    "stop_buffer_pct": 0.05,
+    "target1_r_mult": 1.0,
+    "target2_r_mult": 2.0,
+    "eod_exit_et": "15:55",
+    "fee_bps_one_way": 1.0,
+    "slippage_bps_one_way": 2.0,
+    "risk_budget": 100.0,
+    "max_scan_failure_rate": 1.0,
+    "exchanges": [
+      "XNAS",
+      "XNYS",
+      "XASE"
+    ],
+    "db_path": "/Users/shtylenko/Projects/trading/llm_trader/data/bb_squeeze_long/entries.db"
+  },
+  "entries": 7149,
+  "trades": 7149,
+  "years": {
+    "2022": {
+      "n": 1710,
+      "win_pct": 46.8,
+      "eff_r": -0.0032,
+      "pnl": -550.3,
+      "exits": {
+        "STOP": 780,
+        "TARGET1": 0,
+        "TARGET2": 411,
+        "EOD": 519
+      }
+    },
+    "2023": {
+      "n": 1784,
+      "win_pct": 46.4,
+      "eff_r": -0.0159,
+      "pnl": -2839.32,
+      "exits": {
+        "STOP": 779,
+        "TARGET1": 0,
+        "TARGET2": 355,
+        "EOD": 650
+      }
+    },
+    "2024": {
+      "n": 1904,
+      "win_pct": 45.6,
+      "eff_r": -0.0123,
+      "pnl": -2332.68,
+      "exits": {
+        "STOP": 846,
+        "TARGET1": 0,
+        "TARGET2": 371,
+        "EOD": 687
+      }
+    },
+    "2025": {
+      "n": 1751,
+      "win_pct": 45.4,
+      "eff_r": -0.011,
+      "pnl": -1925.5,
+      "exits": {
+        "STOP": 779,
+        "TARGET1": 0,
+        "TARGET2": 329,
+        "EOD": 643
+      }
+    }
+  },
+  "pooled": {
+    "n": 7149,
+    "win_pct": 46.0,
+    "eff_r": -0.0107,
+    "pnl": -7647.8,
+    "exits": {
+      "STOP": 3184,
+      "TARGET1": 0,
+      "TARGET2": 1466,
+      "EOD": 2499
+    }
+  },
+  "gates": {
+    "pooled_eff_r_gt_0": false,
+    "years_positive": 0,
+    "years_total": 4,
+    "pass": false
+  },
+  "completed_at": "2026-07-18T23:02:37+00:00",
+  "cost_stress": {
+    "baseline_1f_2s": {
+      "n": 7149,
+      "win_pct": 46.0,
+      "eff_r": -0.0107,
+      "pnl": -7647.8,
+      "exits": {
+        "STOP": 3184,
+        "TARGET1": 0,
+        "TARGET2": 1466,
+        "EOD": 2499
+      },
+      "fee_bps": 1.0,
+      "slip_bps": 2.0,
+      "years_pos": 0,
+      "years_total": 4,
+      "pass": false
+    },
+    "slip_2x": {
+      "n": 7149,
+      "win_pct": 44.7,
+      "eff_r": -0.0302,
+      "pnl": -21561.73,
+      "exits": {
+        "STOP": 3184,
+        "TARGET1": 0,
+        "TARGET2": 1466,
+        "EOD": 2499
+      },
+      "fee_bps": 1.0,
+      "slip_bps": 4.0,
+      "years_pos": 0,
+      "years_total": 4,
+      "pass": false
+    },
+    "slip_3x": {
+      "n": 7149,
+      "win_pct": 43.1,
+      "eff_r": -0.0496,
+      "pnl": -35493.06,
+      "exits": {
+        "STOP": 3184,
+        "TARGET1": 0,
+        "TARGET2": 1466,
+        "EOD": 2499
+      },
+      "fee_bps": 1.0,
+      "slip_bps": 6.0,
+      "years_pos": 0,
+      "years_total": 4,
+      "pass": false
+    },
+    "fee2_slip4": {
+      "n": 7149,
+      "win_pct": 44.0,
+      "eff_r": -0.0399,
+      "pnl": -28531.1,
+      "exits": {
+        "STOP": 3184,
+        "TARGET1": 0,
+        "TARGET2": 1466,
+        "EOD": 2499
+      },
+      "fee_bps": 2.0,
+      "slip_bps": 4.0,
+      "years_pos": 0,
+      "years_total": 4,
+      "pass": false
+    },
+    "fee2_slip6": {
+      "n": 7149,
+      "win_pct": 42.2,
+      "eff_r": -0.0594,
+      "pnl": -42454.29,
+      "exits": {
+        "STOP": 3184,
+        "TARGET1": 0,
+        "TARGET2": 1466,
+        "EOD": 2499
+      },
+      "fee_bps": 2.0,
+      "slip_bps": 6.0,
+      "years_pos": 0,
+      "years_total": 4,
+      "pass": false
+    },
+    "fee5_slip5": {
+      "n": 7149,
+      "win_pct": 40.4,
+      "eff_r": -0.0789,
+      "pnl": -56373.3,
+      "exits": {
+        "STOP": 3184,
+        "TARGET1": 0,
+        "TARGET2": 1466,
+        "EOD": 2499
+      },
+      "fee_bps": 5.0,
+      "slip_bps": 5.0,
+      "years_pos": 0,
+      "years_total": 4,
+      "pass": false
+    }
+  }
+}

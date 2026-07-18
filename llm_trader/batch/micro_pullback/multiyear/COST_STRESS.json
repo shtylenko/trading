@@ -1,0 +1,104 @@
+{
+  "baseline_1f_2s": {
+    "n": 1102,
+    "win_pct": 46.2,
+    "eff_r": 0.0292,
+    "pnl": 3213.81,
+    "exits": {
+      "STOP": 583,
+      "TARGET1": 0,
+      "TARGET2": 380,
+      "EOD": 139
+    },
+    "fee_bps": 1.0,
+    "slip_bps": 2.0,
+    "years_pos": 4,
+    "years_total": 4,
+    "pass": true
+  },
+  "slip_2x": {
+    "n": 1102,
+    "win_pct": 45.7,
+    "eff_r": 0.0096,
+    "pnl": 1060.61,
+    "exits": {
+      "STOP": 583,
+      "TARGET1": 0,
+      "TARGET2": 380,
+      "EOD": 139
+    },
+    "fee_bps": 1.0,
+    "slip_bps": 4.0,
+    "years_pos": 3,
+    "years_total": 4,
+    "pass": true
+  },
+  "slip_3x": {
+    "n": 1102,
+    "win_pct": 45.3,
+    "eff_r": -0.01,
+    "pnl": -1097.61,
+    "exits": {
+      "STOP": 583,
+      "TARGET1": 0,
+      "TARGET2": 380,
+      "EOD": 139
+    },
+    "fee_bps": 1.0,
+    "slip_bps": 6.0,
+    "years_pos": 1,
+    "years_total": 4,
+    "pass": false
+  },
+  "fee2_slip4": {
+    "n": 1102,
+    "win_pct": 45.6,
+    "eff_r": -0.0001,
+    "pnl": -12.34,
+    "exits": {
+      "STOP": 583,
+      "TARGET1": 0,
+      "TARGET2": 380,
+      "EOD": 139
+    },
+    "fee_bps": 2.0,
+    "slip_bps": 4.0,
+    "years_pos": 2,
+    "years_total": 4,
+    "pass": false
+  },
+  "fee2_slip6": {
+    "n": 1102,
+    "win_pct": 45.0,
+    "eff_r": -0.0197,
+    "pnl": -2172.41,
+    "exits": {
+      "STOP": 583,
+      "TARGET1": 0,
+      "TARGET2": 380,
+      "EOD": 139
+    },
+    "fee_bps": 2.0,
+    "slip_bps": 6.0,
+    "years_pos": 0,
+    "years_total": 4,
+    "pass": false
+  },
+  "fee5_slip5": {
+    "n": 1102,
+    "win_pct": 44.5,
+    "eff_r": -0.0392,
+    "pnl": -4321.6,
+    "exits": {
+      "STOP": 583,
+      "TARGET1": 0,
+      "TARGET2": 380,
+      "EOD": 139
+    },
+    "fee_bps": 5.0,
+    "slip_bps": 5.0,
+    "years_pos": 0,
+    "years_total": 4,
+    "pass": false
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "strategy": "vwap_pullback",
+  "config": {
+    "start": "2022-01-01",
+    "end": "2025-12-31",
+    "price_min": 10.0,
+    "price_max": 1000.0,
+    "gap_min_pct": 0.5,
+    "gap_max_pct": 25.0,
+    "avg_vol_min": 1000000.0,
+    "rvol_min": 1.2,
+    "rvol_lookback": 20,
+    "morning_confirm_end": "10:30",
+    "entry_window_start": "10:00",
+    "entry_window_end": "14:00",
+    "min_bars_above_vwap_before": 3,
+    "require_green_reclaim": true,
+    "stop_below_vwap_pct": 0.15,
+    "target1_r_mult": 1.0,
+    "target2_r_mult": 2.0,
+    "eod_exit_et": "15:55",
+    "fee_bps_one_way": 1.0,
+    "slippage_bps_one_way": 2.0,
+    "risk_budget": 100.0,
+    "max_scan_failure_rate": 1.0,
+    "exchanges": [
+      "XNAS",
+      "XNYS",
+      "XASE"
+    ],
+    "db_path": "/Users/shtylenko/Projects/trading/llm_trader/data/vwap_pullback/entries.db"
+  },
+  "entries": 506,
+  "trades": 506,
+  "years": {
+    "2022": {
+      "n": 133,
+      "win_pct": 45.9,
+      "eff_r": 0.0343,
+      "clean_r": 0.0343,
+      "pnl": 455.59,
+      "exits": {
+        "STOP": 72,
+        "TARGET1": 0,
+        "TARGET2": 52,
+        "EOD": 9
+      }
+    },
+    "2023": {
+      "n": 139,
+      "win_pct": 50.4,
+      "eff_r": 0.0265,
+      "clean_r": 0.0265,
+      "pnl": 367.86,
+      "exits": {
+        "STOP": 68,
+        "TARGET1": 0,
+        "TARGET2": 68,
+        "EOD": 3
+      }
+    },
+    "2024": {
+      "n": 112,
+      "win_pct": 42.9,
+      "eff_r": -0.0041,
+      "clean_r": -0.0041,
+      "pnl": -45.91,
+      "exits": {
+        "STOP": 64,
+        "TARGET1": 0,
+        "TARGET2": 44,
+        "EOD": 4
+      }
+    },
+    "2025": {
+      "n": 122,
+      "win_pct": 47.5,
+      "eff_r": 0.0341,
+      "clean_r": 0.0341,
+      "pnl": 416.38,
+      "exits": {
+        "STOP": 62,
+        "TARGET1": 0,
+        "TARGET2": 52,
+        "EOD": 8
+      }
+    }
+  },
+  "pooled": {
+    "n": 506,
+    "win_pct": 46.8,
+    "eff_r": 0.0236,
+    "clean_r": 0.0236,
+    "pnl": 1193.92,
+    "exits": {
+      "STOP": 266,
+      "TARGET1": 0,
+      "TARGET2": 216,
+      "EOD": 24
+    }
+  },
+  "completed_at": "2026-07-18T22:49:36+00:00",
+  "gates": {
+    "pooled_eff_r_gt_0": true,
+    "years_positive": 3,
+    "years_total": 4,
+    "pass": true
+  }
+}

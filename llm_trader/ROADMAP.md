@@ -194,15 +194,17 @@ DONE  right_side_v / trend_pullback / breakout_first_pullback — multi-year FAI
 Structural gates (done):
 5. no_mans_land A/B                                  NML: do not default-on; portfolio: keep packaging
 
-Paper path (done):
-6. micro_pullback paper book                         `batch/micro_pullback/paper/PAPER_BOOK.md` (primary)
-7. vwap_pullback paper book                          `batch/vwap_pullback/paper/PAPER_BOOK.md` (2nd)
+Integrity (done):
+6. E0 causal RVOL micro multi-year                     **FAIL** −0.035 / 0/4 years → **park liquid short-hold**
+7. Code fixes: prior-day RVOL (micro/vwap/bb/warrior); VWAP causal morning confirm
 
-Warrior port (done as limited probe):
-8. micro_pullback warrior probe 2025–H1'26             **FAIL** years+ (2025 −0.08 / 2026 +0.16); not multi-year; current float only. See `batch/micro_pullback/warrior_probe/RESULTS.md`
+Historical contaminated paper books (invalid for promotion):
+8. micro/vwap paper packs under `batch/*/paper/` — do not trade
 
-Freeze liquid short-hold track:
-9. prefer micro paper book; VWAP optional second; no more detector retunes
+Warrior port (probe only; still parked):
+9. warrior probe FAIL years+; no PIT float
+
+Track closed for detector R&D; next only if new structural thesis + untouched data.
 
 Swing (parked unless structural change):
 9. trend_pullback / BFP / anchored_vwap / multi_tf_trend
@@ -226,9 +228,9 @@ Do **not** re-open SIP-ORB, gap-and-go, or dominance-flip under new names withou
 | Priority | Id | Type | Status |
 |:--:|---|---|---|
 | 1 | `right_side_v` | new family | **PARKED** multi-year FAIL (−0.03) |
-| 1 | `vwap_pullback` | new family | **Paper-optional (2nd book)** — multi-year PASS thin; paper book + portfolio; more cost-fragile than micro |
+| 1 | `vwap_pullback` | new family | **PARKED** — same full-day RVOL leak class; morning look-ahead fixed in code; not re-promoted after E0 kill |
 | 1 | `bb_squeeze_long` | new family | **PARKED** — multi-year FAIL (−0.011; 0/4 years); n=7149 |
-| 1 | `micro_pullback` | new family (warrior phase-2) | **Paper-optional (liquid)** — multi-year PASS + paper book; warrior probe **FAIL** years+ (see warrior_probe/) |
+| 1 | `micro_pullback` | new family (warrior phase-2) | **PARKED** — contaminated PASS invalidated; **E0 causal RVOL FAIL** (−0.035, 0/4 years). See `multiyear_causal/RESULTS.md` |
 | 1 | `no_mans_land` | shared module / filter | **Shipped** — A/B: NML hurts micro/VWAP; **default OFF**; portfolio caps **keep** |
 | 1 | warrior VWAP reclaim | warrior pattern | deferred (prefer `vwap_pullback`) |
 | 2 | `trend_pullback` | new family (swing) | **PARKED** — multi-year FAIL (−0.02) |

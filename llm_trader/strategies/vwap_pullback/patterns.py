@@ -56,9 +56,11 @@ def screen_ticker(ticker: str, cfg: VwapPullbackConfig) -> list[DayCandidate]:
         return []
     df = df.sort_index()
     df["prior_close"] = df["close"].shift(1)
+    # Causal liquidity: prior 20 sessions only (no same-day completed volume).
     df["avg_vol"] = df["volume"].shift(1).rolling(cfg.rvol_lookback).mean()
     df["gap_pct"] = (df["open"] - df["prior_close"]) / df["prior_close"].replace(0, pd.NA) * 100.0
-    df["rvol"] = df["volume"] / df["avg_vol"].replace(0, pd.NA)
+    # Causal RVOL: prior-day volume only (E0 integrity — was full-day look-ahead).
+    df["rvol"] = df["volume"].shift(1) / df["avg_vol"].replace(0, pd.NA)
 
     out: list[DayCandidate] = []
     for row in df.itertuples():
@@ -115,39 +117,54 @@ def detect_from_frame(
     if df is None or df.empty or "vwap" not in df.columns:
         return None
 
-    # Morning confirmation: bars 09:30 → morning_confirm_end mostly above VWAP
+    # Causal morning confirmation: only bars from 09:30 up to *current* signal bar
+    # (old bug: full 09:30–morning_confirm_end evaluated before window, so 10:00–10:25
+    # signals could use future bars through 10:30).
     m_end = datetime.strptime(cfg.morning_confirm_end, "%H:%M").time()
-    morning = df.between_time(time(9, 30), m_end, inclusive="left")
-    if morning.empty or len(morning) < cfg.min_bars_above_vwap_before:
-        return None
-    above = (morning["close"] > morning["vwap"]).sum()
-    if above < cfg.min_bars_above_vwap_before:
-        return None
-    # Prefer open not deeply below VWAP
-    if float(morning["close"].iloc[0]) < float(morning["vwap"].iloc[0]) * 0.995:
-        return None
-
     e0 = datetime.strptime(cfg.entry_window_start, "%H:%M").time()
     e1 = datetime.strptime(cfg.entry_window_end, "%H:%M").time()
-    win = df.between_time(e0, e1, inclusive="left")
-    if win.empty:
+
+    # Open must not start deeply below VWAP (first RTH bar only — causal)
+    first = df.iloc[0]
+    if float(first["close"]) < float(first["vwap"]) * 0.995:
         return None
 
-    # Count consecutive bars above VWAP before a touch
     bars_above = 0
-    # Also count from morning into window
-    for _, row in morning.iterrows():
-        if float(row["close"]) > float(row["vwap"]):
-            bars_above += 1
-        else:
-            bars_above = 0
-
-    for ts, row in win.iterrows():
+    for ts, row in df.iterrows():
+        t = ts.time() if hasattr(ts, "time") else pd.Timestamp(ts).time()
         vwap = float(row["vwap"])
         lo, hi, op, cl = float(row["low"]), float(row["high"]), float(row["open"]), float(row["close"])
         if not np.isfinite(vwap) or vwap <= 0:
             continue
-        # Still building "above" streak until touch
+
+        # Track strength only with bars seen so far (including this bar for streak)
+        if t < e0:
+            # Pre-window: only build confirmation streak
+            if cl > vwap:
+                bars_above += 1
+            else:
+                bars_above = 0
+            continue
+
+        if t >= e1:
+            break
+
+        # Morning-confirm requirement: enough bars above VWAP from open through
+        # min(now, morning_confirm_end), using only past+current bars.
+        confirm_end = m_end if t >= m_end else t
+        morning_slice = df.loc[:ts].between_time(time(9, 30), confirm_end, inclusive="left")
+        # Include current bar if between_time left-excludes equality edge cases
+        if morning_slice.empty:
+            continue
+        above_count = int((morning_slice["close"] > morning_slice["vwap"]).sum())
+        if above_count < cfg.min_bars_above_vwap_before:
+            # still allow streak tracking for touch logic
+            if cl > vwap:
+                bars_above += 1
+            else:
+                bars_above = 0
+            continue
+
         touched = lo <= vwap <= hi
         if not touched:
             if cl > vwap:
@@ -157,11 +174,9 @@ def detect_from_frame(
             continue
 
         if bars_above < cfg.min_bars_above_vwap_before:
-            # touch without prior strength — reset
             bars_above = 1 if cl > vwap else 0
             continue
 
-        # Reclaim: close back above VWAP
         if cl < vwap:
             bars_above = 0
             continue
@@ -169,15 +184,13 @@ def detect_from_frame(
             bars_above = 0
             continue
 
-        # Setup found
         stop_px = round(vwap * (1.0 - cfg.stop_below_vwap_pct / 100.0), 4)
-        entry_px = round(cl, 4)  # reclaim close as reference; sim may fill next open
+        entry_px = round(cl, 4)
         if stop_px >= entry_px:
             return None
         if getattr(cfg, "nml_gate", False):
             from trading.llm_trader.admission.no_mans_land import evaluate_long_edge
 
-            # signal bar index in full session frame
             try:
                 sig_i = list(df.index).index(ts)
             except ValueError:
@@ -200,14 +213,14 @@ def detect_from_frame(
             "target1_px": t1,
             "target2_px": t2,
             "vwap": round(vwap, 4),
-            "atr": round(risk, 4),  # risk unit as pseudo-atr for plan tools
+            "atr": round(risk, 4),
             "measured_move_px": round(risk * cfg.target2_r_mult, 4),
             "arm_expiry_bars": 1,
             "max_entry_gap_atr": 0.5,
             "gap_pct": cand.gap_pct,
             "rvol": cand.rvol,
             "horizon": "intraday",
-            "construction": "v0.1.0_vwap_pullback_reclaim",
+            "construction": "v0.1.0_vwap_pullback_causal_e0",
         }
         return Entry(
             ticker=cand.ticker,
@@ -217,7 +230,7 @@ def detect_from_frame(
             entry_px=entry_px,
             bar_close=entry_px,
             reason=(
-                f"VWAP pullback reclaim {t_et} ET: morning above VWAP, touch+reclaim "
+                f"VWAP pullback reclaim {t_et} ET: causal morning strength, touch+reclaim "
                 f"@ ${entry_px:.2f}; stop ${stop_px:.2f}; T1 ${t1:.2f} / T2 ${t2:.2f}."
             ),
             strategy="vwap_pullback",

@@ -60,9 +60,12 @@ def screen_ticker(ticker: str, cfg: MicroPullbackConfig) -> list[DayCandidate]:
         return []
     df = df.sort_index()
     df["prior_close"] = df["close"].shift(1)
+    # Causal liquidity: prior 20 sessions only (no same-day completed volume).
     df["avg_vol"] = df["volume"].shift(1).rolling(cfg.rvol_lookback).mean()
     df["gap_pct"] = (df["open"] - df["prior_close"]) / df["prior_close"].replace(0, pd.NA) * 100.0
-    df["rvol"] = df["volume"] / df["avg_vol"].replace(0, pd.NA)
+    # Causal RVOL: prior-day volume / avg of days before that window end (E0 PREREG).
+    # Old bug: df["volume"]/avg_vol used full-session volume unknown at 09:45–14:00.
+    df["rvol"] = df["volume"].shift(1) / df["avg_vol"].replace(0, pd.NA)
 
     out: list[DayCandidate] = []
     for row in df.itertuples():
@@ -320,7 +323,7 @@ def detect_from_frame(
             "gap_pct": cand.gap_pct,
             "rvol": cand.rvol,
             "horizon": "intraday",
-            "construction": "v0.1.0_micro_pullback",
+            "construction": "v0.1.0_micro_pullback_causal_e0",
         }
         return Entry(
             ticker=cand.ticker,

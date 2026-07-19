@@ -56,7 +56,8 @@ def screen_ticker(ticker: str, cfg: ScanConfig) -> list[GapCandidate]:
     df["prior_close"] = df["close"].shift(1)
     df["avg_vol"] = df["volume"].shift(1).rolling(cfg.rvol_lookback).mean()
     df["gap_pct"] = (df["open"] - df["prior_close"]) / df["prior_close"].replace(0, pd.NA) * 100.0
-    df["rvol"] = df["volume"] / df["avg_vol"].replace(0, pd.NA)
+    # Causal RVOL: prior-day volume only (full-day volume is look-ahead for same-day entries).
+    df["rvol"] = df["volume"].shift(1) / df["avg_vol"].replace(0, pd.NA)
 
     out: list[GapCandidate] = []
     for row in df.itertuples():

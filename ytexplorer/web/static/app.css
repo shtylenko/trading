@@ -1,0 +1,22 @@
+:root { color-scheme: dark; --bg:#0b1018; --panel:#121b28; --panel-2:#172235; --line:#263650;
+  --text:#e8eef8; --muted:#91a1ba; --accent:#55c6a8; --blue:#83adff; --warn:#f1b85b; --bad:#f17b86; }
+* { box-sizing:border-box; } body { margin:0; font:15px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; background:var(--bg); color:var(--text); }
+a { color:var(--blue); text-decoration:none; } a:hover { text-decoration:underline; }
+.shell { max-width:1380px; margin:auto; padding:0 24px; } header { border-bottom:1px solid var(--line); background:#0d1521; position:sticky; top:0; z-index:2; }
+.top { min-height:63px; display:flex; align-items:center; gap:18px; } .brand { font-weight:800; letter-spacing:.02em; color:#fff; font-size:18px; } .brand span{color:var(--accent)}
+.tag { border:1px solid #2b776d; color:#9ce8d4; border-radius:999px; font-size:11px; padding:2px 8px; } nav { display:flex; flex-wrap:wrap; gap:3px; margin-left:auto; }
+nav a { color:var(--muted); padding:7px 9px; border-radius:7px; font-size:13px; } nav a.active, nav a:hover { color:#fff; background:var(--panel-2); text-decoration:none; }
+main { padding:28px 0 46px; } h1 { font-size:27px; margin:0; letter-spacing:-.02em; } h2 { font-size:16px; margin:0 0 12px; } h3 { font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.07em; margin:0 0 8px; }
+.lede { margin:5px 0 23px; color:var(--muted); max-width:800px; } .grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:13px; margin-bottom:22px; }
+.grid.two { grid-template-columns:repeat(2,minmax(0,1fr)); } .card { background:var(--panel); border:1px solid var(--line); border-radius:11px; padding:17px; margin-bottom:16px; }
+.metric { min-height:98px; } .metric .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.06em; } .metric .value { font-size:32px; font-weight:750; margin-top:6px; }
+.metric .hint { color:var(--muted); font-size:12px; } .row { display:flex; gap:12px; align-items:center; justify-content:space-between; } .muted { color:var(--muted); }
+table { width:100%; border-collapse:collapse; font-size:13px; } th { color:var(--muted); font-weight:600; text-align:left; font-size:11px; letter-spacing:.05em; text-transform:uppercase; }
+th,td { padding:10px 8px; border-bottom:1px solid #213049; vertical-align:top; } tr:last-child td { border-bottom:0; } .right{text-align:right;} .clip { max-width:440px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.pill { display:inline-block; padding:2px 7px; font-size:11px; border-radius:999px; background:#263650; color:#c7d4e8; text-transform:capitalize; white-space:nowrap; }
+.pill.approved,.pill.research-supported,.pill.shadow-forward { background:#174c43; color:#9ce8d4; }.pill.triage,.pill.candidate,.pill.preregistered { background:#29425e; color:#bdd8ff; }
+.pill.data-blocked,.pill.parked { background:#5a4220; color:#ffdaa0; }.pill.rejected,.pill.killed,.pill.demoted,.pill.duplicate { background:#5d2c38; color:#ffb4bd; }
+.controls { display:flex; align-items:end; gap:10px; flex-wrap:wrap; } label { display:grid; gap:4px; color:var(--muted); font-size:12px; } input,select,textarea { color:var(--text); background:#0d1521; border:1px solid var(--line); border-radius:7px; padding:7px 8px; font:inherit; } textarea { min-width:280px; min-height:58px; }
+button { color:#08201c; background:var(--accent); border:0; border-radius:7px; padding:8px 11px; font-weight:700; cursor:pointer; } button:hover { filter:brightness(1.1); }.quote { border-left:3px solid var(--accent); padding:10px 13px; margin:8px 0; background:#10231f; color:#d8f4ec; }
+.detail { display:grid; grid-template-columns:160px 1fr; gap:6px 16px; font-size:14px; }.detail dt{color:var(--muted);}.detail dd{margin:0; white-space:pre-wrap;}.notice { padding:12px; border:1px solid #725a2d; background:#2b2418; color:#f3dcae; border-radius:8px; }
+.empty { color:var(--muted); padding:16px 0; } .nowrap{white-space:nowrap;} code{color:#b7ccff;} @media(max-width:800px){.shell{padding:0 15px}.grid,.grid.two{grid-template-columns:1fr 1fr}.top{align-items:flex-start;padding:12px 0}.brand{padding-top:4px}nav{margin-left:0}.clip{max-width:180px}.detail{grid-template-columns:1fr}.detail dt{margin-top:9px}} @media(max-width:520px){.grid,.grid.two{grid-template-columns:1fr}table{font-size:12px}th,td{padding:8px 5px}.hide-mobile{display:none}}

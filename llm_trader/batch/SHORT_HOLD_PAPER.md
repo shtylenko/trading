@@ -1,26 +1,32 @@
-# Short-hold paper freeze (2026-07-18)
+# Short-hold paper freeze (updated 2026-07-19 after E0)
 
-Liquid multi-year track (59 names, 2022–2025). Same packaging for both books:
-**portfolio max 3 concurrent / 5 per day; NML OFF.**
+## E0 causal RVOL audit — **FAIL → track parked**
 
-| Book | Role | Paper n | Paper effR | years+ | 2× slip | fee2+slip4 | 3× slip |
-|---|---|---:|---:|---:|:---:|:---:|:---:|
-| **micro_pullback** | **Primary** | 972 | **+0.032** | **4/4** | Y | Y | N |
-| **vwap_pullback** | Second | 494 | **+0.026** | 3/4 | Y | N | N |
+Peer reviews (Fable/Sol) found full-day RVOL look-ahead. Pre-reg:
+`batch/micro_pullback/PREREG_CAUSAL_E0.md`. One-shot re-run with **prior-day RVOL only**:
 
-Artifacts:
-- `batch/micro_pullback/paper/PAPER_BOOK.md`
-- `batch/vwap_pullback/paper/PAPER_BOOK.md`
-- Structural A/B: `batch/admission/structural_ab/RESULTS.md`
+| | Contaminated (invalid) | **Causal E0** |
+|---|---:|---:|
+| n | 1102 | **813** |
+| effR | +0.029 | **−0.035** |
+| years+ | 4/4 | **0/4** |
+| Overall | was “PASS” | **FAIL** |
 
-## Promotion
+Artifact: `batch/micro_pullback/multiyear_causal/RESULTS.md`
 
-- Live size: **no**
-- Paper / tiny size: optional; prefer **micro** only if running one book
-- Do not enable NML on either
-- Do not stack full capital on both without a combined portfolio layer
-- Detector retune: stop (freeze)
+**Per PREREG kill criteria: park liquid short-hold track.** No detector retune.
+No capital. Contaminated multi-year / paper books are **not** promotion evidence
+(historical only, labeled invalid).
 
+## Prior contaminated books (do not trade)
+
+| Book | Role | Note |
+|---|---|---|
+| micro paper | was primary | invalidated by E0 |
+| VWAP paper | was second | same RVOL leak + morning look-ahead fix in code; not re-promoted |
+
+Structural A/B (NML/portfolio): `batch/admission/structural_ab/RESULTS.md` still
+valid for **overlay** conclusions on contaminated entries; not for edge claims.
 ## Warrior small-cap micro probe (not multi-year)
 
 | | |

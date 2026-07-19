@@ -1,0 +1,39 @@
+# The autonomous discovery plan. Keep mechanisms explicit and cadences bounded.
+# `run-scheduled` evaluates this file; the web UI exposes it read-only.
+timezone: America/Chicago
+daily_limits:
+  max_new_channels_to_audit: 3
+  channel_sample_size: 12
+  fetch_channel_transcripts: true
+  hermes_timeout_seconds: 300
+queries:
+  - id: intraday-price-action
+    query: "stock trading price action entry stop loss strategy"
+    cadence: daily
+    upload_date: week
+    max_results: 12
+    intent: intraday setup discovery
+  - id: anchored-vwap
+    query: "anchored VWAP trading strategy rules"
+    cadence: daily
+    upload_date: week
+    max_results: 12
+    intent: event-aware price-reference setups
+  - id: intraday-pullback
+    query: "intraday stock pullback trading strategy entry stop"
+    cadence: daily
+    upload_date: week
+    max_results: 12
+    intent: continuation and pullback mechanisms
+  - id: post-earnings-drift
+    query: "post earnings announcement drift systematic trading strategy"
+    cadence: weekly
+    upload_date: month
+    max_results: 16
+    intent: multi-day event research
+  - id: momentum-52-week-high
+    query: "52 week high momentum stock trading strategy rules"
+    cadence: weekly
+    upload_date: month
+    max_results: 16
+    intent: cross-sectional and swing research

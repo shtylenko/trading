@@ -1,0 +1,9 @@
+# Local web UI dependencies. ytmcp owns its own RapidAPI integration.
+fastapi>=0.110
+uvicorn>=0.29
+jinja2>=3.1
+python-multipart>=0.0.9
+pyyaml>=6.0
+
+# Optional test dependency for FastAPI TestClient:
+# httpx>=0.27

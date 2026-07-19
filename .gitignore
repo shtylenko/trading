@@ -30,6 +30,10 @@ marketdata/data/*
 !marketdata/data/.gitkeep
 data/_sec_cache/
 
+# YT Explorer local evidence ledger and transcript cache
+ytexplorer/data/*
+!ytexplorer/data/.gitkeep
+
 # lab keeps its own .gitignore too (reports/, strategy artifacts) — defense in depth here
 reports/*
 !reports/.gitkeep

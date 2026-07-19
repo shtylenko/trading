@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from trading.ytexplorer.cli import _launch_agent_payload
 from trading.ytexplorer.pipeline import load_plan, run_scheduled
 from trading.ytexplorer.store import ExplorerStore
@@ -11,6 +13,13 @@ def test_daily_plan_is_visible_and_dry_run_has_no_provider_side_effects(tmp_path
     report = run_scheduled(ExplorerStore(tmp_path / "explorer.sqlite3"), cadence="daily", dry_run=True)
     assert report["mode"] == "dry-run"
     assert all(q["cadence"] == "daily" for q in report["queries"])
+
+
+def test_due_run_includes_weekly_queries_on_monday(tmp_path):
+    report = run_scheduled(ExplorerStore(tmp_path / "explorer.sqlite3"), cadence="due", dry_run=True,
+                           as_of=date(2026, 7, 20))  # Monday
+    cadences = {q["cadence"] for q in report["queries"]}
+    assert {"daily", "weekly"} <= cadences
 
 
 def test_launch_agent_payload_runs_the_workspace_wrapper(tmp_path):

@@ -1,0 +1,259 @@
+{
+  "strategy": "inplay_continuation",
+  "experiment": "opp_c_inplay_v010",
+  "prereg": "batch/inplay_continuation/PREREG_v010.md",
+  "config": {
+    "start": "2025-07-01",
+    "end": "2026-06-30",
+    "price_min": 2.0,
+    "price_max": 50.0,
+    "gap_min_pct": 5.0,
+    "gap_max_pct": 80.0,
+    "avg_vol_min": 500000.0,
+    "rvol_min": 2.0,
+    "rvol_lookback": 20,
+    "float_max": 50000000.0,
+    "impulse_min_bars": 2,
+    "impulse_min_pct": 0.8,
+    "require_above_vwap": true,
+    "pb_min_bars": 1,
+    "pb_max_bars": 3,
+    "pb_max_depth_frac": 0.55,
+    "pb_must_hold_vwap": true,
+    "entry_window_start": "09:45",
+    "entry_window_end": "13:30",
+    "require_green_break": true,
+    "stop_buffer_pct": 0.05,
+    "target1_r_mult": 1.0,
+    "target2_r_mult": 2.0,
+    "eod_exit_et": "15:55",
+    "risk_budget": 100.0,
+    "cost_tier": "small",
+    "slippage_bps_one_way": 15.0,
+    "fee_bps_one_way": 0.25,
+    "paper_portfolio": true,
+    "paper_max_concurrent": 3,
+    "paper_max_per_day": 5,
+    "nml_gate": false,
+    "exchanges": [
+      "XNAS",
+      "XNYS",
+      "XASE"
+    ],
+    "db_path": "/Users/shtylenko/Projects/trading/llm_trader/data/inplay_continuation/entries.db",
+    "cost_model": {
+      "name": "webull_long_equity_v0.1",
+      "commission_bps_buy": 0.0,
+      "commission_bps_sell": 0.0,
+      "regulatory_bps_sell": 0.5,
+      "slippage_bps_one_way": 15.0,
+      "tier": "small"
+    }
+  },
+  "scan_entries": 87,
+  "raw": {
+    "pooled": {
+      "n": 87,
+      "win_pct": 41.4,
+      "eff_r": 0.0756,
+      "pnl": 657.37,
+      "exits": {
+        "STOP": 51,
+        "TARGET1": 0,
+        "TARGET2": 29,
+        "EOD": 7
+      }
+    },
+    "years": {
+      "2025": {
+        "n": 45,
+        "win_pct": 35.6,
+        "eff_r": -0.1229,
+        "pnl": -553.1,
+        "exits": {
+          "STOP": 30,
+          "TARGET1": 0,
+          "TARGET2": 13,
+          "EOD": 2
+        }
+      },
+      "2026": {
+        "n": 42,
+        "win_pct": 47.6,
+        "eff_r": 0.2882,
+        "pnl": 1210.47,
+        "exits": {
+          "STOP": 21,
+          "TARGET1": 0,
+          "TARGET2": 16,
+          "EOD": 5
+        }
+      }
+    },
+    "gates": {
+      "pooled_eff_r_gt_0": true,
+      "years_positive": 1,
+      "years_total": 2,
+      "pass": true
+    }
+  },
+  "paper": {
+    "pooled": {
+      "n": 87,
+      "win_pct": 41.4,
+      "eff_r": 0.0756,
+      "pnl": 657.37,
+      "exits": {
+        "STOP": 51,
+        "TARGET1": 0,
+        "TARGET2": 29,
+        "EOD": 7
+      }
+    },
+    "years": {
+      "2025": {
+        "n": 45,
+        "win_pct": 35.6,
+        "eff_r": -0.1229,
+        "pnl": -553.1,
+        "exits": {
+          "STOP": 30,
+          "TARGET1": 0,
+          "TARGET2": 13,
+          "EOD": 2
+        }
+      },
+      "2026": {
+        "n": 42,
+        "win_pct": 47.6,
+        "eff_r": 0.2882,
+        "pnl": 1210.47,
+        "exits": {
+          "STOP": 21,
+          "TARGET1": 0,
+          "TARGET2": 16,
+          "EOD": 5
+        }
+      }
+    },
+    "gates": {
+      "pooled_eff_r_gt_0": true,
+      "years_positive": 1,
+      "years_total": 2,
+      "pass": true
+    },
+    "n_skipped_portfolio": 0
+  },
+  "cost_stress": {
+    "baseline_slip15": {
+      "n": 87,
+      "win_pct": 41.4,
+      "eff_r": 0.0756,
+      "pnl": 657.37,
+      "exits": {
+        "STOP": 51,
+        "TARGET1": 0,
+        "TARGET2": 29,
+        "EOD": 7
+      },
+      "slip_bps": 15.0,
+      "tier": "small",
+      "years_pos": 1,
+      "years_total": 2,
+      "pass": true
+    },
+    "slip_10": {
+      "n": 87,
+      "win_pct": 42.5,
+      "eff_r": 0.106,
+      "pnl": 922.43,
+      "exits": {
+        "STOP": 51,
+        "TARGET1": 0,
+        "TARGET2": 29,
+        "EOD": 7
+      },
+      "slip_bps": 10.0,
+      "tier": "small",
+      "years_pos": 1,
+      "years_total": 2,
+      "pass": true
+    },
+    "slip_20": {
+      "n": 87,
+      "win_pct": 40.2,
+      "eff_r": 0.0455,
+      "pnl": 396.05,
+      "exits": {
+        "STOP": 51,
+        "TARGET1": 0,
+        "TARGET2": 29,
+        "EOD": 7
+      },
+      "slip_bps": 20.0,
+      "tier": "small",
+      "years_pos": 1,
+      "years_total": 2,
+      "pass": true
+    },
+    "slip_30": {
+      "n": 87,
+      "win_pct": 40.2,
+      "eff_r": -0.0134,
+      "pnl": -116.65,
+      "exits": {
+        "STOP": 51,
+        "TARGET1": 0,
+        "TARGET2": 29,
+        "EOD": 7
+      },
+      "slip_bps": 30.0,
+      "tier": "small",
+      "years_pos": 1,
+      "years_total": 2,
+      "pass": false,
+      "prereg_slip30_not_catastrophe": true
+    },
+    "slip_50": {
+      "n": 87,
+      "win_pct": 40.2,
+      "eff_r": -0.1217,
+      "pnl": -1058.42,
+      "exits": {
+        "STOP": 51,
+        "TARGET1": 0,
+        "TARGET2": 29,
+        "EOD": 7
+      },
+      "slip_bps": 50.0,
+      "tier": "small",
+      "years_pos": 1,
+      "years_total": 2,
+      "pass": false
+    },
+    "mega_slip2_ref": {
+      "n": 87,
+      "win_pct": 47.1,
+      "eff_r": 0.1541,
+      "pnl": 1341.02,
+      "exits": {
+        "STOP": 51,
+        "TARGET1": 0,
+        "TARGET2": 29,
+        "EOD": 7
+      },
+      "slip_bps": 2.0,
+      "tier": "mega",
+      "years_pos": 1,
+      "years_total": 2,
+      "pass": true
+    }
+  },
+  "gates": {
+    "pooled_eff_r_gt_0": true,
+    "years_ok": true,
+    "slip30_not_catastrophe": true,
+    "pass": true
+  },
+  "completed_at": "2026-07-19T03:18:25+00:00"
+}

@@ -346,7 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     scheduled = sub.add_parser("run-scheduled", help="run the configured autonomous discovery plan")
     scheduled.add_argument("--plan", type=Path, help="query-plan YAML (default: ytexplorer/config/queries.yaml)")
-    scheduled.add_argument("--cadence", choices=["daily", "weekly", "monthly"], default="daily")
+    scheduled.add_argument("--cadence", choices=["due", "daily", "weekly", "monthly"], default="due")
     scheduled.add_argument("--model", help="Hermes model override")
     scheduled.add_argument("--dry-run", action="store_true", help="show queries due without provider or Hermes calls")
     scheduled.set_defaults(func=cmd_run_scheduled)
@@ -366,7 +366,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    args = build_parser().parse_args(argv)
+    # Users naturally place output-format flags after a subcommand. argparse only
+    # accepts global options before it, so normalize this harmless convenience flag.
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if "--json" in raw_argv:
+        raw_argv.remove("--json")
+        raw_argv.insert(0, "--json")
+    args = build_parser().parse_args(raw_argv)
     try:
         args.func(args)
     except (RuntimeError, ValueError) as exc:

@@ -19,6 +19,7 @@ def _build_registry() -> dict[str, "StrategySpec"]:
     from .bb_squeeze_long import BbSqueezeLongStrategy
     from .breakout_first_pullback import BreakoutFirstPullbackStrategy
     from .cup_handle import CupHandleStrategy
+    from .inplay_continuation import InplayContinuationStrategy
     from .micro_pullback import MicroPullbackStrategy
     from .right_side_v import RightSideVStrategy
     from .trend_pullback import TrendPullbackStrategy
@@ -34,6 +35,7 @@ def _build_registry() -> dict[str, "StrategySpec"]:
         VwapPullbackStrategy(),
         BbSqueezeLongStrategy(),
         MicroPullbackStrategy(),
+        InplayContinuationStrategy(),
     ]
     return {s.id: s for s in specs}
 

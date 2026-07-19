@@ -5,22 +5,27 @@ in `llm_trader` (and not already exhausted as near-identical molds in `lab`), ba
 the Lance Breitstein strategy inventory (`library/lance/lance_strategies.md`) vs current
 coverage in `llm_trader` + `lab`.
 
-**Constraints (product mandate):** long-only equities · no shorting · no futures · no options.
+**Constraints (product mandate):** long-only equities · no shorting · no futures · no options
+(options path optional later under Opportunity F — not default).
 
-**Active focus (2026-07):** **short-hold / same-day only.** Multi-day Lance scanners
-(`trend_pullback`, `breakout_first_pullback`, multi-day `right_side_v`) are **PARKED**
-after multi-year FAILs. Do not prioritize new multi-day TA families unless evidence changes.
+**Broker default (research economics):** **WeBull US long equity** — $0 commission on
+stocks/ETFs; mandatory sell-side regulatory pass-through only; **slippage/spread is the
+real cost.** Model: `costs/webull.py`. Free commission does **not** revive E0-failed
+liquid micro/VWAP.
 
-**How to add a family:** follow [`MULTI_STRATEGY.md`](MULTI_STRATEGY.md) (symmetric
-`strategies/<id>/` layout, skills tree, batch holdouts). Do not fold new patterns into
-`warrior` or `cup_handle` unless they are true variants of those canons.
+**Active focus (2026-07+):** **Opportunity track** after liquid short-hold integrity kill
+(E0 causal RVOL FAIL). Hunt where WeBull economics + selection + harder venues can pay.
+Do **not** resurrect parked leak-contaminated or E0-failed detectors via retunes.
+
+**How to add a family:** follow [`MULTI_STRATEGY.md`](MULTI_STRATEGY.md). Pre-register
+before any result-producing run. Causal screens only. Report notional bps + actual-risk R.
 
 **Related docs:**
-- Platform backlog (skill methodology, not new strategies): [`BACKLOG.md`](BACKLOG.md)
-- Implemented families: `warrior`, `cup_handle` (see README)
-- Lab kills / promotes (do not re-spend sealed years): `../lab/validation/STRATEGY_SYNTHESIS.md`,
-  family `backlog.md` files under `../lab/strategies/`
-
+- Short-hold freeze / E0: [`batch/SHORT_HOLD_PAPER.md`](batch/SHORT_HOLD_PAPER.md),
+  [`batch/micro_pullback/PREREG_CAUSAL_E0.md`](batch/micro_pullback/PREREG_CAUSAL_E0.md)
+- Peer reviews: `peer_reviews/2026-07-18-new-strategies/`
+- Platform backlog: [`BACKLOG.md`](BACKLOG.md)
+- Lab kills: `../lab/validation/STRATEGY_SYNTHESIS.md`
 ---
 
 ## Already implemented (out of roadmap)
@@ -66,7 +71,7 @@ duplicate a killed lab family and fit sealed scan + paper-trade in this package.
 | **Horizon** | Same-day |
 | **Scanner sketch** | RVOL + gap or trend filter → first clean VWAP touch/reclaim in defined window (e.g. 10:00–14:00) |
 | **Skill focus** | One primary entry; no chase far above VWAP; flatten EOD |
-| **Status** | **Research only** — multi-year PASS thin (+0.024); **fails cost stress** at 3× slip / fee2+slip4. See multiyear RESULTS + COST_STRESS |
+| **Status** | **PARKED** — contaminated thin PASS invalidated (full-day RVOL); not re-promoted after E0. See multiyear + peer reviews |
 
 ### 3. `bb_squeeze_long` — Bollinger squeeze → long expansion only
 
@@ -95,12 +100,104 @@ duplicate a killed lab family and fit sealed scan + paper-trade in this package.
 
 | Pattern | Lance / Ross adjacency | Status |
 |---|---|---|
-| **Micro-pullback long** | Short-hold continuation after first pause | **Shipped as `micro_pullback` family** — multi-year PASS (+0.029; 4/4 years); cost-fragile. See `batch/micro_pullback/multiyear/RESULTS.md`. Liquid-universe gate (not warrior pennies). |
-| **VWAP reclaim after washout** | Overlaps `vwap_pullback` — prefer one shared pattern module | Covered by `vwap_pullback` research baseline |
+| **Micro-pullback long** | Short-hold continuation after first pause | **Shipped → PARKED** after E0 causal FAIL (−0.035, 0/4). Contaminated PASS invalid. See `multiyear_causal/RESULTS.md` |
+| **VWAP reclaim after washout** | Overlaps `vwap_pullback` | PARKED with VWAP book (leak class) |
 | **Flat-top / multi-bar base** beyond single ACD | Still long breakout, better structure | Thin / partial |
 
 Optional later: port `micro_pullback` detector onto warrior small-cap gap screen once
 point-in-time float multi-year is available.
+
+---
+
+## Active opportunity track (post-E0 — execute this)
+
+**Context:** Liquid take-all short-holds died under causal screens. Traders still make
+money elsewhere (selection, harder venues, risk premium, process). WeBull $0 commission
+helps high-turnover longs; **slip still binds**. Free commission does not un-kill E0.
+
+**Rules for this track:**
+1. Pre-reg before runs; one evidentiary shot per version  
+2. Causal features only (no full-day volume for intraday admission)  
+3. WeBull cost model default; slip stress by liquidity tier  
+4. No resurrecting parked families via threshold nibble  
+5. Smoke/n30 = code validation only — not promotion evidence  
+
+### Opp A — `costs/webull` research default (Phase 0) — **EXECUTE FIRST**
+
+| | |
+|---|---|
+| **Thesis** | Judge ideas on *your* friction: $0 commission, tiny sell regulatory, tiered slip |
+| **Deliverable** | `costs/webull.py` (+ stress grid helpers); all new families import it |
+| **Kill / success** | Success = module + tests + documented defaults. Not a PnL gate |
+| **Status** | **DONE** — `costs/webull.py` + tests |
+
+### Opp B — Selection layer (not take-every-setup)
+
+| | |
+|---|---|
+| **Thesis** | Scanners lose because they force all hits; edge may live in top-quantile days only |
+| **Ideas (pre-register one)** | Causal time-of-day RVOL; max 1–2 names/day; SPY regime admission; first signal only |
+| **Attach to** | New families (e.g. Opp C), not retune of parked micro |
+| **Status** | Not started — after Opp C base exists |
+
+### Opp C — `inplay_continuation` (harder venue / gap in-play) — **Phase 1 AFTER A**
+
+| | |
+|---|---|
+| **Thesis** | Edge is in catalyst/gap small–mid caps, not mega-cap liquid take-all |
+| **Window** | Rolling ~12 months only (current float OK with warrior-style caveat) |
+| **Screen** | Gap ≥ 5%, price $2–50, ADV floor, **causal** prior-day or time-of-day RVOL |
+| **Pattern (v0.1.0 one only)** | Opening impulse → 1–3 bar micro-pb holding VWAP → green break (same geometry as micro, **new universe + WeBull costs + high slip stress**) |
+| **Costs** | WeBull commission 0 + sell regulatory; slip baseline **15 bps** one-way (small/mid); stress 30 / 50 |
+| **Gates** | Pooled effR > 0; ≥2 calendar periods > 0 if multi-period; fail if only works at fantasy 2 bps slip |
+| **Status** | **Probe PASS (thin)** — n=87, effR +0.076 @ slip15; **2025 −0.12 / 2026 +0.29** (unstable). Slip30 ~0. See `batch/inplay_continuation/probe_12m/RESULTS.md`. **No capital**; next Opp B selection or kill if selection fails |
+| **Do not** | Claim multi-year without PIT float; claim Ross validation without catalyst feed |
+
+### Opp D — Overnight / multi-day with *new* thesis (not failed TA scanners)
+
+| | |
+|---|---|
+| **Thesis** | Overnight equity risk premium / event drift can pay; failed scanners were loose take-all mega-cap TA |
+| **Candidates** | Earnings/gap-hold; sparse weekly trend + regime; ETF relative (later) |
+| **Status** | Backlog — after Opp C probe result |
+| **Still parked** | `trend_pullback`, `breakout_first_pullback`, multi-day `right_side_v` as shipped |
+
+### Opp E — Boring baseline (process scoreboard)
+
+| | |
+|---|---|
+| **Thesis** | Clever systems must beat a simple long process under WeBull costs |
+| **Example** | Rules-based liquid ETF hold / trend with hard daily loss and trade caps |
+| **Status** | Backlog — define after cost module ships |
+
+### Opp F — Options (WeBull)
+
+| | |
+|---|---|
+| **Thesis** | Defined-risk long premium or spreads — different skill tree |
+| **Note** | Verify contract/exchange fees even if “$0 commission”; bid/ask brutal |
+| **Status** | Explicitly **deferred** — not next |
+
+### Opp G — Process automation (risk / stand-down)
+
+| | |
+|---|---|
+| **Thesis** | Enforce max loss/day, max trades, no revenge size — process edge without holy grail pattern |
+| **Status** | Cross-cutting; attach to any live/paper path later |
+
+### Execution order (binding)
+
+```text
+Phase 0  Opp A   WeBull cost model + tests
+Phase 1  Opp C   inplay_continuation 12m probe (causal + WeBull + high slip)
+Phase 2  Opp B   selection filters on C if base not dead
+Phase 3  Opp E   boring baseline scoreboard
+Phase 4  Opp D   only with new structural multi-day thesis + pre-reg
+Defer    Opp F   options
+Always   Opp G   process caps when any paper path exists
+
+PARKED forever without new thesis: liquid micro/VWAP/BB take-all, multi-day TA as shipped
+```
 
 ---
 
@@ -186,28 +283,19 @@ parity; list so they are not confused with the above.
 ## Suggested implementation order
 
 ```text
-DONE  micro_pullback     multi-year PASS thin (+0.029; 4/4); cost-fragile
-DONE  vwap_pullback      multi-year PASS thin (+0.024; 3/4); cost-fragile
-DONE  bb_squeeze_long    multi-year FAIL (−0.011; 0/4) — PARKED
-DONE  right_side_v / trend_pullback / breakout_first_pullback — multi-year FAIL PARKED
+=== CLOSED CAMPAIGN (2026-07) ===
+DONE  multi-day TA FAIL park (trend / BFP / RSV)
+DONE  bb_squeeze FAIL park; NML v0.1.0 OFF; portfolio packaging keep
+DONE  E0 causal RVOL → micro FAIL → park liquid short-hold take-all
+DONE  code: prior-day RVOL; VWAP causal morning; peer-review trail
 
-Structural gates (done):
-5. no_mans_land A/B                                  NML: do not default-on; portfolio: keep packaging
-
-Integrity (done):
-6. E0 causal RVOL micro multi-year                     **FAIL** −0.035 / 0/4 years → **park liquid short-hold**
-7. Code fixes: prior-day RVOL (micro/vwap/bb/warrior); VWAP causal morning confirm
-
-Historical contaminated paper books (invalid for promotion):
-8. micro/vwap paper packs under `batch/*/paper/` — do not trade
-
-Warrior port (probe only; still parked):
-9. warrior probe FAIL years+; no PIT float
-
-Track closed for detector R&D; next only if new structural thesis + untouched data.
-
-Swing (parked unless structural change):
-9. trend_pullback / BFP / anchored_vwap / multi_tf_trend
+=== ACTIVE (WeBull opportunity track) ===
+DONE  Opp A  costs/webull.py
+DONE  Opp C  inplay 12m probe PASS thin (unstable years) — see probe_12m/
+NEXT  Opp B  selection layer on inplay (pre-reg) OR park C if year split unfixable
+THEN  Opp E  boring baseline
+LATER Opp D  new multi-day thesis only
+DEFER Opp F  options
 ```
 
 Each new family should ship with:
@@ -227,25 +315,26 @@ Do **not** re-open SIP-ORB, gap-and-go, or dominance-flip under new names withou
 
 | Priority | Id | Type | Status |
 |:--:|---|---|---|
-| 1 | `right_side_v` | new family | **PARKED** multi-year FAIL (−0.03) |
-| 1 | `vwap_pullback` | new family | **PARKED** — same full-day RVOL leak class; morning look-ahead fixed in code; not re-promoted after E0 kill |
-| 1 | `bb_squeeze_long` | new family | **PARKED** — multi-year FAIL (−0.011; 0/4 years); n=7149 |
-| 1 | `micro_pullback` | new family (warrior phase-2) | **PARKED** — contaminated PASS invalidated; **E0 causal RVOL FAIL** (−0.035, 0/4 years). See `multiyear_causal/RESULTS.md` |
-| 1 | `no_mans_land` | shared module / filter | **Shipped** — A/B: NML hurts micro/VWAP; **default OFF**; portfolio caps **keep** |
-| 1 | warrior VWAP reclaim | warrior pattern | deferred (prefer `vwap_pullback`) |
-| 2 | `trend_pullback` | new family (swing) | **PARKED** — multi-year FAIL (−0.02) |
-| 2 | `breakout_first_pullback` | new family (swing) | **PARKED** — 0.1.0 FAIL (−0.02); 0.2.0 worse (−0.12) |
-| 2 | `anchored_vwap` | new family | not started |
-| 2 | `multi_tf_trend` | gate / family | not started |
-| 3 | `offer_take_scalp` | blocked (L2) | parked |
-| 3 | `news_reaction` | blocked (news) | parked |
-| 3 | `ipo_suite` | blocked (data) | parked |
-| 3 | `macd_divergence` | filter only | parked |
-| 3 | `trendline_bounce` | low priority | parked |
-| 3 | `fib_50` | confluence only | parked |
+| **0** | `costs/webull` | **Opp A** | **DONE** — `costs/webull.py` |
+| **0** | `inplay_continuation` | **Opp C** | **Probe PASS thin** (+0.076 @15bps; 2025 red). No capital. Next: Opp B or park |
+| **0** | selection layer | **Opp B** | pending (after C base) |
+| **0** | boring baseline | **Opp E** | pending |
+| **0** | process caps | **Opp G** | pending paper path |
+| 1 | `right_side_v` | multi-day | **PARKED** FAIL (−0.03) |
+| 1 | `vwap_pullback` | short-hold | **PARKED** leak + not re-promoted post-E0 |
+| 1 | `bb_squeeze_long` | short-hold | **PARKED** FAIL (−0.011; 0/4) |
+| 1 | `micro_pullback` | short-hold | **PARKED** E0 causal FAIL (−0.035; 0/4) |
+| 1 | `no_mans_land` | filter | shipped; default OFF for short-holds |
+| 2 | `trend_pullback` | swing | **PARKED** FAIL (−0.02) |
+| 2 | `breakout_first_pullback` | swing | **PARKED** FAIL |
+| 2 | `anchored_vwap` | swing | not started (Opp D-adjacent) |
+| 2 | `multi_tf_trend` | gate | not started |
+| 3 | options path | **Opp F** | deferred |
+| 3 | `offer_take_scalp` | L2 | parked |
+| 3 | `news_reaction` | news | parked |
+| 3 | `ipo_suite` | data | parked |
 
 ---
 
-*Source analysis: Lance inventory + audit of `llm_trader` (`warrior`, `cup_handle`) and
-`lab` strategy families / research logs (2026-06…2026-07). Update this file when a family
-ships or a Stage-0 kill retires a row.*
+*Updated 2026-07-19: opportunity track + WeBull economics after E0 integrity kill.
+Source: Lance inventory, peer reviews 2026-07-18, operator broker = WeBull.*

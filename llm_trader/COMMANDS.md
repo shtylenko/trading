@@ -197,3 +197,10 @@ python3 -m trading.llm_trader.strategies.micro_pullback.probe_warrior \
   --start 2025-01-01 --end 2026-06-30
 # results: batch/micro_pullback/warrior_probe/RESULTS.md  (probe FAIL years+)
 
+# WeBull opportunity track
+# Opp A: costs in trading/llm_trader/costs/webull.py
+# Opp C: in-play gap continuation 12m probe
+python3 -m trading.llm_trader.strategies.inplay_continuation.runner \
+  --start 2025-07-01 --end 2026-06-30
+# results: batch/inplay_continuation/probe_12m/RESULTS.md
+

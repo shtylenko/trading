@@ -4,6 +4,7 @@ set -euo pipefail
 
 PROJECT_ROOT="/Users/shtylenko/Projects"
 LOG_DIR="$PROJECT_ROOT/trading/ytexplorer/data/logs"
+export PATH="/Users/shtylenko/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 mkdir -p "$LOG_DIR"
 cd "$PROJECT_ROOT"
 
@@ -17,5 +18,5 @@ if [[ -z "${RAPIDAPI_KEY:-}" ]]; then
   exit 78
 fi
 
-exec /usr/bin/python3 -m trading.ytexplorer.cli run-scheduled --cadence daily --json \
+exec /usr/bin/python3 -m trading.ytexplorer.cli run-scheduled --cadence due --json \
   >> "$LOG_DIR/daily.log" 2>&1

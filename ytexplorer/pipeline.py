@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -67,19 +69,27 @@ def _audit_new_channel(store: ExplorerStore, channel_id: str, *, sample_size: in
 
 def run_scheduled(
     store: ExplorerStore, *, plan_path: Path | str | None = None, cadence: str = "daily",
-    model: str | None = None, dry_run: bool = False,
+    model: str | None = None, dry_run: bool = False, as_of: date | None = None,
 ) -> dict[str, Any]:
     """Run discovery → transcript → Hermes extraction → new-channel audit.
 
     Each unit fails independently and is reported in the job ledger; one malformed
     video or unavailable transcript cannot kill the whole daily run.
     """
-    if cadence not in {"daily", "weekly", "monthly"}:
-        raise ValueError("cadence must be daily, weekly, or monthly")
+    if cadence not in {"due", "daily", "weekly", "monthly"}:
+        raise ValueError("cadence must be due, daily, weekly, or monthly")
     plan = load_plan(plan_path)
-    selected = [q for q in plan["queries"] if q.cadence == cadence]
+    run_date = as_of or datetime.now(ZoneInfo(plan["timezone"])).date()
+    if cadence == "due":
+        selected = [q for q in plan["queries"] if (
+            q.cadence == "daily"
+            or (q.cadence == "weekly" and run_date.weekday() == 0)
+            or (q.cadence == "monthly" and run_date.day == 1)
+        )]
+    else:
+        selected = [q for q in plan["queries"] if q.cadence == cadence]
     if dry_run:
-        return {"mode": "dry-run", "cadence": cadence, "timezone": plan["timezone"],
+        return {"mode": "dry-run", "cadence": cadence, "run_date": run_date.isoformat(), "timezone": plan["timezone"],
                 "queries": [q.__dict__ for q in selected], "limits": plan["daily_limits"]}
 
     from .ytmcp_client import search, transcript
@@ -127,6 +137,6 @@ def run_scheduled(
             ))
         except Exception as exc:
             audit_outcomes.append({"channel_id": channel_id, "status": "error", "error": str(exc)})
-    outcome = {"mode": "run", "cadence": cadence, "timezone": plan["timezone"], "queries": outcomes, "channel_audits": audit_outcomes}
+    outcome = {"mode": "run", "cadence": cadence, "run_date": run_date.isoformat(), "timezone": plan["timezone"], "queries": outcomes, "channel_audits": audit_outcomes}
     store.record_job("scheduled-run", cadence, json.dumps(outcome, sort_keys=True))
     return outcome

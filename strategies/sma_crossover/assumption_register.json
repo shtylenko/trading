@@ -1,0 +1,40 @@
+{
+  "assumption_register": [
+    {
+      "assumption": "The moving average is computed as a simple (arithmetic) moving average of monthly closing prices, not an exponential or weighted variant — no EMA or adaptive MA is substituted."
+    },
+    {
+      "assumption": "A single monthly close crossing the SMA triggers the signal; no consecutive-close or multi-bar confirmation filter is applied on entry or exit."
+    },
+    {
+      "assumption": "The S&P 500 used is the total-return index (including reinvested dividends), not the price-return index — otherwise cash-period missed dividends are a hidden drag."
+    },
+    {
+      "assumption": "The SMA is computed from a trailing window of exactly 10 monthly observations, equally weighted, with the current month's close included in the window that defines the signal for that same month."
+    },
+    {
+      "assumption": "Trades execute at the closing price of the monthly bar that triggers the signal (immediate execution, no look-ahead bias from using same-bar close to generate the signal)."
+    },
+    {
+      "assumption": "During cash periods, capital earns the 90-day Treasury bill rate using the constant-maturity series (e.g., FRED DGS3MO), not a rolling auction-cycle or 13-week bill with decaying maturity."
+    },
+    {
+      "assumption": "The T-bill rate is accrued on a simple (not compounded) basis between monthly rebalancing points, matching the monthly signal cadence."
+    },
+    {
+      "assumption": "The cash-equivalent instrument is a 90-day T-bill specifically, not a money-market fund, cash deposit, or a different short-term government maturity."
+    },
+    {
+      "assumption": "No transaction costs, slippage, commissions, or bid-ask spreads are applied to index entries, exits, or bill rollovers — the backtest is friction-free."
+    },
+    {
+      "assumption": "No tax drag is modelled — all returns are pre-tax, as in a tax-exempt or retirement account."
+    },
+    {
+      "assumption": "The S&P 500 index does not change composition, methodology, or survivorship-bias characteristics over the test period; historical index data is treated as static."
+    },
+    {
+      "assumption": "The T-bill yield can fall to zero or negative without a behavioural or operational floor; the strategy does not impose a zero-rate floor or seek alternative cash instruments when rates are negative."
+    }
+  ]
+}

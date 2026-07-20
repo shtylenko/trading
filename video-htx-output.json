@@ -1,0 +1,66 @@
+{
+  "disposition": "candidate",
+  "rationale": "Long-only equity base-breakout strategy with a structured must-have/would-like-to-have/cannot-have filter system. Rising 20MA under price, tight consolidation base, high-quality overnight gap on daily for directional bias, minimum 2:1 R:R, and a fixed entry-over-base/stop-under-base mechanical structure. Position sizing is formulaic. All conditions are observable from daily OHLCV and gap data, making this testable despite some missing quantitative thresholds.",
+  "claims": [
+    {
+      "claim_type": "setup",
+      "summary": "Rising 20MA under price with a tight consolidation base (narrow range bars, clean, minimal tails). Entry triggered when price breaks above the base high. Pre-entry screening eliminates sloppy bases, time-frame conflicts, spready/low-liquidity stocks, and setups unable to reach 2:1 R:R.",
+      "evidence_start": null,
+      "evidence_end": null,
+      "evidence_fragment_id": "F004",
+      "horizon": "swing",
+      "trigger_rule": "Rising 20-period moving average trading under price and trending higher; a tight consolidation base with narrow range bars and few tails; entry taken over the base high",
+      "invalidation_rule": "Sloppy base with tails throughout; time-frame conflict across daily/hourly/15m/5m; spready conditions or average daily volume below a few million shares; less than 2:1 risk-to-reward potential",
+      "required_data": ["daily OHLCV", "intraday OHLCV (hourly/15m/5m)", "average daily volume"],
+      "missing_fields": ["Quantitative tight-base definition (bar count, range percentage)", "Minimum 20MA slope threshold", "Consecutive bar count for 'rising' MA confirmation"],
+      "extract_confidence": 0.7
+    },
+    {
+      "claim_type": "market_context",
+      "summary": "A high-quality overnight gap on the daily time frame establishes the larger-term bullish bias. The trader checks the gap on the daily chart first, then drops to smaller time frames to find the entry setup.",
+      "evidence_start": null,
+      "evidence_end": null,
+      "evidence_fragment_id": "F006",
+      "horizon": "swing",
+      "trigger_rule": "High-quality overnight gap present on the daily time frame, providing bullish bias before checking lower time frames for a base-breakout entry",
+      "invalidation_rule": null,
+      "required_data": ["daily OHLCV including gap data (open vs previous close)", "intraday data for entry refinement"],
+      "missing_fields": ["Quantitative criteria for 'high-quality' gap (gap percentage, volume confirmation, gap type)", "Minimum gap age or fill condition", "Decision rule if gap is absent"],
+      "extract_confidence": 0.6
+    },
+    {
+      "claim_type": "exit",
+      "summary": "Fixed exit structure: entry is over the base high, stop-loss is under the base low. Minimum profit target is 2:1 risk-to-reward. Position sizing is share size = risk / (entry price minus stop-loss price), where risk is the dollar amount the trader is psychologically comfortable losing per trade.",
+      "evidence_start": null,
+      "evidence_end": null,
+      "evidence_fragment_id": "F020",
+      "horizon": "swing",
+      "trigger_rule": "Entry triggered at price above the base high; stop-loss placed below the base low",
+      "invalidation_rule": "Stop-loss triggers at the base low; trade skipped if setup cannot achieve minimum 2:1 R:R",
+      "required_data": ["daily OHLCV", "entry price", "stop-loss price"],
+      "missing_fields": ["Specific profit-target method (fixed R:R multiple, trailing stop, or partial scale-out)", "Trailing stop or adjustment rules if price moves favorably", "Maximum per-day loss rule (mentioned as concept but no specific threshold)"],
+      "extract_confidence": 0.8
+    }
+  ],
+  "candidate": {
+    "claim_index": 0,
+    "title": "Multi-Filter Base Breakout with Daily Gap Bias",
+    "summary": "A long-only swing strategy that buys breakouts above a tight consolidation base when: (1) the 20MA is rising under price, (2) a high-quality overnight gap on the daily provides bullish bias, (3) volume was low during the base with a spike on breakout, (4) multiple time frames are aligned, and (5) the setup has at least 2:1 R:R. The stop is fixed under the base low, and position size is risk / (entry - stop). The hypothesis is that this multi-factor filter system generates a positive expectancy on US equities without needing intraday Level 2 data.",
+    "priority": 3,
+    "feasibility": "testable",
+    "data_requirements": "Daily and intraday OHLCV (hourly, 15m, 5m) for US equities with average daily volume >1M shares. Gap data computable from daily open vs previous close. Backtesting window of at least 3 years.",
+    "prior_art": "Base-breakout with rising MA is a well-known pattern across many trading methodologies (Minervini VCP, Darvas box, cup-and-handle). The specific must-have filter list plus overnight gap bias adds structure but is not novel in isolation.",
+    "structural_difference": "Not conclusively established from the source alone. The multi-layer filter checklist (must-have / would-like-to-have / cannot-have) with a fixed over-base entry and under-base stop is more systematic than discretionary breakout trading, but shares the same underlying pattern as many published breakout strategies.",
+    "assumption_register": [
+      "Tight base definition: freeze the bar count and range-percentage threshold for consolidation",
+      "Rising 20MA: freeze the slope period and minimum value",
+      "High-quality overnight gap: freeze gap percentage minimum, direction, and age",
+      "Volume conditions: freeze the low-volume base threshold and breakout-volume spike multiple",
+      "Shakeout candle: freeze the definition (bottoming tail, body range, position within base)",
+      "Time frame alignment: freeze which time frames and the alignment criteria",
+      "Minimum R:R threshold: 2:1 fixed minimum",
+      "Profit target: freeze target method (fixed R:R or trailing rule)",
+      "Entry trigger: freeze bar-over-base-high or intraday-breakout threshold"
+    ]
+  }
+}

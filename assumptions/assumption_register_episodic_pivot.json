@@ -1,0 +1,76 @@
+{
+  "assumption_register": [
+    {
+      "id": "ASSM-01",
+      "domain": "pattern-identification",
+      "assumption": "Range expansion is measured as a multi-day ATR multiple or a minimum percentage move relative to the prior contraction range, with a minimum number of expansion candles (e.g., 1–3).",
+      "notes": "The video states 'sudden candles' but provides no threshold. Must freeze: lookback window for baseline ATR, expansion multiplier, and minimum consecutive expansion bars."
+    },
+    {
+      "id": "ASSM-02",
+      "domain": "pattern-identification",
+      "assumption": "Contraction/tightness is defined by a narrowing price range over a minimum number of bars (e.g., 5–20 days), measured as shrinking true range, declining ATR percentile, or a maximum bar-size ratio relative to the prior expansion.",
+      "notes": "The video says 'sideways contraction' with no numeric definition. Must freeze: contraction measurement method, minimum contraction days, and maximum allowable range width."
+    },
+    {
+      "id": "ASSM-03",
+      "domain": "entry",
+      "assumption": "The breakout trigger is a close above a defined threshold (e.g., the high of the contraction zone, or a fixed ATR multiple above the contraction's upper boundary). Intraday vs. close-based entry must be specified.",
+      "notes": "The video says 'breaks into a new leg' — ambiguous whether close-only, high-touch, or intraday breach. Must freeze: price confirmation type and threshold."
+    },
+    {
+      "id": "ASSM-04",
+      "domain": "entry",
+      "assumption": "Position sizing (or at minimum the quantity for the initial entry) is fixed and does not vary with the add-on signal after a flat period that does not hit the stop.",
+      "notes": "The video mentions adding after a flat period. Must freeze: whether add-on entries are allowed, size ratio (e.g., 1x initial, 0.5x), and whether the add triggers a new time stop or uses the original one."
+    },
+    {
+      "id": "ASSM-05",
+      "domain": "time-stop",
+      "assumption": "A 'flat day' is defined as one where the daily range or close-to-close change stays within a fixed threshold (e.g., < 0.5 × ATR, or < 2% absolute). The time-stop counter resets or continues across add-on entries.",
+      "notes": "The video says 4–6 flat days invalidates the trade but does not define 'flat'. Must freeze: flat day definition, stop window length (4, 5, or 6 days), and counter behavior on add-on entries."
+    },
+    {
+      "id": "ASSM-06",
+      "domain": "exit",
+      "assumption": "The partial-exit profit target is exactly 20% or 22% (pick one fixed value). Execution is a market or limit order at the open following the close that reaches the threshold.",
+      "notes": "The video says '20–22%'. Must freeze: exact percentage and execution rule (close-of-day touch vs. intraday touch, market vs. limit fill assumption)."
+    },
+    {
+      "id": "ASSM-07",
+      "domain": "exit",
+      "assumption": "The 10-period EMA is calculated on daily closing prices. 'Close below 10 EMA' means the daily close is strictly less than that day's EMA value.",
+      "notes": "The video does not specify EMA input (close vs. HL2 vs. HLC3) or whether 'below' means close-only or intraday. Must freeze: EMA source and confirmation rule."
+    },
+    {
+      "id": "ASSM-08",
+      "domain": "exit",
+      "assumption": "The initial stop-loss is exactly 2.5% below entry price, applied from the open of the bar following entry. It is not adjusted intraday.",
+      "notes": "The video states 2.5% initial stop. Must freeze: whether it is a hard stop or a mental stop, intraday effectiveness, and whether fractional cents are rounded."
+    },
+    {
+      "id": "ASSM-09",
+      "domain": "exit",
+      "assumption": "After the price expands beyond entry (post-breakout uptrend), the trailing stop moves to a profit-protecting level defined as a fixed percentage (e.g., 5% or 10%) below the highest close since entry, or an EMA-based trailing stop. The specific method must be fixed.",
+      "notes": "The video says 'trail stop after expansion into profit — move from 2.5% to 5–10% trailed'. Must freeze: trailing method, activation threshold, and trail distance."
+    },
+    {
+      "id": "ASSM-10",
+      "domain": "exit",
+      "assumption": "The 'sell on close below both 10 and 20 EMA' alternative is either a separate exit regime (selected per-trade) or a supplementary condition that overrides the standard 10-EMA exit. It cannot be both.",
+      "notes": "The video mentions two exit modes without specifying selection rules. Must freeze: rule selection mechanism, or decide one fixed mode for all trades."
+    },
+    {
+      "id": "ASSM-11",
+      "domain": "universe",
+      "assumption": "The trade universe is NSE/BSE liquid equities meeting minimum liquidity, price, and volume thresholds (e.g., average daily turnover > ₹10cr, price > ₹50). No sector, market-cap, or fundamental filter is applied.",
+      "notes": "The video says 'price action alone without fundamentals'. Must freeze: minimum liquidity screen, any survivorship-bias handling, and whether delisted/stagnant stocks are excluded."
+    },
+    {
+      "id": "ASSM-12",
+      "domain": "data",
+      "assumption": "Daily OHLC data is adjusted for corporate actions (splits, bonuses, dividends) consistently across all instruments. EMA recalculation uses the adjusted close series.",
+      "notes": "Not addressed in the video but critical for backtesting fidelity on Indian equities. Must freeze: data source and adjustment method (e.g., adjusted close only, or split-adjusted + dividend-adjusted)."
+    }
+  ]
+}

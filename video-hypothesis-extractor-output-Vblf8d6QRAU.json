@@ -1,0 +1,43 @@
+{
+  "disposition": "candidate",
+  "rationale": "The source describes individual equity technical analysis for swing trading. The PLTR section contains a reasonably mechanical inverted head-and-shoulders breakout setup with stated trigger, target, and a directional invalidation scenario. AMD 464 support and TSLA confirmation-at-support are mentioned but lack complete mechanical rules.",
+  "claims": [
+    {
+      "claim_type": "setup",
+      "summary": "PLTR consolidating between 136 resistance and a rising 21-day EMA, forming an inverted head-and-shoulders pattern with 136 as the neckline.",
+      "evidence_start": null,
+      "evidence_end": null,
+      "evidence_fragment_id": "F016",
+      "horizon": "swing",
+      "trigger_rule": null,
+      "invalidation_rule": null,
+      "required_data": ["PLTR daily OHLCV", "21-day simple moving average"],
+      "missing_fields": ["No minimum consolidation duration stated", "No volume condition for pattern confirmation"],
+      "extract_confidence": 0.85
+    },
+    {
+      "claim_type": "entry",
+      "summary": "A clear upward breakout above 136 resistance (the inverted H&S neckline) triggers a long entry targeting the 160s. A downward breakout of the 21-day EMA invalidates the bullish thesis and targets a pullback to 105.",
+      "evidence_start": null,
+      "evidence_end": null,
+      "evidence_fragment_id": "F017",
+      "horizon": "swing",
+      "trigger_rule": "Price makes a clear upward breakout above 136 resistance (inverted H&S neckline level).",
+      "invalidation_rule": "Price breaks down below the rising 21-day EMA, forming a possible double top pattern and targeting a pullback toward 105.",
+      "required_data": ["PLTR daily OHLCV", "21-day simple moving average", "136 price level", "105 price level", "160s price zone"],
+      "missing_fields": ["What constitutes 'clear breakout' is not defined (close above, % threshold, volume filter)", "No explicit stop-loss level for the entry", "No time limit on holding period"],
+      "extract_confidence": 0.7
+    }
+  ],
+  "candidate": {
+    "claim_index": 1,
+    "title": "PLTR Resistance Neckline Breakout",
+    "summary": "When PLTR is consolidating between a known resistance level (136) and a rising 21-day EMA, with that resistance serving as the neckline of an inverted head-and-shoulders pattern, a clear upward breakout above that level triggers a long entry targeting the prior high zone (~160s). The setup is invalidated if price instead breaks below the 21-day EMA, which targets a deeper pullback toward 105.",
+    "priority": 2,
+    "feasibility": "testable",
+    "data_requirements": "Daily OHLCV for PLTR. No exotic data — standard price, simple moving average, and fixed level detection are sufficient.",
+    "prior_art": "Inverted head-and-shoulders breakout at resistance is a widely documented pattern. Needs prior-art check for a published Long-Only Equity variant.",
+    "structural_difference": "Not established. The setup matches a textbook inverted H&S breakout at a known resistance level; no unique modification or novel filter is described.",
+    "assumption_register": "1) 'Clear' breakout must be operationalized (e.g. close above 136, or 2% above, or two consecutive closes). 2) 21-day EMA must be rising (positive slope). 3) Consolidation between 136 and 21 EMA must precede the breakout. 4) Target is the prior high zone (~160s) not a fixed risk multiple. 5) The invalidation scenario (breakdown below 21 EMA → 105) is not a stop-loss but a directional invalidation."
+  }
+}

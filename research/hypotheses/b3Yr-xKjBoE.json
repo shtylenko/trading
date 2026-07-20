@@ -1,0 +1,6 @@
+{
+  "disposition": "reference",
+  "rationale": "Educational framework describing the three conceptual pillars of a trading system (trend identification, entry/stop/take-profit rules, and probability/edge). No specific mechanical setup, trigger, invalidation, or exit is stated — only general principles that 'a rule must exist.' Lacks the mechanical specificity required for hypothesis extraction.",
+  "claims": [],
+  "candidate": null
+}

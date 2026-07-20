@@ -25,6 +25,7 @@ SKILL_PATH = PACKAGE_DIR / "skills" / "video_hypothesis_extractor"
 REPO_ROOT = PACKAGE_DIR.parent.parent
 DISPOSITIONS = {"candidate", "needs-detail", "reference", "duplicate", "data-blocked", "rejected"}
 CLAIM_TYPES = {"setup", "filter", "entry", "exit", "risk", "market_context"}
+EVIDENCE_FRAGMENT_CHARS = 420
 
 
 class ExtractionError(RuntimeError):
@@ -69,7 +70,38 @@ def _require_string(value: Any, field: str, *, allow_empty: bool = False) -> str
     return value.strip()
 
 
-def validate_result(value: dict[str, Any], transcript: str) -> dict[str, Any]:
+def build_evidence_fragments(text: str, *, max_chars: int = EVIDENCE_FRAGMENT_CHARS) -> list[dict[str, str]]:
+    """Split an excerpt into stable, exact source fragments for model citation.
+
+    The model selects an ID rather than copying text character-for-character.
+    The application resolves that ID back to the original transcript text, so
+    provenance stays strict without fragile quote copying.
+    """
+    fragments: list[dict[str, str]] = []
+    start = 0
+    while start < len(text):
+        while start < len(text) and text[start].isspace():
+            start += 1
+        if start >= len(text):
+            break
+        end = min(len(text), start + max_chars)
+        if end < len(text):
+            boundary = max(text.rfind(" ", start + max_chars // 2, end), text.rfind("\n", start + max_chars // 2, end))
+            if boundary > start:
+                end = boundary
+        fragment = text[start:end].strip()
+        if fragment:
+            fragments.append({"id": f"F{len(fragments) + 1:03d}", "text": fragment})
+        start = max(end, start + 1)
+    return fragments
+
+
+def validate_result(
+    value: dict[str, Any],
+    transcript: str,
+    *,
+    evidence_fragments: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     """Validate LLM output and prove each cited quote came from this transcript."""
     disposition = value.get("disposition")
     if disposition not in DISPOSITIONS:
@@ -79,6 +111,7 @@ def validate_result(value: dict[str, Any], transcript: str) -> dict[str, Any]:
     if not isinstance(raw_claims, list) or len(raw_claims) > 3:
         raise ExtractionError("claims must be a list with at most three items")
     transcript_normal = _normal(transcript)
+    fragment_text = {fragment["id"]: fragment["text"] for fragment in evidence_fragments or []}
     claims: list[dict[str, Any]] = []
     for i, raw in enumerate(raw_claims):
         if not isinstance(raw, dict):
@@ -86,9 +119,15 @@ def validate_result(value: dict[str, Any], transcript: str) -> dict[str, Any]:
         claim_type = raw.get("claim_type")
         if claim_type not in CLAIM_TYPES:
             raise ExtractionError(f"claim {i} has invalid claim_type")
-        quote = _require_string(raw.get("evidence_quote"), f"claims[{i}].evidence_quote")
-        if _normal(quote) not in transcript_normal:
-            raise ExtractionError(f"claim {i} evidence_quote is not an exact transcript excerpt")
+        fragment_id = raw.get("evidence_fragment_id")
+        if fragment_text and isinstance(fragment_id, str) and fragment_id in fragment_text:
+            quote = fragment_text[fragment_id]
+        else:
+            # Legacy/recovery compatibility. New prompts require fragment IDs;
+            # strict literal validation remains for historical output.
+            quote = _require_string(raw.get("evidence_quote"), f"claims[{i}].evidence_quote")
+            if _normal(quote) not in transcript_normal:
+                raise ExtractionError(f"claim {i} evidence_quote is not an exact transcript excerpt")
         confidence = raw.get("extract_confidence")
         if not isinstance(confidence, (int, float)) or not 0 <= float(confidence) <= 1:
             raise ExtractionError(f"claim {i} extract_confidence must be 0..1")
@@ -183,7 +222,7 @@ def select_relevant_excerpt(transcript: str, *, max_chars: int = 9000) -> str:
     return best
 
 
-def build_prompt(video: dict[str, Any], excerpt: str) -> str:
+def build_prompt(video: dict[str, Any], excerpt: str, evidence_fragments: list[dict[str, str]]) -> str:
     skill = (SKILL_PATH / "SKILL.md").read_text(encoding="utf-8")
     return f"""Process exactly one YouTube transcript. The version-controlled skill below is part of this task;
 follow it exactly even if no Hermes profile skill has that name.
@@ -198,10 +237,13 @@ Video metadata:
 - channel: {video['channel_title']}
 - source URL: {video.get('url') or 'unknown'}
 
-Analyze only this bounded transcript excerpt (it may not represent the whole video):
---- BEGIN TRANSCRIPT EXCERPT ---
-{excerpt}
---- END TRANSCRIPT EXCERPT ---
+Analyze only this bounded transcript excerpt (it may not represent the whole video).
+For every claim, return one `evidence_fragment_id` from the numbered source
+fragments below. Do not return `evidence_quote`; the application resolves the
+fragment ID to exact source text. If no fragment supports a claim, omit it.
+--- BEGIN NUMBERED SOURCE FRAGMENTS ---
+{chr(10).join(f"[{fragment['id']}] {fragment['text']}" for fragment in evidence_fragments)}
+--- END NUMBERED SOURCE FRAGMENTS ---
 
 Research scope: this system only investigates long-only equity strategies. If
 the source is primarily about futures, options, or short selling, return the
@@ -297,12 +339,13 @@ class HermesExtractor:
         if not transcript or not video.get("transcript_hash"):
             raise ExtractionError(f"video {video_id} has no downloaded transcript")
         excerpt = select_relevant_excerpt(transcript)
+        evidence_fragments = build_evidence_fragments(excerpt)
         excerpt_hash = _digest_text(excerpt)
         skill_hash = self.skill_hash
         if not force and self.store.extraction_exists(video_id, excerpt_hash, skill_hash):
             return ExtractionResult(video_id=video_id, status="skipped", skipped=True, detail="same bounded excerpt and skill already extracted")
 
-        prompt = build_prompt(video, excerpt)
+        prompt = build_prompt(video, excerpt, evidence_fragments)
         prompt_hash = _digest_text(prompt)
         cmd = ["hermes", "-z", prompt, "--safe-mode"]
         # A deployed Hermes profile may register the same skill by name. The prompt
@@ -331,7 +374,7 @@ class HermesExtractor:
                                          prompt_hash=prompt_hash, status="error", raw_response=raw, error=error)
             raise ExtractionError(f"Hermes extraction failed: {error}")
         try:
-            parsed = validate_result(_parse_json(raw), excerpt)
+            parsed = validate_result(_parse_json(raw), excerpt, evidence_fragments=evidence_fragments)
         except ExtractionError as exc:
             # The most common failure is a useful extraction with a paraphrased
             # citation. Repair only the quotes, then validate strictly again.
@@ -341,7 +384,7 @@ class HermesExtractor:
                 raise
             try:
                 repaired_raw = self._repair_quotes(raw, excerpt, model=model, timeout=timeout)
-                parsed = validate_result(_parse_json(repaired_raw), excerpt)
+                parsed = validate_result(_parse_json(repaired_raw), excerpt, evidence_fragments=evidence_fragments)
                 raw = raw + "\n\n--- QUOTE REPAIR ---\n" + repaired_raw
             except (ExtractionError, subprocess.TimeoutExpired) as repair_exc:
                 self.store.record_extraction(video_id=video_id, transcript_hash=excerpt_hash, model=model, skill_hash=skill_hash,

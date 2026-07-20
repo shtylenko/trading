@@ -180,6 +180,18 @@ class ExplorerStore:
                     completed_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_llm_extractions_video ON llm_extractions(video_id, completed_at DESC);
+                CREATE TABLE IF NOT EXISTS metadata_screenings (
+                    screening_id TEXT PRIMARY KEY,
+                    video_id TEXT NOT NULL REFERENCES videos(video_id),
+                    screen_version TEXT NOT NULL,
+                    model TEXT,
+                    prompt_hash TEXT NOT NULL,
+                    verdict TEXT NOT NULL,
+                    score REAL NOT NULL,
+                    rationale TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_metadata_screenings_video ON metadata_screenings(video_id, created_at DESC);
                 CREATE TABLE IF NOT EXISTS pipeline_runs (
                     run_id TEXT PRIMARY KEY,
                     cadence TEXT NOT NULL,
@@ -343,6 +355,34 @@ class ExplorerStore:
                 (f"error: {message[:160]}", utc_now(), video_id),
             )
 
+    def reserve_transcript_downloads(self, video_ids: list[str]) -> list[str]:
+        """Atomically claim pending videos so overlapping workers cannot duplicate work."""
+        if not video_ids:
+            return []
+        self.init()
+        reserved: list[str] = []
+        with self.connect() as conn:
+            now = utc_now()
+            for video_id in video_ids:
+                result = conn.execute(
+                    """UPDATE videos SET transcript_status='processing', updated_at=?
+                       WHERE video_id=? AND transcript_status='pending' AND status='new'""",
+                    (now, video_id),
+                )
+                if result.rowcount:
+                    reserved.append(video_id)
+        return reserved
+
+    def release_transcript_reservation(self, video_id: str) -> None:
+        """Return a video to the backlog after an unexpected transient worker failure."""
+        self.init()
+        with self.connect() as conn:
+            conn.execute(
+                """UPDATE videos SET transcript_status='pending', updated_at=?
+                   WHERE video_id=? AND transcript_status='processing'""",
+                (utc_now(), video_id),
+            )
+
     def mark_video_out_of_scope(self, video_id: str) -> None:
         """Keep discovered metadata visible while preventing later evaluation."""
         self.init()
@@ -486,6 +526,39 @@ class ExplorerStore:
                  raw_response, _json(parsed) if parsed is not None else None, error, now, now),
             )
         return extraction_id
+
+    def record_metadata_screenings(
+        self,
+        decisions: dict[str, dict[str, Any]],
+        *,
+        model: str | None,
+        prompt_hash: str,
+        screen_version: str,
+    ) -> None:
+        if not decisions:
+            return
+        self.init()
+        now = utc_now()
+        with self.connect() as conn:
+            for video_id, decision in decisions.items():
+                conn.execute(
+                    """INSERT INTO metadata_screenings
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        f"scr_{uuid.uuid4().hex[:12]}", video_id, screen_version, model, prompt_hash,
+                        decision["verdict"], float(decision["score"]), decision["reason"], now,
+                    ),
+                )
+
+    def metadata_screenings_for_video(self, video_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        self.init()
+        with self.connect() as conn:
+            return self._rows(conn.execute(
+                """SELECT screen_version, model, verdict, score, rationale, created_at
+                   FROM metadata_screenings WHERE video_id=?
+                   ORDER BY created_at DESC, rowid DESC LIMIT ?""",
+                (video_id, limit),
+            ).fetchall())
 
     def extractions_for_video(self, video_id: str) -> list[dict[str, Any]]:
         self.init()

@@ -14,9 +14,9 @@ commentary, tool output, or code fences.
 
 1. Extract only what the speaker actually says. Do not repair an ambiguous rule
    with general trading knowledge.
-2. For every claim, copy a short exact `evidence_quote` from the transcript.
-   Do not paraphrase in this field. If the source has no usable quote, omit the
-   claim.
+2. For every claim, select the supplied `evidence_fragment_id`. The application
+   resolves that ID to exact source text; never paraphrase a quote or invent an
+   ID. If the source has no usable fragment, omit the claim.
 3. The transcript is cleaned text and may not preserve subtitle timings. Always
    return `evidence_start` and `evidence_end` as `null`; never invent a time.
 4. A claim is testable only if its observable context, causal trigger, and
@@ -61,7 +61,7 @@ either an invalidation or exit; otherwise choose `needs-detail` or `reference`.
       "summary": "brief factual summary",
       "evidence_start": null,
       "evidence_end": null,
-      "evidence_quote": "exact contiguous excerpt from the transcript",
+      "evidence_fragment_id": "F001",
       "horizon": "intraday | overnight | swing | unknown",
       "trigger_rule": "source-stated rule or null",
       "invalidation_rule": "source-stated rule or null",

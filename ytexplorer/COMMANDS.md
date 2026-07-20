@@ -28,9 +28,10 @@ and a sufficiently explicit rule before it can become a Research Candidate.
 
 The configured daily plan lives in [config/queries.yaml](config/queries.yaml).
 It searches the current long-only trading topics for videos from the last week.
-For each query, it stores all returned videos in **Inbox**, ranks them using
-their title/description, then spends the configured Hermes budget on the best
-few.
+For each query, it stores all returned videos in **Inbox**, excludes out-of-
+scope futures/options/short-side material, then asks Hermes to screen the
+remaining metadata in a small batch. The screen is stored for audit and ranks
+which videos receive transcript/Hermes extraction capacity.
 
 The installed macOS scheduler runs this automatically. To run the same process
 immediately:
@@ -112,10 +113,11 @@ select a bounded, ranked batch instead.
 
 ## 4. Process historical Inbox videos
 
-`process-backfill` selects pending historical videos by rule-language score,
-downloads their transcripts, and runs Hermes. A completed video becomes either
-cited evidence, a Research Candidate, or a source that is recorded as a
-reference/rejection.
+`process-backfill` atomically reserves pending historical videos so overlapping
+workers cannot duplicate work. It applies the long-only scope filter, uses the
+auditable metadata screen to rank the shortlist, downloads transcripts, and
+runs Hermes. A completed video becomes either cited evidence, a Research
+Candidate, or a source that is recorded as a reference/rejection.
 
 ```bash
 # Process ten historical videos now.
@@ -141,10 +143,12 @@ needed.
 ## 5. What Hermes does with a transcript
 
 For each selected video, Hermes receives a bounded strategy-dense excerpt and
-the checked-in extraction skill. Its JSON is validated before anything is
-queued:
+the checked-in extraction skill. The excerpt is split into numbered exact
+source fragments; Hermes cites fragment IDs rather than copying text. The
+application resolves those IDs back to source text before saving anything.
+Its JSON is validated before anything is queued:
 
-1. Every evidence quote must be an exact contiguous excerpt of the transcript.
+1. Every evidence fragment is exact contiguous source text from the transcript.
 2. Claims describe a setup, entry, exit, risk rule, filter, or market context.
 3. A candidate needs an observable trigger, protection/exit information, and
    named data requirements. Missing pieces are labelled `needs-detail`; Hermes
@@ -167,7 +171,9 @@ python3 -m trading.ytexplorer.cli --json recover --limit 8 --promote-limit 20
 ```
 
 `recover` retries invalid extractions and can promote existing evidence bundles
-to transparent `needs-detail` cards. It does not fabricate missing rules.
+to transparent `needs-detail` cards. It does not fabricate missing rules. The
+daily scheduler also retries a small configured number of invalid extractions
+automatically, using the current extractor version.
 
 ## 7. Inspect results
 

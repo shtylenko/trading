@@ -41,7 +41,8 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
         if video is None:
             raise HTTPException(404, "unknown video")
         return render(request, "video_detail.html", video=video, claims=store.claims_for_video(video_id),
-                      extractions=store.extractions_for_video(video_id))
+                      extractions=store.extractions_for_video(video_id),
+                      screenings=store.metadata_screenings_for_video(video_id))
 
     @app.get("/channels", response_class=HTMLResponse)
     def channels(request: Request, status: Optional[str] = None):

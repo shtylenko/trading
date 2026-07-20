@@ -5,7 +5,14 @@ import subprocess
 
 import pytest
 
-from trading.ytexplorer.llm_engine import ExtractionError, HermesExtractor, promote_needs_detail, select_relevant_excerpt
+from trading.ytexplorer.metadata_screening import parse_screen_response
+from trading.ytexplorer.llm_engine import (
+    ExtractionError,
+    HermesExtractor,
+    build_evidence_fragments,
+    promote_needs_detail,
+    select_relevant_excerpt,
+)
 from trading.ytexplorer.store import ExplorerStore
 
 
@@ -133,3 +140,21 @@ def test_relevant_excerpt_is_bounded_and_prefers_rule_dense_passage():
     excerpt = select_relevant_excerpt(bland + useful, max_chars=9000)
     assert len(excerpt) <= 9000
     assert "entry trigger strategy" in excerpt
+
+
+def test_evidence_fragments_are_exact_and_stable():
+    text = "First source rule. " * 80
+    fragments = build_evidence_fragments(text, max_chars=100)
+    assert fragments[0]["id"] == "F001"
+    assert all(fragment["text"] in text for fragment in fragments)
+
+
+def test_metadata_screening_requires_one_valid_decision_per_video():
+    raw = json.dumps({"decisions": [
+        {"video_id": "a", "verdict": "process", "score": 80, "reason": "Explicit entry and stop in title."},
+        {"video_id": "b", "verdict": "defer", "score": 20, "reason": "Generic course."},
+    ]})
+    decisions = parse_screen_response(raw, {"a", "b"})
+    assert decisions["a"]["score"] == 80
+    with pytest.raises(ValueError, match="every supplied video"):
+        parse_screen_response(json.dumps({"decisions": []}), {"a"})

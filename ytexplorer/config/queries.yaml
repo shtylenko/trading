@@ -8,6 +8,10 @@ daily_limits:
   hermes_timeout_seconds: 90
   max_hermes_per_query: 2
   max_backfill_videos_per_run: 10
+  max_recovery_videos_per_run: 2
+  metadata_screen_batch_size: 20
+  max_metadata_screen_videos_per_query: 20
+  max_metadata_screen_videos_per_backfill: 40
 queries:
   - id: day-trading
     query: "day trading"

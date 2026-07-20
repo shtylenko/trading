@@ -180,9 +180,10 @@ def cmd_backfill(args: argparse.Namespace) -> None:
 
 def cmd_process_backfill(args: argparse.Namespace) -> None:
     """Process a bounded batch from the metadata-only historical Inbox."""
-    from .pipeline import process_historical_backfill
+    from .pipeline import load_plan, process_historical_backfill
 
     store = _store(args)
+    limits = load_plan()["daily_limits"]
     run_id = store.start_pipeline_run("historical-backfill")
     progress = _ScheduledProgress(enabled=not args.no_progress)
     try:
@@ -191,6 +192,8 @@ def cmd_process_backfill(args: argparse.Namespace) -> None:
             limit=args.limit,
             model=args.model,
             timeout=args.timeout,
+            metadata_screen_limit=int(limits.get("max_metadata_screen_videos_per_backfill", 40)),
+            metadata_screen_batch_size=int(limits.get("metadata_screen_batch_size", 20)),
             run_id=run_id,
             progress=progress,
         )
@@ -200,6 +203,8 @@ def cmd_process_backfill(args: argparse.Namespace) -> None:
             "limits": {
                 "max_backfill_videos_per_run": args.limit,
                 "hermes_timeout_seconds": args.timeout,
+                "metadata_screen_batch_size": int(limits.get("metadata_screen_batch_size", 20)),
+                "max_metadata_screen_videos_per_backfill": int(limits.get("max_metadata_screen_videos_per_backfill", 40)),
             },
         }
         store.finish_pipeline_run(run_id, status="ok", summary=outcome)
@@ -389,6 +394,10 @@ class _ScheduledProgress:
             self._bar.refresh()
         elif event == "backfill_queued":
             self._bar.set_description(f"Historical Inbox: {update['count']}/{update['pending']} selected")
+            self._bar.total += int(update["count"])
+            self._bar.refresh()
+        elif event == "recovery_queued":
+            self._bar.set_description(f"Recovery: {update['count']} invalid extractions")
             self._bar.total += int(update["count"])
             self._bar.refresh()
         elif event == "video_finished":

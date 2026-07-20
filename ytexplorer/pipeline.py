@@ -61,6 +61,74 @@ def rank_video_for_research(video: dict[str, Any]) -> tuple[int, list[str]]:
     return score, reasons
 
 
+def screen_and_rank_videos(
+    store: ExplorerStore,
+    videos: list[dict[str, Any]],
+    *,
+    screen_limit: int,
+    batch_size: int,
+    model: str | None,
+    timeout: int,
+    run_id: str | None = None,
+    stage: str = "metadata-screen",
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Use the metadata LLM screen as an auditable override of keyword ranking.
+
+    A screen failure is safe: the existing deterministic order remains the
+    fallback. The screener only sees metadata and never creates claims.
+    """
+    baseline = sorted(
+        videos,
+        key=lambda video: (rank_video_for_research(video)[0], video.get("published_at") or "", video.get("view_count") or 0),
+        reverse=True,
+    )
+    to_screen = baseline[:max(0, screen_limit)]
+    decisions: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
+    if to_screen:
+        from .metadata_screening import MetadataScreener
+
+        screener = MetadataScreener(store)
+        for start in range(0, len(to_screen), max(1, batch_size)):
+            batch = to_screen[start:start + max(1, batch_size)]
+            try:
+                decisions.update(screener.screen(batch, model=model, timeout=min(timeout, 45)))
+            except Exception as exc:
+                errors.append(str(exc))
+                if run_id:
+                    store.append_pipeline_event(run_id, stage, f"screen fallback: {exc}", "error")
+    screened_out = 0
+    eligible: list[dict[str, Any]] = []
+    for video in baseline:
+        decision = decisions.get(video["video_id"])
+        if decision and decision["verdict"] == "out-of-scope":
+            store.mark_video_out_of_scope(video["video_id"])
+            screened_out += 1
+            continue
+        if decision:
+            video["metadata_screen"] = decision
+        eligible.append(video)
+    def key(video: dict[str, Any]) -> tuple[float, float, int, str, int]:
+        decision = video.get("metadata_screen") or {}
+        verdict_weight = {"process": 2.0, "defer": 1.0}.get(decision.get("verdict"), 0.5)
+        return (
+            verdict_weight,
+            float(decision.get("score", 0)),
+            rank_video_for_research(video)[0],
+            video.get("published_at") or "",
+            video.get("view_count") or 0,
+        )
+    ranked = sorted(eligible, key=key, reverse=True)
+    summary = {"screened": len(decisions), "screened_out_of_scope": screened_out, "screen_errors": errors}
+    if run_id:
+        store.append_pipeline_event(
+            run_id, stage,
+            f"screened {len(decisions)}/{len(to_screen)} metadata records; {screened_out} out of scope; {len(errors)} fallback batches",
+            "ok" if not errors else "error",
+        )
+    return ranked, summary
+
+
 def load_plan(path: Path | str | None = None) -> dict[str, Any]:
     raw = yaml.safe_load(Path(path or DEFAULT_PLAN_PATH).read_text(encoding="utf-8")) or {}
     if not isinstance(raw.get("queries"), list):
@@ -106,6 +174,8 @@ def process_historical_backfill(
     limit: int,
     model: str | None = None,
     timeout: int = 90,
+    metadata_screen_limit: int = 40,
+    metadata_screen_batch_size: int = 20,
     run_id: str | None = None,
     progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
@@ -128,19 +198,23 @@ def process_historical_backfill(
         else:
             store.mark_video_out_of_scope(video["video_id"])
             out_of_scope += 1
-    ranked = sorted(
+    ranked, screen_summary = screen_and_rank_videos(
+        store,
         eligible,
-        key=lambda video: (
-            rank_video_for_research(video)[0],
-            video.get("published_at") or "",
-            video.get("view_count") or 0,
-        ),
-        reverse=True,
+        screen_limit=max(0, metadata_screen_limit) if limit > 0 else 0,
+        batch_size=max(1, metadata_screen_batch_size),
+        model=model,
+        timeout=timeout,
+        run_id=run_id,
+        stage="historical-metadata-screen",
     )
-    selected = ranked[:max(0, limit)]
+    candidates = ranked[:max(0, limit)]
+    reserved_ids = set(store.reserve_transcript_downloads([video["video_id"] for video in candidates]))
+    selected = [video for video in candidates if video["video_id"] in reserved_ids]
     result: dict[str, Any] = {
         "pending": len(pending),
         "out_of_scope": out_of_scope,
+        **screen_summary,
         "selected": len(selected),
         "transcripts": 0,
         "extracted": 0,
@@ -184,12 +258,59 @@ def process_historical_backfill(
                     "ok" if extraction.status == "ok" else extraction.status,
                 )
         except Exception as exc:
+            store.release_transcript_reservation(video_id)
             result["errors"].append(f"{video_id}: {exc}")
             if run_id:
                 store.append_pipeline_event(run_id, "historical-video", f"{video_id}: {exc}", "error")
         finally:
             if progress is not None:
                 progress({"event": "video_finished", "video_id": video_id, "source": "backfill"})
+    return result
+
+
+def recover_invalid_extractions(
+    store: ExplorerStore,
+    *,
+    limit: int,
+    model: str | None = None,
+    timeout: int = 90,
+    run_id: str | None = None,
+    progress: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Retry a small, automatic lane of invalid historical model output.
+
+    New extractor versions use evidence-fragment IDs, so a forced retry can
+    recover prior quote-copy failures without weakening evidence validation.
+    """
+    video_ids = store.invalid_extraction_video_ids(limit=max(0, limit))
+    result: dict[str, Any] = {"selected": len(video_ids), "recovered": 0, "skipped_scope": 0, "errors": []}
+    if progress is not None:
+        progress({"event": "recovery_queued", "count": len(video_ids)})
+    if run_id:
+        store.append_pipeline_event(run_id, "recovery", f"selected {len(video_ids)} invalid extractions for retry")
+    extractor = HermesExtractor(store)
+    for video_id in video_ids:
+        video = store.get_video(video_id)
+        if video is None:
+            continue
+        in_scope, exclusions = long_only_scope(video)
+        if not in_scope:
+            store.mark_video_out_of_scope(video_id)
+            result["skipped_scope"] += 1
+            continue
+        try:
+            extraction = extractor.extract(video_id, model=model, timeout=timeout, force=True)
+            if extraction.status == "ok":
+                result["recovered"] += 1
+            if run_id:
+                store.append_pipeline_event(run_id, "recovery", f"{video_id}: {extraction.status}", extraction.status)
+        except Exception as exc:
+            result["errors"].append(f"{video_id}: {exc}")
+            if run_id:
+                store.append_pipeline_event(run_id, "recovery", f"{video_id}: {exc}", "error")
+        finally:
+            if progress is not None:
+                progress({"event": "video_finished", "video_id": video_id, "source": "recovery"})
     return result
 
 
@@ -236,7 +357,7 @@ def run_scheduled(
     for query_index, item in enumerate(selected, start=1):
         result: dict[str, Any] = {
             "id": item.id, "query": item.query, "new": 0, "transcripts": 0, "extracted": 0,
-            "ranked_for_extraction": 0, "deferred": 0, "out_of_scope": 0, "errors": [],
+            "ranked_for_extraction": 0, "deferred": 0, "out_of_scope": 0, "metadata_screened": 0, "errors": [],
         }
         report("query_started", index=query_index, total_queries=len(selected), query_id=item.id, query=item.query)
         store.append_pipeline_event(run_id, "search", f"searching {item.id}: {item.query}")
@@ -267,7 +388,19 @@ def run_scheduled(
             else:
                 store.mark_video_out_of_scope(row["video_id"])
                 result["out_of_scope"] += 1
-        ranked = sorted(eligible_rows, key=lambda row: (rank_video_for_research(row)[0], row.get("view_count") or 0), reverse=True)
+        ranked, screen_summary = screen_and_rank_videos(
+            store,
+            eligible_rows,
+            screen_limit=int(limits.get("max_metadata_screen_videos_per_query", 20)),
+            batch_size=int(limits.get("metadata_screen_batch_size", 20)),
+            model=model,
+            timeout=hermes_timeout,
+            run_id=run_id,
+            stage=f"metadata-screen:{item.id}",
+        )
+        result["metadata_screened"] = screen_summary["screened"]
+        result["out_of_scope"] += screen_summary["screened_out_of_scope"]
+        result["errors"].extend(f"metadata screen: {error}" for error in screen_summary["screen_errors"])
         work_rows = ranked[:extraction_budget]
         result["ranked_for_extraction"] = len(work_rows)
         result["deferred"] = max(0, len(eligible_rows) - len(work_rows))
@@ -309,6 +442,16 @@ def run_scheduled(
         limit=backfill_limit,
         model=model,
         timeout=hermes_timeout,
+        metadata_screen_limit=int(limits.get("max_metadata_screen_videos_per_backfill", 40)),
+        metadata_screen_batch_size=int(limits.get("metadata_screen_batch_size", 20)),
+        run_id=run_id,
+        progress=progress,
+    )
+    recovery = recover_invalid_extractions(
+        store,
+        limit=max(0, int(limits.get("max_recovery_videos_per_run", 0))),
+        model=model,
+        timeout=hermes_timeout,
         run_id=run_id,
         progress=progress,
     )
@@ -329,6 +472,7 @@ def run_scheduled(
     outcome = {
         "run_id": run_id, "mode": "run", "cadence": cadence, "run_date": run_date.isoformat(),
         "timezone": plan["timezone"], "queries": outcomes, "historical_backfill": historical_backfill,
+        "recovery": recovery,
         "channel_audits": audit_outcomes,
         "parameters": {
             "queries": [item.__dict__ for item in selected],
@@ -336,6 +480,10 @@ def run_scheduled(
                 "hermes_timeout_seconds": hermes_timeout,
                 "max_hermes_per_query": extraction_budget,
                 "max_backfill_videos_per_run": backfill_limit,
+                "max_recovery_videos_per_run": max(0, int(limits.get("max_recovery_videos_per_run", 0))),
+                "metadata_screen_batch_size": int(limits.get("metadata_screen_batch_size", 20)),
+                "max_metadata_screen_videos_per_query": int(limits.get("max_metadata_screen_videos_per_query", 20)),
+                "max_metadata_screen_videos_per_backfill": int(limits.get("max_metadata_screen_videos_per_backfill", 40)),
                 "max_new_channels_to_audit": int(limits.get("max_new_channels_to_audit", 3)),
                 "channel_sample_size": int(limits.get("channel_sample_size", 12)),
             },

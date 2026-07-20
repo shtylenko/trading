@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .store import ExplorerStore, PACKAGE_DIR
+from .scope import long_only_scope
 
 
 SKILL_PATH = PACKAGE_DIR / "skills" / "video_hypothesis_extractor"
@@ -350,6 +351,19 @@ class HermesExtractor:
         claim_ids = [self.store.add_claim(video_id=video_id, **claim) for claim in parsed["claims"]]
         candidate_id: str | None = None
         candidate = parsed["candidate"]
+        if candidate is not None:
+            candidate_in_scope, exclusions = long_only_scope({
+                "title": candidate.get("title", ""),
+                "description": candidate.get("summary", ""),
+            })
+            if not candidate_in_scope:
+                # Retain any source-backed claims, but do not let a short-side
+                # rule enter the long-only research queue merely because the
+                # source title/description failed to expose its direction.
+                candidate = None
+                parsed["candidate"] = None
+                parsed["disposition"] = "rejected"
+                parsed["rationale"] += "; rejected by long-only scope: " + ", ".join(exclusions)
         if candidate is not None:
             candidate_args = dict(candidate)
             claim_id = claim_ids[candidate_args.pop("claim_index")]

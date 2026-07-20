@@ -12,7 +12,7 @@ _OUT_OF_SCOPE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\boptions?\b", re.IGNORECASE), "options"),
     (re.compile(r"\bshort(?:ing|\s+sell(?:ing)?|\s+(?:position|trade|strategy)s?)\b", re.IGNORECASE), "shorting"),
     (re.compile(r"\blong\s*(?:/|&|and|vs\.?)[\s-]*short\b", re.IGNORECASE), "long-short"),
-    (re.compile(r"\bbearish\s+(?:trade|strategy|setup|position)\b", re.IGNORECASE), "bearish-trading"),
+    (re.compile(r"\bbearish\b", re.IGNORECASE), "bearish-trading"),
 )
 
 

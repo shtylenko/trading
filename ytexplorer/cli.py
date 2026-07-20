@@ -182,15 +182,31 @@ def cmd_process_backfill(args: argparse.Namespace) -> None:
     """Process a bounded batch from the metadata-only historical Inbox."""
     from .pipeline import process_historical_backfill
 
+    store = _store(args)
+    run_id = store.start_pipeline_run("historical-backfill")
     progress = _ScheduledProgress(enabled=not args.no_progress)
     try:
         outcome = process_historical_backfill(
-            _store(args),
+            store,
             limit=args.limit,
             model=args.model,
             timeout=args.timeout,
+            run_id=run_id,
             progress=progress,
         )
+        outcome["run_id"] = run_id
+        outcome["parameters"] = {
+            "queries": [],
+            "limits": {
+                "max_backfill_videos_per_run": args.limit,
+                "hermes_timeout_seconds": args.timeout,
+            },
+        }
+        store.finish_pipeline_run(run_id, status="ok", summary=outcome)
+        store.record_job("historical-process", str(args.limit), json.dumps(outcome, sort_keys=True))
+    except Exception as exc:
+        store.finish_pipeline_run(run_id, status="error", error=str(exc))
+        raise
     finally:
         progress.close()
     _print(outcome, as_json=args.json)

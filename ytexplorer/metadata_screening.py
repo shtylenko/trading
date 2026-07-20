@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 from typing import Any
 
@@ -43,7 +44,14 @@ Videos:
 
 def parse_screen_response(raw: str, expected_ids: set[str]) -> dict[str, dict[str, Any]]:
     try:
-        value = json.loads(raw.strip())
+        cleaned = raw.strip()
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        if fenced:
+            cleaned = fenced.group(1)
+        start = cleaned.find("{")
+        if start < 0:
+            raise json.JSONDecodeError("No JSON object found", cleaned, 0)
+        value, _ = json.JSONDecoder().raw_decode(cleaned[start:])
     except json.JSONDecodeError as exc:
         raise ValueError(f"metadata screener returned invalid JSON: {exc.msg}") from exc
     decisions = value.get("decisions") if isinstance(value, dict) else None

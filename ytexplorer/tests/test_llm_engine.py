@@ -158,3 +158,29 @@ def test_metadata_screening_requires_one_valid_decision_per_video():
     assert decisions["a"]["score"] == 80
     with pytest.raises(ValueError, match="every supplied video"):
         parse_screen_response(json.dumps({"decisions": []}), {"a"})
+
+
+def test_extractor_accepts_json_fenced_by_model_commentary(tmp_path):
+    store = _store_with_transcript(tmp_path)
+    payload = {"disposition": "reference", "rationale": "Generic education.", "claims": [], "candidate": None}
+
+    def runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="Reasoning first.\n```json\n" + json.dumps(payload) + "\n```\nDone.", stderr="")
+
+    assert HermesExtractor(store, runner=runner).extract("v1").status == "ok"
+
+
+def test_extractor_keeps_first_three_valid_claims_when_model_exceeds_cap(tmp_path):
+    store = _store_with_transcript(tmp_path)
+    claim = {
+        "claim_type": "setup", "summary": "VWAP reclaim", "evidence_quote": "Wait for price to reclaim VWAP after a pullback.",
+        "horizon": "intraday", "trigger_rule": "reclaim", "invalidation_rule": "stop",
+        "required_data": ["OHLCV"], "missing_fields": [], "extract_confidence": 0.8,
+    }
+    payload = {"disposition": "reference", "rationale": "Repeated evidence.", "claims": [claim, claim, claim, claim], "candidate": None}
+
+    def runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
+
+    assert HermesExtractor(store, runner=runner).extract("v1").status == "ok"
+    assert len(store.claims_for_video("v1")) == 3

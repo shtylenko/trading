@@ -53,10 +53,18 @@ def _normal(text: str) -> str:
 
 def _parse_json(text: str) -> dict[str, Any]:
     cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE)
+    # Hermes occasionally adds an analysis sentence around an otherwise valid
+    # fenced JSON object. Extract the object; schema/provenance validation below
+    # remains just as strict.
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    if fenced:
+        cleaned = fenced.group(1)
     try:
-        value = json.loads(cleaned)
+        decoder = json.JSONDecoder()
+        start = cleaned.find("{")
+        if start < 0:
+            raise json.JSONDecodeError("No JSON object found", cleaned, 0)
+        value, _ = decoder.raw_decode(cleaned[start:])
     except json.JSONDecodeError as exc:
         raise ExtractionError(f"Hermes did not return valid JSON: {exc.msg}") from exc
     if not isinstance(value, dict):
@@ -108,8 +116,10 @@ def validate_result(
         raise ExtractionError(f"invalid disposition: {disposition!r}")
     rationale = _require_string(value.get("rationale"), "rationale")
     raw_claims = value.get("claims")
-    if not isinstance(raw_claims, list) or len(raw_claims) > 3:
-        raise ExtractionError("claims must be a list with at most three items")
+    if not isinstance(raw_claims, list):
+        raise ExtractionError("claims must be a list")
+    claims_truncated = len(raw_claims) > 3
+    raw_claims = raw_claims[:3]
     transcript_normal = _normal(transcript)
     fragment_text = {fragment["id"]: fragment["text"] for fragment in evidence_fragments or []}
     claims: list[dict[str, Any]] = []
@@ -154,25 +164,30 @@ def validate_result(
         if not isinstance(candidate, dict) or not claims:
             raise ExtractionError("candidate requires at least one valid claim")
         index = candidate.get("claim_index")
-        if not isinstance(index, int) or not 0 <= index < len(claims):
+        if claims_truncated and isinstance(index, int) and index >= len(claims):
+            candidate = None
+            disposition = "needs-detail"
+            rationale += "; model returned more than three claims and its candidate relied on an omitted claim"
+        elif not isinstance(index, int) or not 0 <= index < len(claims):
             raise ExtractionError("candidate.claim_index must reference a claim")
-        priority = candidate.get("priority", 0)
-        if not isinstance(priority, (int, float)) or not 0 <= float(priority) <= 100:
-            raise ExtractionError("candidate.priority must be 0..100")
-        assumption_register = candidate.get("assumption_register")
-        missing_assumption_register = not isinstance(assumption_register, str) or not assumption_register.strip()
-        candidate = {
-            "claim_index": index,
-            "title": _require_string(candidate.get("title"), "candidate.title"),
-            "summary": _require_string(candidate.get("summary"), "candidate.summary"),
-            "priority": float(priority),
-            "feasibility": _require_string(candidate.get("feasibility"), "candidate.feasibility"),
-            "data_requirements": _require_string(candidate.get("data_requirements"), "candidate.data_requirements", allow_empty=True),
-            "prior_art": _require_string(candidate.get("prior_art"), "candidate.prior_art", allow_empty=True),
-            "structural_difference": _require_string(candidate.get("structural_difference"), "candidate.structural_difference", allow_empty=True),
-            "assumption_register": assumption_register.strip() if isinstance(assumption_register, str) else "",
-            "missing_assumption_register": missing_assumption_register,
-        }
+        if candidate is not None:
+            priority = candidate.get("priority", 0)
+            if not isinstance(priority, (int, float)) or not 0 <= float(priority) <= 100:
+                raise ExtractionError("candidate.priority must be 0..100")
+            assumption_register = candidate.get("assumption_register")
+            missing_assumption_register = not isinstance(assumption_register, str) or not assumption_register.strip()
+            candidate = {
+                "claim_index": index,
+                "title": _require_string(candidate.get("title"), "candidate.title"),
+                "summary": _require_string(candidate.get("summary"), "candidate.summary"),
+                "priority": float(priority),
+                "feasibility": _require_string(candidate.get("feasibility"), "candidate.feasibility"),
+                "data_requirements": _require_string(candidate.get("data_requirements"), "candidate.data_requirements", allow_empty=True),
+                "prior_art": _require_string(candidate.get("prior_art"), "candidate.prior_art", allow_empty=True),
+                "structural_difference": _require_string(candidate.get("structural_difference"), "candidate.structural_difference", allow_empty=True),
+                "assumption_register": assumption_register.strip() if isinstance(assumption_register, str) else "",
+                "missing_assumption_register": missing_assumption_register,
+            }
     elif disposition in {"candidate", "duplicate", "data-blocked"}:
         raise ExtractionError(f"{disposition} disposition requires a candidate object")
     return {"disposition": disposition, "rationale": rationale, "claims": claims, "candidate": candidate}
@@ -246,9 +261,11 @@ fragment ID to exact source text. If no fragment supports a claim, omit it.
 --- END NUMBERED SOURCE FRAGMENTS ---
 
 Research scope: this system only investigates long-only equity strategies. If
-the source is primarily about futures, options, or short selling, return the
-`rejected` disposition with an empty claims list and explain that it is out of
-scope. Do not convert a short, options, or futures rule into a long-only rule.
+the source is primarily about futures, options, short selling, or a combined
+long/short strategy, return the `rejected` disposition with an empty claims
+list and explain that it is out of scope. Do not extract only the long side of
+a dual-direction strategy or convert a short, options, or futures rule into a
+long-only rule.
 
 Return only the strict JSON object required by the skill. Do not write files, run code,
 search the web, inspect other repository files, or give advice. The transcript excerpt has no reliable

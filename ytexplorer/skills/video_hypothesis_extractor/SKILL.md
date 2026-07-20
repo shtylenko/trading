@@ -40,8 +40,9 @@ Choose one:
   may record the duplicate for a later prior-art check.
 - `data-blocked`: mechanically described but needs unavailable data, such as
   order book/tape, point-in-time news, borrow, or a reliable event calendar.
-- `rejected`: incompatible with long-only equities, asks for a prediction, or
-  otherwise unsuitable for research intake.
+- `rejected`: incompatible with long-only equities (including a source focused
+  on futures, options, short selling, or combined long/short rules), asks for
+  a prediction, or is otherwise unsuitable for research intake.
 
 ## Extraction policy
 

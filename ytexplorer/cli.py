@@ -50,7 +50,12 @@ def cmd_discover(args: argparse.Namespace) -> None:
     from .ytmcp_client import search, transcript
 
     store = _store(args)
-    rows = search(args.query, max_results=args.max_results, upload_date=args.upload_date)
+    rows = search(
+        args.query,
+        max_results=args.max_results,
+        upload_date=args.upload_date,
+        sort_by=args.sort_by,
+    )
     new = 0
     transcript_ok = 0
     progress = _BatchProgress("Discover", len(rows), enabled=not args.no_progress)
@@ -88,6 +93,82 @@ def cmd_discover(args: argparse.Namespace) -> None:
             progress.close()
     outcome = {"query": args.query, "returned": len(rows), "new": new, "transcripts": transcript_ok, "extractions": extracted}
     store.record_job("discover", args.query, json.dumps(outcome, sort_keys=True))
+    _print(outcome, as_json=args.json)
+
+
+def cmd_backfill(args: argparse.Namespace) -> None:
+    """Ingest a historical, date-sorted result set for every configured query.
+
+    This deliberately stores metadata only by default.  A large backfill must
+    not immediately create thousands of transcript or Hermes jobs; the normal
+    ranked pipeline can evaluate the expanded Inbox over time.
+    """
+    from .pipeline import load_plan
+    from .ytmcp_client import search, transcript
+
+    store = _store(args)
+    plan = load_plan(args.plan)
+    queries = plan["queries"]
+    progress = _BatchProgress(
+        "Historical backfill",
+        len(queries) * args.max_results,
+        enabled=not args.no_progress,
+    )
+    outcomes = []
+    total_new = 0
+    total_transcripts = 0
+    try:
+        for item in queries:
+            result = {"id": item.id, "query": item.query, "returned": 0, "new": 0, "transcripts": 0, "errors": []}
+            try:
+                rows = search(item.query, max_results=args.max_results, sort_by="date")
+                result["returned"] = len(rows)
+                for row in rows:
+                    result["new"] += store.upsert_video(row, discovered_by=f"backfill:{item.id}")
+                    if args.transcripts:
+                        tx = transcript(row["video_id"])
+                        if "error" in tx:
+                            store.mark_transcript_error(row["video_id"], str(tx["error"]))
+                            result["errors"].append(f"{row['video_id']}: transcript {tx['error']}")
+                        else:
+                            store.set_transcript(row["video_id"], tx.get("raw_text", ""), tx.get("language_code", "en"))
+                            result["transcripts"] += 1
+                    progress.update()
+            except Exception as exc:
+                result["errors"].append(str(exc))
+            total_new += result["new"]
+            total_transcripts += result["transcripts"]
+            outcomes.append(result)
+    finally:
+        progress.close()
+    outcome = {
+        "mode": "historical-backfill",
+        "sort_by": "date",
+        "upload_date": None,
+        "max_results_per_query": args.max_results,
+        "queries": outcomes,
+        "new": total_new,
+        "transcripts": total_transcripts,
+    }
+    store.record_job("historical-backfill", "configured-plan", json.dumps(outcome, sort_keys=True))
+    _print(outcome, as_json=args.json)
+
+
+def cmd_process_backfill(args: argparse.Namespace) -> None:
+    """Process a bounded batch from the metadata-only historical Inbox."""
+    from .pipeline import process_historical_backfill
+
+    progress = _ScheduledProgress(enabled=not args.no_progress)
+    try:
+        outcome = process_historical_backfill(
+            _store(args),
+            limit=args.limit,
+            model=args.model,
+            timeout=args.timeout,
+            progress=progress,
+        )
+    finally:
+        progress.close()
     _print(outcome, as_json=args.json)
 
 
@@ -266,6 +347,10 @@ class _ScheduledProgress:
         elif event == "videos_queued":
             self._bar.total += int(update["count"])
             self._bar.refresh()
+        elif event == "backfill_queued":
+            self._bar.set_description(f"Historical Inbox: {update['count']}/{update['pending']} selected")
+            self._bar.total += int(update["count"])
+            self._bar.refresh()
         elif event == "video_finished":
             self._bar.update(1)
         elif event == "run_finished":
@@ -411,11 +496,24 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--query", required=True)
     discover.add_argument("--max-results", type=int, default=20)
     discover.add_argument("--upload-date", choices=["hour", "today", "day", "week", "month", "year"])
+    discover.add_argument("--sort-by", choices=["relevance", "rating", "date", "views", "popularity"], default="relevance")
     discover.add_argument("--transcripts", action="store_true", help="also fetch transcripts (uses API quota)")
     discover.add_argument("--extract", action="store_true", help="run Hermes extraction for downloaded transcripts")
     discover.add_argument("--model", help="Hermes model override used with --extract")
     discover.add_argument("--timeout", type=int, default=90, help="Hermes timeout seconds with --extract")
     discover.set_defaults(func=cmd_discover)
+
+    backfill = sub.add_parser("backfill", help="date-sorted all-time discovery for every configured query")
+    backfill.add_argument("--plan", type=Path, help="query-plan YAML (default: ytexplorer/config/queries.yaml)")
+    backfill.add_argument("--max-results", type=int, default=200, help="maximum results to ingest per query (default: 200)")
+    backfill.add_argument("--transcripts", action="store_true", help="also download transcripts; off by default for a safe large backfill")
+    backfill.set_defaults(func=cmd_backfill)
+
+    process_backfill = sub.add_parser("process-backfill", help="rank and process a bounded batch from the historical Inbox")
+    process_backfill.add_argument("--limit", type=int, default=10, help="historical videos to attempt (default: 10)")
+    process_backfill.add_argument("--model", help="Hermes model override")
+    process_backfill.add_argument("--timeout", type=int, default=90, help="Hermes timeout seconds per video")
+    process_backfill.set_defaults(func=cmd_process_backfill)
 
     audit = sub.add_parser("audit-channel", help="sample a channel and recommend/promote its source status")
     audit.add_argument("channel_id")

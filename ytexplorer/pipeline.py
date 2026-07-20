@@ -96,6 +96,89 @@ def _audit_new_channel(store: ExplorerStore, channel_id: str, *, sample_size: in
     return {"channel_id": channel_id, "status": status, "reason": reason, **audit}
 
 
+def process_historical_backfill(
+    store: ExplorerStore,
+    *,
+    limit: int,
+    model: str | None = None,
+    timeout: int = 90,
+    run_id: str | None = None,
+    progress: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Spend a bounded daily Hermes budget on the historical Inbox.
+
+    Historical discovery is intentionally metadata-only. This worker gradually
+    turns it into cited evidence without allowing a large one-off backfill to
+    overload transcript or model capacity. Metadata rule density decides which
+    items are attempted first; all remaining records stay in the Inbox.
+    """
+    from .ytmcp_client import transcript
+
+    pending = store.historical_backfill_pending_videos()
+    ranked = sorted(
+        pending,
+        key=lambda video: (
+            rank_video_for_research(video)[0],
+            video.get("published_at") or "",
+            video.get("view_count") or 0,
+        ),
+        reverse=True,
+    )
+    selected = ranked[:max(0, limit)]
+    result: dict[str, Any] = {
+        "pending": len(pending),
+        "selected": len(selected),
+        "transcripts": 0,
+        "extracted": 0,
+        "skipped": 0,
+        "errors": [],
+    }
+    if progress is not None:
+        progress({"event": "backfill_queued", "count": len(selected), "pending": len(pending)})
+    if run_id:
+        store.append_pipeline_event(
+            run_id,
+            "historical-backfill",
+            f"selected {len(selected)}/{len(pending)} pending historical videos by rule-language score",
+        )
+    extractor = HermesExtractor(store)
+    for video in selected:
+        video_id = video["video_id"]
+        try:
+            tx = transcript(video_id)
+            if "error" in tx:
+                message = str(tx["error"])
+                store.mark_transcript_error(video_id, message)
+                result["errors"].append(f"{video_id}: transcript {message}")
+                if run_id:
+                    store.append_pipeline_event(run_id, "historical-transcript", f"{video_id}: {message}", "error")
+                continue
+            store.set_transcript(video_id, tx.get("raw_text", ""), tx.get("language_code", "en"))
+            result["transcripts"] += 1
+            if run_id:
+                store.append_pipeline_event(run_id, "historical-transcript", f"{video_id}: downloaded")
+            extraction = extractor.extract(video_id, model=model, timeout=timeout)
+            if extraction.skipped:
+                result["skipped"] += 1
+            elif extraction.status == "ok":
+                result["extracted"] += 1
+            if run_id:
+                store.append_pipeline_event(
+                    run_id,
+                    "historical-extract",
+                    f"{video_id}: {extraction.status} {extraction.disposition or ''}".strip(),
+                    "ok" if extraction.status == "ok" else extraction.status,
+                )
+        except Exception as exc:
+            result["errors"].append(f"{video_id}: {exc}")
+            if run_id:
+                store.append_pipeline_event(run_id, "historical-video", f"{video_id}: {exc}", "error")
+        finally:
+            if progress is not None:
+                progress({"event": "video_finished", "video_id": video_id, "source": "backfill"})
+    return result
+
+
 def run_scheduled(
     store: ExplorerStore, *, plan_path: Path | str | None = None, cadence: str = "daily",
     model: str | None = None, dry_run: bool = False, as_of: date | None = None,
@@ -198,6 +281,16 @@ def run_scheduled(
                 report("video_finished", query_id=item.id, video_id=row.get("video_id", "?"))
         outcomes.append(result)
 
+    backfill_limit = max(0, int(limits.get("max_backfill_videos_per_run", 0)))
+    historical_backfill = process_historical_backfill(
+        store,
+        limit=backfill_limit,
+        model=model,
+        timeout=hermes_timeout,
+        run_id=run_id,
+        progress=progress,
+    )
+
     audit_outcomes = []
     for channel_id in sorted(newly_discovered_channels)[:int(limits.get("max_new_channels_to_audit", 3))]:
         try:
@@ -213,12 +306,14 @@ def run_scheduled(
             store.append_pipeline_event(run_id, "channel-audit", f"{channel_id}: {exc}", "error")
     outcome = {
         "run_id": run_id, "mode": "run", "cadence": cadence, "run_date": run_date.isoformat(),
-        "timezone": plan["timezone"], "queries": outcomes, "channel_audits": audit_outcomes,
+        "timezone": plan["timezone"], "queries": outcomes, "historical_backfill": historical_backfill,
+        "channel_audits": audit_outcomes,
         "parameters": {
             "queries": [item.__dict__ for item in selected],
             "limits": {
                 "hermes_timeout_seconds": hermes_timeout,
                 "max_hermes_per_query": extraction_budget,
+                "max_backfill_videos_per_run": backfill_limit,
                 "max_new_channels_to_audit": int(limits.get("max_new_channels_to_audit", 3)),
                 "channel_sample_size": int(limits.get("channel_sample_size", 12)),
             },

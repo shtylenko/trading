@@ -366,6 +366,23 @@ class ExplorerStore:
         with self.connect() as conn:
             return self._rows(conn.execute(query, args).fetchall())
 
+    def historical_backfill_pending_videos(self, *, limit: int = 10_000) -> list[dict[str, Any]]:
+        """Return metadata-only historical discoveries that have not been attempted.
+
+        A transcript error is deliberately not selected again here; recovery is
+        a separate, explicit policy so an unavailable caption track cannot
+        consume every future daily backfill slot.
+        """
+        self.init()
+        with self.connect() as conn:
+            return self._rows(conn.execute(
+                """SELECT v.*, c.title AS channel_title, c.status AS channel_status
+                   FROM videos v JOIN channels c ON c.channel_id=v.channel_id
+                   WHERE v.discovered_by LIKE 'backfill:%' AND v.transcript_status='pending'
+                   ORDER BY v.published_at DESC, v.discovered_at DESC LIMIT ?""",
+                (limit,),
+            ).fetchall())
+
     def list_channels(self, *, status: str | None = None) -> list[dict[str, Any]]:
         self.init()
         where, args = ("", []) if not status else (" WHERE c.status=?", [status])

@@ -20,8 +20,19 @@ def _load_api():
     return YouTubeAPI(cache_dir=str(cache_dir))
 
 
-def search(query: str, *, max_results: int = 20, upload_date: str | None = None) -> list[dict[str, Any]]:
-    response = _load_api().search_videos(query, max_results=max_results, upload_date=upload_date)
+def search(
+    query: str,
+    *,
+    max_results: int = 20,
+    upload_date: str | None = None,
+    sort_by: str = "relevance",
+) -> list[dict[str, Any]]:
+    response = _load_api().search_videos(
+        query,
+        max_results=max_results,
+        upload_date=upload_date,
+        sort_by=sort_by,
+    )
     if "error" in response:
         raise RuntimeError(response["error"])
     return list(response.get("data", []))

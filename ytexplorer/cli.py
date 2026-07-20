@@ -48,6 +48,7 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 def cmd_discover(args: argparse.Namespace) -> None:
     from .ytmcp_client import search, transcript
+    from .scope import long_only_scope
 
     store = _store(args)
     rows = search(
@@ -58,10 +59,19 @@ def cmd_discover(args: argparse.Namespace) -> None:
     )
     new = 0
     transcript_ok = 0
+    out_of_scope = 0
+    eligible_ids: set[str] = set()
     progress = _BatchProgress("Discover", len(rows), enabled=not args.no_progress)
     try:
         for row in rows:
             new += store.upsert_video(row, discovered_by=f"query:{args.query}")
+            in_scope, _ = long_only_scope(row)
+            if not in_scope:
+                store.mark_video_out_of_scope(row["video_id"])
+                out_of_scope += 1
+                progress.update()
+                continue
+            eligible_ids.add(row["video_id"])
             if args.transcripts:
                 result = transcript(row["video_id"])
                 if "error" in result:
@@ -79,6 +89,9 @@ def cmd_discover(args: argparse.Namespace) -> None:
         progress = _BatchProgress("Extract discovered", len(rows), enabled=not args.no_progress)
         try:
             for row in rows:
+                if row["video_id"] not in eligible_ids:
+                    progress.update()
+                    continue
                 video = store.get_video(row["video_id"])
                 if video is None or video.get("transcript_status") != "ready":
                     progress.update()
@@ -91,7 +104,8 @@ def cmd_discover(args: argparse.Namespace) -> None:
                 progress.update()
         finally:
             progress.close()
-    outcome = {"query": args.query, "returned": len(rows), "new": new, "transcripts": transcript_ok, "extractions": extracted}
+    outcome = {"query": args.query, "returned": len(rows), "new": new, "out_of_scope": out_of_scope,
+               "transcripts": transcript_ok, "extractions": extracted}
     store.record_job("discover", args.query, json.dumps(outcome, sort_keys=True))
     _print(outcome, as_json=args.json)
 
@@ -104,6 +118,7 @@ def cmd_backfill(args: argparse.Namespace) -> None:
     ranked pipeline can evaluate the expanded Inbox over time.
     """
     from .pipeline import load_plan
+    from .scope import long_only_scope
     from .ytmcp_client import search, transcript
 
     store = _store(args)
@@ -117,14 +132,21 @@ def cmd_backfill(args: argparse.Namespace) -> None:
     outcomes = []
     total_new = 0
     total_transcripts = 0
+    total_out_of_scope = 0
     try:
         for item in queries:
-            result = {"id": item.id, "query": item.query, "returned": 0, "new": 0, "transcripts": 0, "errors": []}
+            result = {"id": item.id, "query": item.query, "returned": 0, "new": 0, "out_of_scope": 0, "transcripts": 0, "errors": []}
             try:
                 rows = search(item.query, max_results=args.max_results, sort_by="date")
                 result["returned"] = len(rows)
                 for row in rows:
                     result["new"] += store.upsert_video(row, discovered_by=f"backfill:{item.id}")
+                    in_scope, _ = long_only_scope(row)
+                    if not in_scope:
+                        store.mark_video_out_of_scope(row["video_id"])
+                        result["out_of_scope"] += 1
+                        progress.update()
+                        continue
                     if args.transcripts:
                         tx = transcript(row["video_id"])
                         if "error" in tx:
@@ -138,6 +160,7 @@ def cmd_backfill(args: argparse.Namespace) -> None:
                 result["errors"].append(str(exc))
             total_new += result["new"]
             total_transcripts += result["transcripts"]
+            total_out_of_scope += result["out_of_scope"]
             outcomes.append(result)
     finally:
         progress.close()
@@ -148,6 +171,7 @@ def cmd_backfill(args: argparse.Namespace) -> None:
         "max_results_per_query": args.max_results,
         "queries": outcomes,
         "new": total_new,
+        "out_of_scope": total_out_of_scope,
         "transcripts": total_transcripts,
     }
     store.record_job("historical-backfill", "configured-plan", json.dumps(outcome, sort_keys=True))

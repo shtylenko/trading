@@ -202,6 +202,11 @@ Analyze only this bounded transcript excerpt (it may not represent the whole vid
 {excerpt}
 --- END TRANSCRIPT EXCERPT ---
 
+Research scope: this system only investigates long-only equity strategies. If
+the source is primarily about futures, options, or short selling, return the
+`rejected` disposition with an empty claims list and explain that it is out of
+scope. Do not convert a short, options, or futures rule into a long-only rule.
+
 Return only the strict JSON object required by the skill. Do not write files, run code,
 search the web, inspect other repository files, or give advice. The transcript excerpt has no reliable
 subtitle timestamps: use null timing fields and quote exact contiguous transcript passages."""

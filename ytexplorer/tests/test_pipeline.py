@@ -4,6 +4,7 @@ from datetime import date
 
 from trading.ytexplorer.cli import _launch_agent_payload, _web_launch_agent_payload
 from trading.ytexplorer.pipeline import load_plan, rank_video_for_research, run_scheduled
+from trading.ytexplorer.scope import long_only_scope
 from trading.ytexplorer.store import ExplorerStore
 
 
@@ -36,3 +37,9 @@ def test_metadata_ranker_favors_explicit_rules_over_promotional_language():
     rules_score, _ = rank_video_for_research({"title": "VWAP entry, exit and stop loss rules", "description": "backtest setup"})
     noise_score, _ = rank_video_for_research({"title": "Guaranteed 90% win trading signals", "description": ""})
     assert rules_score > noise_score
+
+
+def test_long_only_scope_excludes_futures_options_and_short_selling():
+    for title in ("VWAP futures strategy", "Options income strategy", "Short selling setup with stops"):
+        assert long_only_scope({"title": title})[0] is False
+    assert long_only_scope({"title": "Long-only stock swing trading strategy"})[0] is True

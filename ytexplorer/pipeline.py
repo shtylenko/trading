@@ -12,6 +12,7 @@ import yaml
 
 from .channel_audit import audit_samples, recommend_status
 from .llm_engine import HermesExtractor
+from .scope import long_only_scope
 from .store import ExplorerStore
 
 
@@ -42,6 +43,9 @@ def rank_video_for_research(video: dict[str, Any]) -> tuple[int, list[str]]:
     This deliberately ranks only the *extraction budget*; every result is
     still stored in the inbox for human exploration and later re-ranking.
     """
+    in_scope, exclusions = long_only_scope(video)
+    if not in_scope:
+        return -1_000, [f"out-of-scope:{reason}" for reason in exclusions]
     text = f"{video.get('title', '')} {video.get('description', '')}".casefold()
     score, reasons = 0, []
     for term, weight in _RULE_TERMS.items():
@@ -115,8 +119,17 @@ def process_historical_backfill(
     from .ytmcp_client import transcript
 
     pending = store.historical_backfill_pending_videos()
+    eligible = []
+    out_of_scope = 0
+    for video in pending:
+        in_scope, _ = long_only_scope(video)
+        if in_scope:
+            eligible.append(video)
+        else:
+            store.mark_video_out_of_scope(video["video_id"])
+            out_of_scope += 1
     ranked = sorted(
-        pending,
+        eligible,
         key=lambda video: (
             rank_video_for_research(video)[0],
             video.get("published_at") or "",
@@ -127,6 +140,7 @@ def process_historical_backfill(
     selected = ranked[:max(0, limit)]
     result: dict[str, Any] = {
         "pending": len(pending),
+        "out_of_scope": out_of_scope,
         "selected": len(selected),
         "transcripts": 0,
         "extracted": 0,
@@ -139,7 +153,7 @@ def process_historical_backfill(
         store.append_pipeline_event(
             run_id,
             "historical-backfill",
-            f"selected {len(selected)}/{len(pending)} pending historical videos by rule-language score",
+            f"selected {len(selected)}/{len(eligible)} in-scope historical videos by rule-language score; {out_of_scope} out of scope",
         )
     extractor = HermesExtractor(store)
     for video in selected:
@@ -222,7 +236,7 @@ def run_scheduled(
     for query_index, item in enumerate(selected, start=1):
         result: dict[str, Any] = {
             "id": item.id, "query": item.query, "new": 0, "transcripts": 0, "extracted": 0,
-            "ranked_for_extraction": 0, "deferred": 0, "errors": [],
+            "ranked_for_extraction": 0, "deferred": 0, "out_of_scope": 0, "errors": [],
         }
         report("query_started", index=query_index, total_queries=len(selected), query_id=item.id, query=item.query)
         store.append_pipeline_event(run_id, "search", f"searching {item.id}: {item.query}")
@@ -245,12 +259,20 @@ def run_scheduled(
             stored = store.get_video(row["video_id"])
             if stored:
                 row["channel_status"] = stored.get("channel_status")
-        ranked = sorted(rows, key=lambda row: (rank_video_for_research(row)[0], row.get("view_count") or 0), reverse=True)
+        eligible_rows = []
+        for row in rows:
+            in_scope, _ = long_only_scope(row)
+            if in_scope:
+                eligible_rows.append(row)
+            else:
+                store.mark_video_out_of_scope(row["video_id"])
+                result["out_of_scope"] += 1
+        ranked = sorted(eligible_rows, key=lambda row: (rank_video_for_research(row)[0], row.get("view_count") or 0), reverse=True)
         work_rows = ranked[:extraction_budget]
         result["ranked_for_extraction"] = len(work_rows)
-        result["deferred"] = max(0, len(rows) - len(work_rows))
+        result["deferred"] = max(0, len(eligible_rows) - len(work_rows))
         store.append_pipeline_event(
-            run_id, "rank", f"{item.id}: selected {len(work_rows)}/{len(rows)} highest rule-language scores; {result['deferred']} deferred"
+            run_id, "rank", f"{item.id}: selected {len(work_rows)}/{len(eligible_rows)} in-scope videos; {result['deferred']} deferred; {result['out_of_scope']} out of scope"
         )
         report("videos_queued", query_id=item.id, count=len(work_rows))
         for row in work_rows:

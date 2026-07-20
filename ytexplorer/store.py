@@ -18,7 +18,7 @@ from typing import Any, Iterator, Optional
 PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = PACKAGE_DIR / "data" / "ytexplorer.sqlite3"
 
-VIDEO_STATUSES = {"new", "extracted", "reference", "archived", "error"}
+VIDEO_STATUSES = {"new", "extracted", "reference", "archived", "out-of-scope", "error"}
 CHANNEL_STATUSES = {"candidate", "approved", "rejected", "demoted"}
 CANDIDATE_STATUSES = {
     "triage",
@@ -343,6 +343,15 @@ class ExplorerStore:
                 (f"error: {message[:160]}", utc_now(), video_id),
             )
 
+    def mark_video_out_of_scope(self, video_id: str) -> None:
+        """Keep discovered metadata visible while preventing later evaluation."""
+        self.init()
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE videos SET status='out-of-scope', updated_at=? WHERE video_id=?",
+                (utc_now(), video_id),
+            )
+
     def get_video(self, video_id: str) -> Optional[dict[str, Any]]:
         self.init()
         with self.connect() as conn:
@@ -378,7 +387,7 @@ class ExplorerStore:
             return self._rows(conn.execute(
                 """SELECT v.*, c.title AS channel_title, c.status AS channel_status
                    FROM videos v JOIN channels c ON c.channel_id=v.channel_id
-                   WHERE v.discovered_by LIKE 'backfill:%' AND v.transcript_status='pending'
+                   WHERE v.discovered_by LIKE 'backfill:%' AND v.transcript_status='pending' AND v.status='new'
                    ORDER BY v.published_at DESC, v.discovered_at DESC LIMIT ?""",
                 (limit,),
             ).fetchall())

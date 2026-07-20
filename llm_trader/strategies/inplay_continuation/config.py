@@ -34,6 +34,13 @@ class InplayContinuationConfig:
     rvol_lookback: int = 20
     float_max: Optional[float] = 50_000_000.0  # None = no float gate
 
+    # Opp B select_A admission (v0.1.1) — frozen after selection A/B
+    # time < 11:00 AND 5≤gap≤15 AND rvol≥3. When True, tightens screen + entry window.
+    select_a: bool = False
+    select_a_gap_max_pct: float = 15.0
+    select_a_rvol_min: float = 3.0
+    select_a_entry_end: str = "11:00"
+
     # Impulse / micro-pb (stricter impulse % than liquid micro)
     impulse_min_bars: int = 2
     impulse_min_pct: float = 0.8
@@ -77,6 +84,14 @@ class InplayContinuationConfig:
         self.slippage_bps_one_way = model.slippage_bps_one_way
         self.fee_bps_one_way = model.fee_bps_sell / 2.0
         self.cost_tier = model.tier.value
+        return self
+
+    def apply_select_a(self) -> "InplayContinuationConfig":
+        """Opp B primary keep: morning + gap band + strict prior-day RVOL."""
+        self.select_a = True
+        self.gap_max_pct = self.select_a_gap_max_pct
+        self.rvol_min = self.select_a_rvol_min
+        self.entry_window_end = self.select_a_entry_end
         return self
 
     @classmethod

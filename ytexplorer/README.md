@@ -55,3 +55,7 @@ before storing a claim. Set `YTEXPLORER_HERMES_SKILL` to additionally preload a 
 Hermes skill by name. The current `ytmcp` cleaned-transcript interface does not preserve
 subtitle timings, so it intentionally records exact quotes + transcript hashes rather than
 invented timestamps.
+
+To keep autonomous runs bounded, Hermes receives one relevance-selected transcript excerpt
+(at most 9,000 characters) per video and has a 90-second hard process-group timeout. A timeout
+is recorded as an extraction error and the pipeline continues to the next video.

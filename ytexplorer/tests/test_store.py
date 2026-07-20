@@ -37,3 +37,14 @@ def test_claim_candidate_and_audit_workflow(tmp_path):
     sample = [_video() | {"transcript_text": "trading strategy entry exit stop risk"} for _ in range(12)]
     audit = audit_samples(sample)
     assert recommend_status(audit)[0] == "approved"
+
+
+def test_pipeline_run_history_is_newest_first_and_exposes_parameters(tmp_path):
+    store = ExplorerStore(tmp_path / "explorer.sqlite3")
+    first = store.start_pipeline_run("daily")
+    store.finish_pipeline_run(first, status="ok", summary={"run_date": "2026-07-18", "parameters": {"queries": [{"id": "a"}]}})
+    second = store.start_pipeline_run("weekly")
+    store.finish_pipeline_run(second, status="aborted", error="stopped")
+    runs = store.list_pipeline_runs()
+    assert [run["run_id"] for run in runs] == [second, first]
+    assert runs[1]["query_specs"] == [{"id": "a"}]

@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from trading.ytexplorer.llm_engine import ExtractionError, HermesExtractor
+from trading.ytexplorer.llm_engine import ExtractionError, HermesExtractor, promote_needs_detail, select_relevant_excerpt
 from trading.ytexplorer.store import ExplorerStore
 
 
@@ -65,3 +65,71 @@ def test_hermes_cannot_cite_text_missing_from_transcript(tmp_path):
     with pytest.raises(ExtractionError, match="not an exact transcript excerpt"):
         HermesExtractor(store, runner=runner).extract("v1")
     assert store.extractions_for_video("v1")[0]["status"] == "invalid"
+
+
+def test_hermes_repairs_a_paraphrased_quote_without_relaxing_provenance(tmp_path):
+    store = _store_with_transcript(tmp_path)
+    payload = {
+        "disposition": "reference", "rationale": "A sourced rule.",
+        "claims": [{"claim_type": "setup", "summary": "VWAP reclaim", "evidence_quote": "reclaim VWAP after pullback",
+                    "horizon": "intraday", "trigger_rule": "reclaim", "invalidation_rule": "stop",
+                    "required_data": ["OHLCV"], "missing_fields": [], "extract_confidence": 0.8}],
+        "candidate": None,
+    }
+    repaired = payload | {"claims": [payload["claims"][0] | {
+        "evidence_quote": "Wait for price to reclaim VWAP after a pullback."
+    }]}
+    responses = iter([json.dumps(payload), json.dumps(repaired)])
+
+    def runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout=next(responses), stderr="")
+
+    result = HermesExtractor(store, runner=runner).extract("v1")
+    assert result.status == "ok"
+    assert store.claims_for_video("v1")[0]["evidence_quote"] == repaired["claims"][0]["evidence_quote"]
+
+
+def test_missing_candidate_assumptions_becomes_needs_detail_with_repair(tmp_path):
+    store = _store_with_transcript(tmp_path)
+    payload = {
+        "disposition": "candidate", "rationale": "Rules are substantially specified.",
+        "claims": [{"claim_type": "setup", "summary": "VWAP reclaim", "evidence_quote": "Wait for price to reclaim VWAP after a pullback.",
+                    "horizon": "intraday", "trigger_rule": "reclaim VWAP", "invalidation_rule": "stop below pullback",
+                    "required_data": ["OHLCV"], "missing_fields": ["exit"], "extract_confidence": 0.8}],
+        "candidate": {"claim_index": 0, "title": "VWAP reclaim", "summary": "Test reclaim.", "priority": 20,
+                      "feasibility": "testable", "data_requirements": "intraday OHLCV", "prior_art": "unknown",
+                      "structural_difference": "unknown"},
+    }
+    responses = iter([json.dumps(payload), json.dumps({"assumption_register": ["Freeze the exit rule."]})])
+
+    def runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout=next(responses), stderr="")
+
+    result = HermesExtractor(store, runner=runner).extract("v1")
+    candidate = store.get_candidate(result.candidate_id)
+    assert candidate["status"] == "needs-detail"
+    assert "Research assumption: Freeze the exit rule." in candidate["assumption_register"]
+
+
+def test_recovery_promotes_stored_needs_detail_evidence_to_queue(tmp_path):
+    store = _store_with_transcript(tmp_path)
+    claim_id = store.add_claim(
+        video_id="v1", claim_type="setup", summary="VWAP reclaim", evidence_quote="Wait for price to reclaim VWAP after a pullback.",
+        trigger_rule="reclaim VWAP", required_data=["OHLCV"], missing_fields=["exit"], extract_confidence=0.8,
+    )
+    parsed = {"disposition": "needs-detail", "rationale": "Exit rule is missing.", "claims": []}
+    store.record_extraction(video_id="v1", transcript_hash="hash", model=None, skill_hash="skill", prompt_hash="prompt",
+                            status="ok", parsed=parsed)
+    promoted = promote_needs_detail(store)
+    candidate = store.get_candidate(promoted[0])
+    assert candidate["claim_id"] == claim_id
+    assert candidate["status"] == "needs-detail"
+    assert "Freeze before testing: exit." in candidate["assumption_register"]
+
+
+def test_relevant_excerpt_is_bounded_and_prefers_rule_dense_passage():
+    bland = "general market commentary " * 1000
+    useful = "entry trigger strategy stop loss VWAP pullback " * 250
+    excerpt = select_relevant_excerpt(bland + useful, max_chars=9000)
+    assert len(excerpt) <= 9000
+    assert "entry trigger strategy" in excerpt

@@ -53,28 +53,39 @@ def cmd_discover(args: argparse.Namespace) -> None:
     rows = search(args.query, max_results=args.max_results, upload_date=args.upload_date)
     new = 0
     transcript_ok = 0
-    for row in rows:
-        new += store.upsert_video(row, discovered_by=f"query:{args.query}")
-        if args.transcripts:
-            result = transcript(row["video_id"])
-            if "error" in result:
-                store.mark_transcript_error(row["video_id"], str(result["error"]))
-            else:
-                store.set_transcript(row["video_id"], result.get("raw_text", ""), result.get("language_code", "en"))
-                transcript_ok += 1
+    progress = _BatchProgress("Discover", len(rows), enabled=not args.no_progress)
+    try:
+        for row in rows:
+            new += store.upsert_video(row, discovered_by=f"query:{args.query}")
+            if args.transcripts:
+                result = transcript(row["video_id"])
+                if "error" in result:
+                    store.mark_transcript_error(row["video_id"], str(result["error"]))
+                else:
+                    store.set_transcript(row["video_id"], result.get("raw_text", ""), result.get("language_code", "en"))
+                    transcript_ok += 1
+            progress.update()
+    finally:
+        progress.close()
     extracted = []
     if args.extract:
         from .llm_engine import HermesExtractor
         extractor = HermesExtractor(store)
-        for row in rows:
-            video = store.get_video(row["video_id"])
-            if video is None or video.get("transcript_status") != "ready":
-                continue
-            try:
-                result = extractor.extract(row["video_id"], model=args.model, timeout=args.timeout)
-                extracted.append({"video_id": result.video_id, "status": result.status, "disposition": result.disposition})
-            except Exception as exc:  # One bad model response must not stop the discovery batch.
-                extracted.append({"video_id": row["video_id"], "status": "error", "detail": str(exc)})
+        progress = _BatchProgress("Extract discovered", len(rows), enabled=not args.no_progress)
+        try:
+            for row in rows:
+                video = store.get_video(row["video_id"])
+                if video is None or video.get("transcript_status") != "ready":
+                    progress.update()
+                    continue
+                try:
+                    result = extractor.extract(row["video_id"], model=args.model, timeout=args.timeout)
+                    extracted.append({"video_id": result.video_id, "status": result.status, "disposition": result.disposition})
+                except Exception as exc:  # One bad model response must not stop the discovery batch.
+                    extracted.append({"video_id": row["video_id"], "status": "error", "detail": str(exc)})
+                progress.update()
+        finally:
+            progress.close()
     outcome = {"query": args.query, "returned": len(rows), "new": new, "transcripts": transcript_ok, "extractions": extracted}
     store.record_job("discover", args.query, json.dumps(outcome, sort_keys=True))
     _print(outcome, as_json=args.json)
@@ -88,15 +99,20 @@ def cmd_audit_channel(args: argparse.Namespace) -> None:
     if channel is None:
         raise ValueError("unknown channel; discover or ingest one of its videos first")
     source_rows = channel_videos(args.channel_id, sort_by="newest")[:args.sample_size]
-    for row in source_rows:
-        # ytmcp channel records already include the channel identifier.
-        store.upsert_video(row, discovered_by=f"channel:{args.channel_id}")
-        if args.transcripts:
-            result = transcript(row["video_id"])
-            if "error" in result:
-                store.mark_transcript_error(row["video_id"], str(result["error"]))
-            else:
-                store.set_transcript(row["video_id"], result.get("raw_text", ""), result.get("language_code", "en"))
+    progress = _BatchProgress("Audit channel", len(source_rows), enabled=not args.no_progress)
+    try:
+        for row in source_rows:
+            # ytmcp channel records already include the channel identifier.
+            store.upsert_video(row, discovered_by=f"channel:{args.channel_id}")
+            if args.transcripts:
+                result = transcript(row["video_id"])
+                if "error" in result:
+                    store.mark_transcript_error(row["video_id"], str(result["error"]))
+                else:
+                    store.set_transcript(row["video_id"], result.get("raw_text", ""), result.get("language_code", "en"))
+            progress.update()
+    finally:
+        progress.close()
     samples = [v for v in store.list_videos(limit=1000) if v["channel_id"] == args.channel_id][:args.sample_size]
     audit = audit_samples(samples)
     recommended, reason = recommend_status(
@@ -163,7 +179,7 @@ def cmd_link_experiment(args: argparse.Namespace) -> None:
 
 
 def cmd_extract(args: argparse.Namespace) -> None:
-    from .llm_engine import HermesExtractor, extract_ready
+    from .llm_engine import HermesExtractor, ExtractionError
 
     store = _store(args)
     if args.video_id:
@@ -171,17 +187,116 @@ def cmd_extract(args: argparse.Namespace) -> None:
                                                 force=args.force, dry_run=args.dry_run)
         payload: Any = result.__dict__
     else:
-        payload = [r.__dict__ for r in extract_ready(store, limit=args.limit, model=args.model, timeout=args.timeout,
-                                                      force=args.force, dry_run=args.dry_run)]
+        videos = [v for v in store.list_videos(limit=10000) if v.get("transcript_status") == "ready"][:args.limit]
+        progress = _BatchProgress("Extract", len(videos), enabled=not args.no_progress)
+        results = []
+        try:
+            extractor = HermesExtractor(store)
+            for video in videos:
+                try:
+                    result = extractor.extract(video["video_id"], model=args.model, timeout=args.timeout,
+                                               force=args.force, dry_run=args.dry_run)
+                    results.append(result.__dict__)
+                except ExtractionError as exc:
+                    results.append({"video_id": video["video_id"], "status": "error", "detail": str(exc)})
+                progress.update()
+        finally:
+            progress.close()
+        payload = results
     _print(payload, as_json=args.json)
+
+
+def cmd_recover(args: argparse.Namespace) -> None:
+    """Retry prior invalid output and surface existing incomplete evidence."""
+    from .llm_engine import HermesExtractor, ExtractionError, promote_needs_detail
+
+    store = _store(args)
+    video_ids = store.invalid_extraction_video_ids(limit=args.limit)
+    retried = []
+    progress = _BatchProgress("Recover invalid extractions", len(video_ids), enabled=not args.no_progress)
+    try:
+        for video_id in video_ids:
+            try:
+                result = HermesExtractor(store).extract(video_id, model=args.model, timeout=args.timeout, force=True)
+                retried.append({"video_id": video_id, "status": result.status, "disposition": result.disposition})
+            except ExtractionError as exc:
+                retried.append({"video_id": video_id, "status": "error", "detail": str(exc)})
+            progress.update()
+    finally:
+        progress.close()
+    promoted = promote_needs_detail(store, limit=args.promote_limit)
+    _print({"retried": retried, "promoted_needs_detail": promoted}, as_json=args.json)
 
 
 def cmd_run_scheduled(args: argparse.Namespace) -> None:
     from .pipeline import run_scheduled
 
-    payload = run_scheduled(_store(args), plan_path=args.plan, cadence=args.cadence,
-                            model=args.model, dry_run=args.dry_run)
+    progress = _ScheduledProgress(enabled=not args.no_progress and not args.dry_run)
+    try:
+        payload = run_scheduled(_store(args), plan_path=args.plan, cadence=args.cadence,
+                                model=args.model, dry_run=args.dry_run, progress=progress)
+    finally:
+        progress.close()
     _print(payload, as_json=args.json)
+
+
+class _ScheduledProgress:
+    """Interactive stderr-only progress for scheduled discovery.
+
+    Keeping it on stderr means stdout remains a valid JSON document when the
+    caller uses ``--json`` for bot automation or log processing.
+    """
+
+    def __init__(self, *, enabled: bool) -> None:
+        self._bar: Any = None
+        if not enabled or not sys.stderr.isatty():
+            return
+        try:
+            from tqdm import tqdm
+        except ImportError:
+            return
+        self._bar = tqdm(total=0, desc="YT Explorer", unit="video", dynamic_ncols=True, file=sys.stderr)
+
+    def __call__(self, update: dict[str, Any]) -> None:
+        if self._bar is None:
+            return
+        event = update["event"]
+        if event == "query_started":
+            self._bar.set_description(f"Search {update['index']}/{update['total_queries']}: {update['query_id']}")
+        elif event == "videos_queued":
+            self._bar.total += int(update["count"])
+            self._bar.refresh()
+        elif event == "video_finished":
+            self._bar.update(1)
+        elif event == "run_finished":
+            self._bar.set_description("YT Explorer complete")
+            self._bar.refresh()
+
+    def close(self) -> None:
+        if self._bar is not None:
+            self._bar.close()
+
+
+class _BatchProgress:
+    """A stderr-only tqdm bar for bounded batch commands."""
+
+    def __init__(self, desc: str, total: int, *, enabled: bool) -> None:
+        self._bar: Any = None
+        if not enabled or not sys.stderr.isatty():
+            return
+        try:
+            from tqdm import tqdm
+        except ImportError:
+            return
+        self._bar = tqdm(total=total, desc=desc, unit="item", dynamic_ncols=True, file=sys.stderr)
+
+    def update(self, count: int = 1) -> None:
+        if self._bar is not None:
+            self._bar.update(count)
+
+    def close(self) -> None:
+        if self._bar is not None:
+            self._bar.close()
 
 
 def _launch_agent_payload(wrapper: Path, log_dir: Path, hour: int, minute: int) -> dict[str, Any]:
@@ -196,28 +311,52 @@ def _launch_agent_payload(wrapper: Path, log_dir: Path, hour: int, minute: int) 
     }
 
 
+def _web_launch_agent_payload(wrapper: Path, log_dir: Path) -> dict[str, Any]:
+    return {
+        "Label": "com.trading.ytexplorer.web",
+        "ProgramArguments": [str(wrapper)],
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "ProcessType": "Background",
+        "StandardOutPath": str(log_dir / "web.out.log"),
+        "StandardErrorPath": str(log_dir / "web.err.log"),
+    }
+
+
 def cmd_install_schedule(args: argparse.Namespace) -> None:
     """Install and load a macOS LaunchAgent; this is the one-time scheduler setup."""
     package = Path(__file__).resolve().parent
     wrapper = package / "deploy" / "run_daily.sh"
+    web_wrapper = package / "deploy" / "run_web.sh"
     log_dir = package / "data" / "logs"
-    target = Path.home() / "Library" / "LaunchAgents" / "com.trading.ytexplorer.daily.plist"
+    target_dir = Path.home() / "Library" / "LaunchAgents"
+    target = target_dir / "com.trading.ytexplorer.daily.plist"
+    web_target = target_dir / "com.trading.ytexplorer.web.plist"
     target.parent.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
     payload = _launch_agent_payload(wrapper, log_dir, args.hour, args.minute)
     target.write_bytes(plistlib.dumps(payload, sort_keys=False))
+    web_target.write_bytes(plistlib.dumps(_web_launch_agent_payload(web_wrapper, log_dir), sort_keys=False))
     wrapper.chmod(0o755)
+    web_wrapper.chmod(0o755)
     if args.no_load:
-        _print({"installed": str(target), "loaded": False, "schedule": f"{args.hour:02d}:{args.minute:02d}"}, as_json=args.json)
+        _print({"daily_agent": str(target), "web_agent": str(web_target), "loaded": False,
+                "schedule": f"{args.hour:02d}:{args.minute:02d}"}, as_json=args.json)
         return
     uid = str(os.getuid())
     service = f"gui/{uid}/com.trading.ytexplorer.daily"
+    web_service = f"gui/{uid}/com.trading.ytexplorer.web"
     # A prior version may or may not be loaded; ignore that particular outcome.
     subprocess.run(["launchctl", "bootout", service], capture_output=True, text=True, check=False)
     proc = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(target)], capture_output=True, text=True, check=False)
     if proc.returncode:
         raise RuntimeError(f"launchctl bootstrap failed: {proc.stderr.strip() or proc.stdout.strip()}")
-    _print({"installed": str(target), "loaded": True, "schedule": f"{args.hour:02d}:{args.minute:02d}",
+    subprocess.run(["launchctl", "bootout", web_service], capture_output=True, text=True, check=False)
+    web_proc = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(web_target)], capture_output=True, text=True, check=False)
+    if web_proc.returncode:
+        raise RuntimeError(f"web LaunchAgent bootstrap failed: {web_proc.stderr.strip() or web_proc.stdout.strip()}")
+    _print({"daily_agent": str(target), "web_agent": str(web_target), "loaded": True,
+            "schedule": f"{args.hour:02d}:{args.minute:02d}", "monitor": "http://127.0.0.1:8791/operations",
             "log": str(log_dir / "daily.log")}, as_json=args.json)
 
 
@@ -264,6 +403,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="YT Explorer evidence-first research intake")
     parser.add_argument("--db", type=Path, help=f"SQLite path (default: {default_db_path()})")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    parser.add_argument("--no-progress", action="store_true", help="suppress interactive tqdm progress bars")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("init").set_defaults(func=cmd_init)
 
@@ -274,7 +414,7 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--transcripts", action="store_true", help="also fetch transcripts (uses API quota)")
     discover.add_argument("--extract", action="store_true", help="run Hermes extraction for downloaded transcripts")
     discover.add_argument("--model", help="Hermes model override used with --extract")
-    discover.add_argument("--timeout", type=int, default=300, help="Hermes timeout seconds with --extract")
+    discover.add_argument("--timeout", type=int, default=90, help="Hermes timeout seconds with --extract")
     discover.set_defaults(func=cmd_discover)
 
     audit = sub.add_parser("audit-channel", help="sample a channel and recommend/promote its source status")
@@ -339,10 +479,17 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--video-id", help="one downloaded transcript to process")
     extract.add_argument("--limit", type=int, default=20, help="ready transcripts to process when --video-id is omitted")
     extract.add_argument("--model", help="Hermes model override")
-    extract.add_argument("--timeout", type=int, default=300)
+    extract.add_argument("--timeout", type=int, default=90)
     extract.add_argument("--force", action="store_true", help="reprocess even if the same transcript + skill already succeeded")
     extract.add_argument("--dry-run", action="store_true", help="show the Hermes command without invoking it")
     extract.set_defaults(func=cmd_extract)
+
+    recover = sub.add_parser("recover", help="retry invalid Hermes output and queue existing needs-detail evidence")
+    recover.add_argument("--limit", type=int, default=8, help="invalid videos to retry (default: 8)")
+    recover.add_argument("--promote-limit", type=int, default=20, help="needs-detail bundles to queue (default: 20)")
+    recover.add_argument("--model", help="Hermes model override")
+    recover.add_argument("--timeout", type=int, default=90)
+    recover.set_defaults(func=cmd_recover)
 
     scheduled = sub.add_parser("run-scheduled", help="run the configured autonomous discovery plan")
     scheduled.add_argument("--plan", type=Path, help="query-plan YAML (default: ytexplorer/config/queries.yaml)")
@@ -369,9 +516,10 @@ def main(argv: list[str] | None = None) -> None:
     # Users naturally place output-format flags after a subcommand. argparse only
     # accepts global options before it, so normalize this harmless convenience flag.
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    if "--json" in raw_argv:
-        raw_argv.remove("--json")
-        raw_argv.insert(0, "--json")
+    for flag in ("--json", "--no-progress"):
+        if flag in raw_argv:
+            raw_argv.remove(flag)
+            raw_argv.insert(0, flag)
     args = build_parser().parse_args(raw_argv)
     try:
         args.func(args)

@@ -138,7 +138,7 @@ helps high-turnover longs; **slip still binds**. Free commission does not un-kil
 | **Thesis** | Scanners lose because they force all hits; edge may live in top-quantile days only |
 | **Ideas (pre-register one)** | Causal time-of-day RVOL; max 1–2 names/day; SPY regime admission; first signal only |
 | **Attach to** | New families (e.g. Opp C), not retune of parked micro |
-| **Status** | Not started — after Opp C base exists |
+| **Status** | **DONE (A/B)** — `select_A` kept provisionally; single filters failed both-years. See `PREREG_OPPB_SELECTION.md` + `selection_b/RESULTS.md` |
 
 ### Opp C — `inplay_continuation` (harder venue / gap in-play) — **Phase 1 AFTER A**
 
@@ -150,7 +150,7 @@ helps high-turnover longs; **slip still binds**. Free commission does not un-kil
 | **Pattern (v0.1.0 one only)** | Opening impulse → 1–3 bar micro-pb holding VWAP → green break (same geometry as micro, **new universe + WeBull costs + high slip stress**) |
 | **Costs** | WeBull commission 0 + sell regulatory; slip baseline **15 bps** one-way (small/mid); stress 30 / 50 |
 | **Gates** | Pooled effR > 0; ≥2 calendar periods > 0 if multi-period; fail if only works at fantasy 2 bps slip |
-| **Status** | **Probe PASS (thin)** — n=87, effR +0.076 @ slip15; **2025 −0.12 / 2026 +0.29** (unstable). Slip30 ~0. See `batch/inplay_continuation/probe_12m/RESULTS.md`. **No capital**; next Opp B selection or kill if selection fails |
+| **Status** | Opp C probe thin PASS → **Opp B `select_A` primary PASS** (n=15, both years+, slip30 ok). **Tiny n — research only, no capital.** See `selection_b/RESULTS.md`. Next: forward shadow or Opp E |
 | **Do not** | Claim multi-year without PIT float; claim Ross validation without catalyst feed |
 
 ### Opp D — Overnight / multi-day with *new* thesis (not failed TA scanners)
@@ -168,7 +168,7 @@ helps high-turnover longs; **slip still binds**. Free commission does not un-kil
 |---|---|
 | **Thesis** | Clever systems must beat a simple long process under WeBull costs |
 | **Example** | Rules-based liquid ETF hold / trend with hard daily loss and trade caps |
-| **Status** | Backlog — define after cost module ships |
+| **Status** | **DONE v0.1** — scoreboard: select_A **beats** best boring (spy_green_open) on mean bps & total PnL; still n=15. See `batch/boring_baseline/scoreboard_v010/RESULTS.md` |
 
 ### Opp F — Options (WeBull)
 
@@ -291,11 +291,13 @@ DONE  code: prior-day RVOL; VWAP causal morning; peer-review trail
 
 === ACTIVE (WeBull opportunity track) ===
 DONE  Opp A  costs/webull.py
-DONE  Opp C  inplay 12m probe PASS thin (unstable years) — see probe_12m/
-NEXT  Opp B  selection layer on inplay (pre-reg) OR park C if year split unfixable
-THEN  Opp E  boring baseline
+DONE  Opp C  inplay 12m probe PASS thin (unstable years)
+DONE  Opp B  select_A primary PASS (n=15 both years) — research only
+DONE  Opp E  scoreboard: select_A beats spy_green_open (mean bps & $5k PnL) — still no capital
+NEXT  Forward zero-capital shadow of select_A on new days only
 LATER Opp D  new multi-day thesis only
 DEFER Opp F  options
+NO    more filters on the n=87 sample
 ```
 
 Each new family should ship with:
@@ -316,9 +318,9 @@ Do **not** re-open SIP-ORB, gap-and-go, or dominance-flip under new names withou
 | Priority | Id | Type | Status |
 |:--:|---|---|---|
 | **0** | `costs/webull` | **Opp A** | **DONE** — `costs/webull.py` |
-| **0** | `inplay_continuation` | **Opp C** | **Probe PASS thin** (+0.076 @15bps; 2025 red). No capital. Next: Opp B or park |
-| **0** | selection layer | **Opp B** | pending (after C base) |
-| **0** | boring baseline | **Opp E** | pending |
+| **0** | `inplay_continuation` | **Opp C+B** | **select_A research candidate** n=15 both years+ @15bps; **no capital** |
+| **0** | selection layer | **Opp B** | **DONE** — select_A kept; do not add filters on this sample |
+| **0** | boring baseline | **Opp E** | **DONE** — select_A wins scoreboard (tiny n); no capital |
 | **0** | process caps | **Opp G** | pending paper path |
 | 1 | `right_side_v` | multi-day | **PARKED** FAIL (−0.03) |
 | 1 | `vwap_pullback` | short-hold | **PARKED** leak + not re-promoted post-E0 |

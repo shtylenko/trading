@@ -22,6 +22,7 @@ VIDEO_STATUSES = {"new", "extracted", "reference", "archived", "error"}
 CHANNEL_STATUSES = {"candidate", "approved", "rejected", "demoted"}
 CANDIDATE_STATUSES = {
     "triage",
+    "needs-detail",
     "duplicate",
     "data-blocked",
     "parked",
@@ -179,6 +180,24 @@ class ExplorerStore:
                     completed_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_llm_extractions_video ON llm_extractions(video_id, completed_at DESC);
+                CREATE TABLE IF NOT EXISTS pipeline_runs (
+                    run_id TEXT PRIMARY KEY,
+                    cadence TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    summary_json TEXT,
+                    error TEXT
+                );
+                CREATE TABLE IF NOT EXISTS pipeline_events (
+                    event_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES pipeline_runs(run_id),
+                    stage TEXT NOT NULL,
+                    detail TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_pipeline_events_run ON pipeline_events(run_id, created_at DESC);
                 """
             )
 
@@ -194,6 +213,74 @@ class ExplorerStore:
                 "INSERT INTO job_runs VALUES (?, ?, ?, ?, ?, ?)",
                 (str(uuid.uuid4()), kind, detail, outcome, now, now),
             )
+
+    def start_pipeline_run(self, cadence: str) -> str:
+        self.init()
+        run_id = f"run_{uuid.uuid4().hex[:12]}"
+        with self.connect() as conn:
+            conn.execute("INSERT INTO pipeline_runs (run_id,cadence,status,started_at) VALUES (?, ?, 'running', ?)",
+                         (run_id, cadence, utc_now()))
+        self.append_pipeline_event(run_id, "run", f"scheduled pipeline started ({cadence})", "running")
+        return run_id
+
+    def append_pipeline_event(self, run_id: str, stage: str, detail: str, status: str = "running") -> None:
+        self.init()
+        with self.connect() as conn:
+            conn.execute("INSERT INTO pipeline_events VALUES (?, ?, ?, ?, ?, ?)",
+                         (str(uuid.uuid4()), run_id, stage, detail[:2000], status, utc_now()))
+
+    def finish_pipeline_run(self, run_id: str, *, status: str, summary: dict[str, Any] | None = None, error: str = "") -> None:
+        self.init()
+        with self.connect() as conn:
+            conn.execute("UPDATE pipeline_runs SET status=?, completed_at=?, summary_json=?, error=? WHERE run_id=?",
+                         (status, utc_now(), _json(summary) if summary is not None else None, error[:2000] or None, run_id))
+        self.append_pipeline_event(run_id, "run", "pipeline completed" if status == "ok" else error or "pipeline failed", status)
+
+    def latest_pipeline_run(self) -> Optional[dict[str, Any]]:
+        self.init()
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM pipeline_runs ORDER BY started_at DESC, rowid DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+
+    def get_pipeline_run(self, run_id: str) -> Optional[dict[str, Any]]:
+        self.init()
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM pipeline_runs WHERE run_id=?", (run_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_pipeline_runs(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Recent scheduled/manual pipeline runs, newest launch first.
+
+        Parse the non-sensitive persisted summary into template-friendly fields
+        while retaining the raw run record for diagnostics.
+        """
+        self.init()
+        with self.connect() as conn:
+            rows = self._rows(conn.execute(
+                "SELECT * FROM pipeline_runs ORDER BY started_at DESC, rowid DESC LIMIT ?", (limit,)
+            ).fetchall())
+        for row in rows:
+            try:
+                summary = json.loads(row.get("summary_json") or "{}")
+            except json.JSONDecodeError:
+                summary = {}
+            parameters = summary.get("parameters") or {}
+            # Runs created before parameter persistence have outcome query data,
+            # which is still useful context even though it lacks the full plan.
+            query_specs = parameters.get("queries") or summary.get("queries") or []
+            row["run_date"] = summary.get("run_date")
+            row["timezone"] = summary.get("timezone")
+            row["query_specs"] = query_specs
+            row["limits"] = parameters.get("limits") or {}
+            row["parameters_captured"] = bool(parameters)
+        return rows
+
+    def pipeline_events(self, run_id: str, *, limit: int = 80) -> list[dict[str, Any]]:
+        self.init()
+        with self.connect() as conn:
+            return self._rows(conn.execute(
+                "SELECT * FROM pipeline_events WHERE run_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?", (run_id, limit)
+            ).fetchall())
 
     def upsert_video(self, video: dict[str, Any], discovered_by: str = "manual") -> bool:
         """Insert/update a video and create an unknown channel as a candidate.
@@ -381,6 +468,42 @@ class ExplorerStore:
                 """SELECT extraction_id, model, skill_hash, status, error, started_at, completed_at
                    FROM llm_extractions WHERE video_id=? ORDER BY completed_at DESC, rowid DESC""", (video_id,)
             ).fetchall())
+
+    def invalid_extraction_video_ids(self, *, limit: int) -> list[str]:
+        """Latest-invalid videos with no later successful extraction."""
+        self.init()
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT e.video_id
+                   FROM llm_extractions e
+                   WHERE e.status='invalid'
+                     AND NOT EXISTS (
+                       SELECT 1 FROM llm_extractions newer
+                       WHERE newer.video_id=e.video_id AND newer.status='ok'
+                         AND (newer.completed_at > e.completed_at OR
+                              (newer.completed_at=e.completed_at AND newer.rowid > e.rowid))
+                     )
+                   GROUP BY e.video_id
+                   ORDER BY MAX(e.completed_at) ASC
+                   LIMIT ?""", (limit,)
+            ).fetchall()
+        return [row["video_id"] for row in rows]
+
+    def needs_detail_extractions(self, *, limit: int) -> list[dict[str, Any]]:
+        """Successful source bundles awaiting a research candidate."""
+        self.init()
+        with self.connect() as conn:
+            rows = self._rows(conn.execute(
+                """SELECT e.video_id, e.parsed_json, e.completed_at, v.title AS video_title
+                   FROM llm_extractions e JOIN videos v ON v.video_id=e.video_id
+                   WHERE e.status='ok' AND e.parsed_json LIKE '%\"disposition\": \"needs-detail\"%'
+                     AND NOT EXISTS (
+                       SELECT 1 FROM candidates ca JOIN claims cl ON cl.claim_id=ca.claim_id
+                       WHERE cl.video_id=e.video_id
+                     )
+                   ORDER BY e.completed_at ASC LIMIT ?""", (limit,)
+            ).fetchall())
+        return rows
 
     def add_candidate(
         self, *, title: str, summary: str, claim_id: str | None = None, priority: float = 0,

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import date
 
-from trading.ytexplorer.cli import _launch_agent_payload
-from trading.ytexplorer.pipeline import load_plan, run_scheduled
+from trading.ytexplorer.cli import _launch_agent_payload, _web_launch_agent_payload
+from trading.ytexplorer.pipeline import load_plan, rank_video_for_research, run_scheduled
 from trading.ytexplorer.store import ExplorerStore
 
 
@@ -26,3 +26,12 @@ def test_launch_agent_payload_runs_the_workspace_wrapper(tmp_path):
     payload = _launch_agent_payload(tmp_path / "run_daily.sh", tmp_path / "logs", 6, 5)
     assert payload["Label"] == "com.trading.ytexplorer.daily"
     assert payload["StartCalendarInterval"] == {"Hour": 6, "Minute": 5}
+    web = _web_launch_agent_payload(tmp_path / "run_web.sh", tmp_path / "logs")
+    assert web["RunAtLoad"] is True
+    assert web["KeepAlive"] is True
+
+
+def test_metadata_ranker_favors_explicit_rules_over_promotional_language():
+    rules_score, _ = rank_video_for_research({"title": "VWAP entry, exit and stop loss rules", "description": "backtest setup"})
+    noise_score, _ = rank_video_for_research({"title": "Guaranteed 90% win trading signals", "description": ""})
+    assert rules_score > noise_score

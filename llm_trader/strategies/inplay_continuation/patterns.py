@@ -283,7 +283,11 @@ def detect_from_frame(
             "gap_pct": cand.gap_pct,
             "rvol": cand.rvol,
             "horizon": "intraday",
-            "construction": "v0.1.0_inplay_continuation",
+            "construction": (
+                "v0.1.1_inplay_select_a" if getattr(cfg, "select_a", False)
+                else "v0.1.0_inplay_continuation"
+            ),
+            "select_a": bool(getattr(cfg, "select_a", False)),
             "cost_model": cfg.cost_model().to_dict(),
         }
         return Entry(

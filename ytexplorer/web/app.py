@@ -106,7 +106,18 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
 
     @app.get("/operations", response_class=HTMLResponse)
     def operations(request: Request):
-        return render(request, "operations.html", stats=store.dashboard(), db_path=store.path)
+        run = store.latest_pipeline_run()
+        return render(request, "operations.html", stats=store.dashboard(), db_path=store.path, run=run,
+                      runs=store.list_pipeline_runs(),
+                      events=store.pipeline_events(run["run_id"]) if run else [])
+
+    @app.get("/operations/{run_id}", response_class=HTMLResponse)
+    def operation_detail(request: Request, run_id: str):
+        run = store.get_pipeline_run(run_id)
+        if run is None:
+            raise HTTPException(404, "unknown pipeline run")
+        decorated = next((item for item in store.list_pipeline_runs(limit=1000) if item["run_id"] == run_id), run)
+        return render(request, "operation_detail.html", run=decorated, events=store.pipeline_events(run_id, limit=500))
 
     @app.get("/healthz")
     def healthz():

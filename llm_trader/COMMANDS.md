@@ -203,4 +203,11 @@ python3 -m trading.llm_trader.strategies.micro_pullback.probe_warrior \
 python3 -m trading.llm_trader.strategies.inplay_continuation.runner \
   --start 2025-07-01 --end 2026-06-30
 # results: batch/inplay_continuation/probe_12m/RESULTS.md
+# Opp B selection A/B (pre-reg select_A etc.)
+python3 -m trading.llm_trader.strategies.inplay_continuation.selection_b
+# results: batch/inplay_continuation/selection_b/RESULTS.md
+# Opp E boring baseline scoreboard vs select_A
+python3 -m trading.llm_trader.strategies.boring_baseline.scoreboard \
+  --start 2025-07-01 --end 2026-06-30
+# results: batch/boring_baseline/scoreboard_v010/RESULTS.md
 

@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -26,6 +26,35 @@ class QueryPlan:
     upload_date: str | None
     max_results: int
     intent: str
+
+
+_RULE_TERMS = {
+    "entry": 4, "exit": 4, "stop loss": 4, "invalidation": 4, "risk reward": 3,
+    "strategy": 2, "setup": 2, "rules": 2, "breakout": 2, "pullback": 2,
+    "vwap": 2, "backtest": 2, "position sizing": 2,
+}
+_NOISE_TERMS = {"guaranteed": 5, "100%": 4, "90% win": 4, "signal": 2, "prediction": 2}
+
+
+def rank_video_for_research(video: dict[str, Any]) -> tuple[int, list[str]]:
+    """Rank metadata for explicit, testable trading-rule language.
+
+    This deliberately ranks only the *extraction budget*; every result is
+    still stored in the inbox for human exploration and later re-ranking.
+    """
+    text = f"{video.get('title', '')} {video.get('description', '')}".casefold()
+    score, reasons = 0, []
+    for term, weight in _RULE_TERMS.items():
+        if term in text:
+            score += weight
+            reasons.append(term)
+    for term, penalty in _NOISE_TERMS.items():
+        if term in text:
+            score -= penalty
+    if video.get("channel_status") == "approved":
+        score += 3
+        reasons.append("approved-channel")
+    return score, reasons
 
 
 def load_plan(path: Path | str | None = None) -> dict[str, Any]:
@@ -70,6 +99,7 @@ def _audit_new_channel(store: ExplorerStore, channel_id: str, *, sample_size: in
 def run_scheduled(
     store: ExplorerStore, *, plan_path: Path | str | None = None, cadence: str = "daily",
     model: str | None = None, dry_run: bool = False, as_of: date | None = None,
+    progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run discovery → transcript → Hermes extraction → new-channel audit.
 
@@ -94,22 +124,55 @@ def run_scheduled(
 
     from .ytmcp_client import search, transcript
 
+    def report(event: str, **details: Any) -> None:
+        if progress is not None:
+            progress({"event": event, **details})
+
+    run_id = store.start_pipeline_run(cadence)
+    limits = plan["daily_limits"]
+    hermes_timeout = int(limits.get("hermes_timeout_seconds", 90))
     extractor = HermesExtractor(store)
     newly_discovered_channels: set[str] = set()
     outcomes: list[dict[str, Any]] = []
-    for item in selected:
-        result: dict[str, Any] = {"id": item.id, "query": item.query, "new": 0, "transcripts": 0, "extracted": 0, "errors": []}
+    report("run_started", query_count=len(selected))
+    extraction_budget = max(1, int(limits.get("max_hermes_per_query", 4)))
+    for query_index, item in enumerate(selected, start=1):
+        result: dict[str, Any] = {
+            "id": item.id, "query": item.query, "new": 0, "transcripts": 0, "extracted": 0,
+            "ranked_for_extraction": 0, "deferred": 0, "errors": [],
+        }
+        report("query_started", index=query_index, total_queries=len(selected), query_id=item.id, query=item.query)
+        store.append_pipeline_event(run_id, "search", f"searching {item.id}: {item.query}")
         try:
             rows = search(item.query, max_results=item.max_results, upload_date=item.upload_date)
         except Exception as exc:  # provider error belongs in the run report, not a crashed scheduler
             result["errors"].append(f"search: {exc}")
+            store.append_pipeline_event(run_id, "search", f"{item.id}: {exc}", "error")
             outcomes.append(result)
             continue
+        store.append_pipeline_event(run_id, "search", f"{item.id}: {len(rows)} videos returned")
+        # Retain every discovery result, then spend transcript/Hermes capacity
+        # only on the rule-dense subset.  Deferred records remain in the inbox.
+        new_channel_ids: dict[str, bool] = {}
         for row in rows:
+            is_new = store.upsert_video(row, discovered_by=f"scheduled:{item.id}")
+            if is_new:
+                result["new"] += 1
+                new_channel_ids[row["video_id"]] = True
+            stored = store.get_video(row["video_id"])
+            if stored:
+                row["channel_status"] = stored.get("channel_status")
+        ranked = sorted(rows, key=lambda row: (rank_video_for_research(row)[0], row.get("view_count") or 0), reverse=True)
+        work_rows = ranked[:extraction_budget]
+        result["ranked_for_extraction"] = len(work_rows)
+        result["deferred"] = max(0, len(rows) - len(work_rows))
+        store.append_pipeline_event(
+            run_id, "rank", f"{item.id}: selected {len(work_rows)}/{len(rows)} highest rule-language scores; {result['deferred']} deferred"
+        )
+        report("videos_queued", query_id=item.id, count=len(work_rows))
+        for row in work_rows:
             try:
-                is_new = store.upsert_video(row, discovered_by=f"scheduled:{item.id}")
-                if is_new:
-                    result["new"] += 1
+                if new_channel_ids.get(row["video_id"]):
                     newly_discovered_channels.add(row["channel_identifier"])
                 video = store.get_video(row["video_id"])
                 if video and video.get("transcript_status") != "ready":
@@ -117,26 +180,51 @@ def run_scheduled(
                     if "error" in tx:
                         store.mark_transcript_error(row["video_id"], str(tx["error"]))
                         result["errors"].append(f"{row['video_id']}: transcript {tx['error']}")
+                        store.append_pipeline_event(run_id, "transcript", f"{row['video_id']}: {tx['error']}", "error")
                         continue
                     store.set_transcript(row["video_id"], tx.get("raw_text", ""), tx.get("language_code", "en"))
                     result["transcripts"] += 1
-                extraction = extractor.extract(row["video_id"], model=model)
+                    store.append_pipeline_event(run_id, "transcript", f"{row['video_id']}: downloaded")
+                store.append_pipeline_event(run_id, "extract", f"{row['video_id']}: Hermes extraction")
+                extraction = extractor.extract(row["video_id"], model=model, timeout=hermes_timeout)
                 if extraction.status == "ok":
                     result["extracted"] += 1
+                store.append_pipeline_event(run_id, "extract", f"{row['video_id']}: {extraction.status} {extraction.disposition or ''}".strip(),
+                                            "ok" if extraction.status == "ok" else extraction.status)
             except Exception as exc:
                 result["errors"].append(f"{row.get('video_id', '?')}: {exc}")
+                store.append_pipeline_event(run_id, "video", f"{row.get('video_id', '?')}: {exc}", "error")
+            finally:
+                report("video_finished", query_id=item.id, video_id=row.get("video_id", "?"))
         outcomes.append(result)
 
-    limits = plan["daily_limits"]
     audit_outcomes = []
     for channel_id in sorted(newly_discovered_channels)[:int(limits.get("max_new_channels_to_audit", 3))]:
         try:
+            store.append_pipeline_event(run_id, "channel-audit", f"{channel_id}: auditing")
             audit_outcomes.append(_audit_new_channel(
                 store, channel_id, sample_size=int(limits.get("channel_sample_size", 12)),
                 fetch_transcripts=bool(limits.get("fetch_channel_transcripts", True)),
             ))
+            store.append_pipeline_event(run_id, "channel-audit", f"{channel_id}: {audit_outcomes[-1]['status']}",
+                                        audit_outcomes[-1]["status"])
         except Exception as exc:
             audit_outcomes.append({"channel_id": channel_id, "status": "error", "error": str(exc)})
-    outcome = {"mode": "run", "cadence": cadence, "run_date": run_date.isoformat(), "timezone": plan["timezone"], "queries": outcomes, "channel_audits": audit_outcomes}
+            store.append_pipeline_event(run_id, "channel-audit", f"{channel_id}: {exc}", "error")
+    outcome = {
+        "run_id": run_id, "mode": "run", "cadence": cadence, "run_date": run_date.isoformat(),
+        "timezone": plan["timezone"], "queries": outcomes, "channel_audits": audit_outcomes,
+        "parameters": {
+            "queries": [item.__dict__ for item in selected],
+            "limits": {
+                "hermes_timeout_seconds": hermes_timeout,
+                "max_hermes_per_query": extraction_budget,
+                "max_new_channels_to_audit": int(limits.get("max_new_channels_to_audit", 3)),
+                "channel_sample_size": int(limits.get("channel_sample_size", 12)),
+            },
+        },
+    }
+    store.finish_pipeline_run(run_id, status="ok", summary=outcome)
     store.record_job("scheduled-run", cadence, json.dumps(outcome, sort_keys=True))
+    report("run_finished")
     return outcome

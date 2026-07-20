@@ -5,7 +5,8 @@ daily_limits:
   max_new_channels_to_audit: 3
   channel_sample_size: 12
   fetch_channel_transcripts: true
-  hermes_timeout_seconds: 300
+  hermes_timeout_seconds: 90
+  max_hermes_per_query: 4
 queries:
   - id: intraday-price-action
     query: "stock trading price action entry stop loss strategy"
@@ -37,3 +38,66 @@ queries:
     upload_date: month
     max_results: 16
     intent: cross-sectional and swing research
+  # Broad weekly discovery expands the idea surface beyond named mechanisms.
+  # These use a shorter recency filter and lower per-query cap so the daily
+  # pipeline remains bounded; results still enter the same evidence queue.
+  - id: broad-stock-trading
+    query: "stock trading"
+    cadence: weekly
+    upload_date: month
+    max_results: 8
+    intent: broad stock-market trading discovery
+  - id: broad-trading-strategy
+    query: "trading strategy"
+    cadence: weekly
+    upload_date: month
+    max_results: 8
+    intent: broad rules-based strategy discovery
+  - id: broad-price-action
+    query: "price action trading"
+    cadence: weekly
+    upload_date: month
+    max_results: 8
+    intent: discretionary-mechanism discovery for later rule formalization
+  - id: broad-algorithmic-trading
+    query: "algorithmic trading"
+    cadence: weekly
+    upload_date: month
+    max_results: 8
+    intent: systematic trading research and implementation discovery
+  - id: broad-quant-trading
+    query: "quantitative trading"
+    cadence: weekly
+    upload_date: month
+    max_results: 8
+    intent: quantitative signal and portfolio research discovery
+  - id: broad-ai-trading
+    query: "AI trading"
+    cadence: weekly
+    upload_date: month
+    max_results: 8
+    intent: machine-learning and AI-assisted trading research discovery
+  - id: broad-claude-trading
+    query: "Claude trading"
+    cadence: weekly
+    upload_date: month
+    max_results: 8
+    intent: Claude-assisted trading workflow discovery
+  - id: broad-chatgpt-trading
+    query: "ChatGPT trading"
+    cadence: weekly
+    upload_date: month
+    max_results: 8
+    intent: LLM-assisted trading workflow discovery
+  - id: broad-options-trading
+    query: "options trading"
+    cadence: weekly
+    upload_date: month
+    max_results: 8
+    intent: options strategy discovery
+  - id: broad-futures-trading
+    query: "futures trading"
+    cadence: weekly
+    upload_date: month
+    max_results: 8
+    intent: futures and intraday execution discovery

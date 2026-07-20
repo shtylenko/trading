@@ -1,0 +1,134 @@
+{
+  "experiment": "opp_e_boring_baseline_v010",
+  "prereg": "batch/boring_baseline/PREREG_v010.md",
+  "window": {
+    "start": "2025-07-01",
+    "end": "2026-06-30"
+  },
+  "notional_usd": 5000.0,
+  "webull_mega_slip_bps": 2.0,
+  "webull_select_a_slip_bps": 15.0,
+  "baselines": {
+    "spy_oc": {
+      "n": 251,
+      "win_pct": 48.6,
+      "mean_bps": -3.363,
+      "total_pnl": -396.8,
+      "years": {
+        "2025": {
+          "n": 128,
+          "win_pct": 46.9,
+          "mean_bps": -5.702,
+          "total_pnl": -343.09
+        },
+        "2026": {
+          "n": 123,
+          "win_pct": 50.4,
+          "mean_bps": -0.93,
+          "total_pnl": -53.71
+        }
+      }
+    },
+    "qqq_oc": {
+      "n": 251,
+      "win_pct": 52.2,
+      "mean_bps": -2.786,
+      "total_pnl": -293.5,
+      "years": {
+        "2025": {
+          "n": 128,
+          "win_pct": 53.1,
+          "mean_bps": -8.417,
+          "total_pnl": -518.63
+        },
+        "2026": {
+          "n": 123,
+          "win_pct": 51.2,
+          "mean_bps": 3.075,
+          "total_pnl": 225.13
+        }
+      }
+    },
+    "spy_green_open": {
+      "n": 131,
+      "win_pct": 60.3,
+      "mean_bps": 8.154,
+      "total_pnl": 487.77,
+      "years": {
+        "2025": {
+          "n": 67,
+          "win_pct": 59.7,
+          "mean_bps": 3.36,
+          "total_pnl": 96.86
+        },
+        "2026": {
+          "n": 64,
+          "win_pct": 60.9,
+          "mean_bps": 13.172,
+          "total_pnl": 390.91
+        }
+      }
+    },
+    "spy_gap_nonneg": {
+      "n": 152,
+      "win_pct": 45.4,
+      "mean_bps": -8.205,
+      "total_pnl": -598.58,
+      "years": {
+        "2025": {
+          "n": 82,
+          "win_pct": 42.7,
+          "mean_bps": -11.63,
+          "total_pnl": -449.04
+        },
+        "2026": {
+          "n": 70,
+          "win_pct": 48.6,
+          "mean_bps": -4.192,
+          "total_pnl": -149.54
+        }
+      }
+    }
+  },
+  "baseline_counts": {
+    "spy_oc": 251,
+    "qqq_oc": 251,
+    "spy_green_open": 131,
+    "spy_gap_nonneg": 152
+  },
+  "select_a": {
+    "pooled": {
+      "n": 15,
+      "win_pct": 46.7,
+      "mean_bps": 230.02,
+      "total_pnl": 1725.15,
+      "mean_eff_r": 0.2707
+    },
+    "years": {
+      "2025": {
+        "n": 5,
+        "win_pct": 40.0,
+        "mean_bps": 51.499,
+        "total_pnl": 128.75,
+        "mean_eff_r": 0.014
+      },
+      "2026": {
+        "n": 10,
+        "win_pct": 50.0,
+        "mean_bps": 319.28,
+        "total_pnl": 1596.4,
+        "mean_eff_r": 0.3991
+      }
+    },
+    "trades": 15
+  },
+  "scoreboard": {
+    "best_baseline": "spy_green_open",
+    "best_baseline_mean_bps": 8.154,
+    "best_baseline_total_pnl": 487.77,
+    "select_a_mean_bps": 230.02,
+    "select_a_total_pnl": 1725.15,
+    "clever_wins": true
+  },
+  "completed_at": "2026-07-19T04:06:54Z"
+}

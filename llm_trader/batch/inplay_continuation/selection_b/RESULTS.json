@@ -1,0 +1,748 @@
+{
+  "experiment": "opp_b_selection",
+  "prereg": "batch/inplay_continuation/PREREG_OPPB_SELECTION.md",
+  "base_n": 87,
+  "variants": {
+    "baseline": {
+      "n_entries": 87,
+      "n_trades_slip15": 87,
+      "slip15": {
+        "pooled": {
+          "n": 87,
+          "win_pct": 41.4,
+          "eff_r": 0.0756,
+          "pnl": 657.37
+        },
+        "years": {
+          "2025": {
+            "n": 45,
+            "win_pct": 35.6,
+            "eff_r": -0.1229,
+            "pnl": -553.1
+          },
+          "2026": {
+            "n": 42,
+            "win_pct": 47.6,
+            "eff_r": 0.2882,
+            "pnl": 1210.47
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip15_paper": {
+        "pooled": {
+          "n": 87,
+          "win_pct": 41.4,
+          "eff_r": 0.0756,
+          "pnl": 657.37
+        },
+        "years": {
+          "2025": {
+            "n": 45,
+            "win_pct": 35.6,
+            "eff_r": -0.1229,
+            "pnl": -553.1
+          },
+          "2026": {
+            "n": 42,
+            "win_pct": 47.6,
+            "eff_r": 0.2882,
+            "pnl": 1210.47
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30": {
+        "pooled": {
+          "n": 87,
+          "win_pct": 40.2,
+          "eff_r": -0.0134,
+          "pnl": -116.65
+        },
+        "years": {
+          "2025": {
+            "n": 45,
+            "win_pct": 33.3,
+            "eff_r": -0.2123,
+            "pnl": -955.15
+          },
+          "2026": {
+            "n": 42,
+            "win_pct": 47.6,
+            "eff_r": 0.1996,
+            "pnl": 838.5
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30_not_catastrophe": true,
+      "primary_keep": false
+    },
+    "morning_only": {
+      "n_entries": 35,
+      "n_trades_slip15": 35,
+      "slip15": {
+        "pooled": {
+          "n": 35,
+          "win_pct": 40.0,
+          "eff_r": 0.0036,
+          "pnl": 12.71
+        },
+        "years": {
+          "2025": {
+            "n": 18,
+            "win_pct": 33.3,
+            "eff_r": -0.2233,
+            "pnl": -401.86
+          },
+          "2026": {
+            "n": 17,
+            "win_pct": 47.1,
+            "eff_r": 0.2439,
+            "pnl": 414.57
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip15_paper": {
+        "pooled": {
+          "n": 35,
+          "win_pct": 40.0,
+          "eff_r": 0.0036,
+          "pnl": 12.71
+        },
+        "years": {
+          "2025": {
+            "n": 18,
+            "win_pct": 33.3,
+            "eff_r": -0.2233,
+            "pnl": -401.86
+          },
+          "2026": {
+            "n": 17,
+            "win_pct": 47.1,
+            "eff_r": 0.2439,
+            "pnl": 414.57
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30": {
+        "pooled": {
+          "n": 35,
+          "win_pct": 37.1,
+          "eff_r": -0.0728,
+          "pnl": -254.75
+        },
+        "years": {
+          "2025": {
+            "n": 18,
+            "win_pct": 27.8,
+            "eff_r": -0.3054,
+            "pnl": -549.68
+          },
+          "2026": {
+            "n": 17,
+            "win_pct": 47.1,
+            "eff_r": 0.1735,
+            "pnl": 294.93
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30_not_catastrophe": false,
+      "primary_keep": false
+    },
+    "gap_band": {
+      "n_entries": 56,
+      "n_trades_slip15": 56,
+      "slip15": {
+        "pooled": {
+          "n": 56,
+          "win_pct": 42.9,
+          "eff_r": 0.0934,
+          "pnl": 522.82
+        },
+        "years": {
+          "2025": {
+            "n": 30,
+            "win_pct": 40.0,
+            "eff_r": -0.0103,
+            "pnl": -30.84
+          },
+          "2026": {
+            "n": 26,
+            "win_pct": 46.2,
+            "eff_r": 0.2129,
+            "pnl": 553.66
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip15_paper": {
+        "pooled": {
+          "n": 56,
+          "win_pct": 42.9,
+          "eff_r": 0.0934,
+          "pnl": 522.82
+        },
+        "years": {
+          "2025": {
+            "n": 30,
+            "win_pct": 40.0,
+            "eff_r": -0.0103,
+            "pnl": -30.84
+          },
+          "2026": {
+            "n": 26,
+            "win_pct": 46.2,
+            "eff_r": 0.2129,
+            "pnl": 553.66
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30": {
+        "pooled": {
+          "n": 56,
+          "win_pct": 42.9,
+          "eff_r": -0.013,
+          "pnl": -72.76
+        },
+        "years": {
+          "2025": {
+            "n": 30,
+            "win_pct": 40.0,
+            "eff_r": -0.1163,
+            "pnl": -348.98
+          },
+          "2026": {
+            "n": 26,
+            "win_pct": 46.2,
+            "eff_r": 0.1062,
+            "pnl": 276.22
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30_not_catastrophe": true,
+      "primary_keep": false
+    },
+    "rvol_strict": {
+      "n_entries": 51,
+      "n_trades_slip15": 51,
+      "slip15": {
+        "pooled": {
+          "n": 51,
+          "win_pct": 37.3,
+          "eff_r": 0.0456,
+          "pnl": 232.38
+        },
+        "years": {
+          "2025": {
+            "n": 26,
+            "win_pct": 23.1,
+            "eff_r": -0.3586,
+            "pnl": -932.31
+          },
+          "2026": {
+            "n": 25,
+            "win_pct": 52.0,
+            "eff_r": 0.4659,
+            "pnl": 1164.69
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip15_paper": {
+        "pooled": {
+          "n": 51,
+          "win_pct": 37.3,
+          "eff_r": 0.0456,
+          "pnl": 232.38
+        },
+        "years": {
+          "2025": {
+            "n": 26,
+            "win_pct": 23.1,
+            "eff_r": -0.3586,
+            "pnl": -932.31
+          },
+          "2026": {
+            "n": 25,
+            "win_pct": 52.0,
+            "eff_r": 0.4659,
+            "pnl": 1164.69
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30": {
+        "pooled": {
+          "n": 51,
+          "win_pct": 37.3,
+          "eff_r": -0.0284,
+          "pnl": -144.64
+        },
+        "years": {
+          "2025": {
+            "n": 26,
+            "win_pct": 23.1,
+            "eff_r": -0.4295,
+            "pnl": -1116.64
+          },
+          "2026": {
+            "n": 25,
+            "win_pct": 52.0,
+            "eff_r": 0.3888,
+            "pnl": 972.0
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30_not_catastrophe": true,
+      "primary_keep": false
+    },
+    "shallow_pb": {
+      "n_entries": 42,
+      "n_trades_slip15": 42,
+      "slip15": {
+        "pooled": {
+          "n": 42,
+          "win_pct": 42.9,
+          "eff_r": 0.0938,
+          "pnl": 394.0
+        },
+        "years": {
+          "2025": {
+            "n": 19,
+            "win_pct": 42.1,
+            "eff_r": -0.0317,
+            "pnl": -60.14
+          },
+          "2026": {
+            "n": 23,
+            "win_pct": 43.5,
+            "eff_r": 0.1975,
+            "pnl": 454.14
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip15_paper": {
+        "pooled": {
+          "n": 42,
+          "win_pct": 42.9,
+          "eff_r": 0.0938,
+          "pnl": 394.0
+        },
+        "years": {
+          "2025": {
+            "n": 19,
+            "win_pct": 42.1,
+            "eff_r": -0.0317,
+            "pnl": -60.14
+          },
+          "2026": {
+            "n": 23,
+            "win_pct": 43.5,
+            "eff_r": 0.1975,
+            "pnl": 454.14
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30": {
+        "pooled": {
+          "n": 42,
+          "win_pct": 40.5,
+          "eff_r": 0.0019,
+          "pnl": 8.05
+        },
+        "years": {
+          "2025": {
+            "n": 19,
+            "win_pct": 36.8,
+            "eff_r": -0.1251,
+            "pnl": -237.73
+          },
+          "2026": {
+            "n": 23,
+            "win_pct": 43.5,
+            "eff_r": 0.1069,
+            "pnl": 245.78
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30_not_catastrophe": true,
+      "primary_keep": false
+    },
+    "first_per_day": {
+      "n_entries": 68,
+      "n_trades_slip15": 68,
+      "slip15": {
+        "pooled": {
+          "n": 68,
+          "win_pct": 41.2,
+          "eff_r": 0.0903,
+          "pnl": 613.85
+        },
+        "years": {
+          "2025": {
+            "n": 33,
+            "win_pct": 36.4,
+            "eff_r": -0.1187,
+            "pnl": -391.66
+          },
+          "2026": {
+            "n": 35,
+            "win_pct": 45.7,
+            "eff_r": 0.2873,
+            "pnl": 1005.51
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip15_paper": {
+        "pooled": {
+          "n": 68,
+          "win_pct": 41.2,
+          "eff_r": 0.0903,
+          "pnl": 613.85
+        },
+        "years": {
+          "2025": {
+            "n": 33,
+            "win_pct": 36.4,
+            "eff_r": -0.1187,
+            "pnl": -391.66
+          },
+          "2026": {
+            "n": 35,
+            "win_pct": 45.7,
+            "eff_r": 0.2873,
+            "pnl": 1005.51
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30": {
+        "pooled": {
+          "n": 68,
+          "win_pct": 39.7,
+          "eff_r": 0.0005,
+          "pnl": 3.47
+        },
+        "years": {
+          "2025": {
+            "n": 33,
+            "win_pct": 33.3,
+            "eff_r": -0.2139,
+            "pnl": -705.98
+          },
+          "2026": {
+            "n": 35,
+            "win_pct": 45.7,
+            "eff_r": 0.2027,
+            "pnl": 709.45
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30_not_catastrophe": true,
+      "primary_keep": false
+    },
+    "select_A": {
+      "n_entries": 15,
+      "n_trades_slip15": 15,
+      "slip15": {
+        "pooled": {
+          "n": 15,
+          "win_pct": 46.7,
+          "eff_r": 0.2707,
+          "pnl": 406.08
+        },
+        "years": {
+          "2025": {
+            "n": 5,
+            "win_pct": 40.0,
+            "eff_r": 0.014,
+            "pnl": 6.99
+          },
+          "2026": {
+            "n": 10,
+            "win_pct": 50.0,
+            "eff_r": 0.3991,
+            "pnl": 399.09
+          }
+        },
+        "years_positive": 2,
+        "both_years_positive": true,
+        "pass_primary": true
+      },
+      "slip15_paper": {
+        "pooled": {
+          "n": 15,
+          "win_pct": 46.7,
+          "eff_r": 0.2707,
+          "pnl": 406.08
+        },
+        "years": {
+          "2025": {
+            "n": 5,
+            "win_pct": 40.0,
+            "eff_r": 0.014,
+            "pnl": 6.99
+          },
+          "2026": {
+            "n": 10,
+            "win_pct": 50.0,
+            "eff_r": 0.3991,
+            "pnl": 399.09
+          }
+        },
+        "years_positive": 2,
+        "both_years_positive": true,
+        "pass_primary": true
+      },
+      "slip30": {
+        "pooled": {
+          "n": 15,
+          "win_pct": 46.7,
+          "eff_r": 0.1764,
+          "pnl": 264.64
+        },
+        "years": {
+          "2025": {
+            "n": 5,
+            "win_pct": 40.0,
+            "eff_r": -0.0924,
+            "pnl": -46.2
+          },
+          "2026": {
+            "n": 10,
+            "win_pct": 50.0,
+            "eff_r": 0.3108,
+            "pnl": 310.84
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30_not_catastrophe": true,
+      "primary_keep": true
+    },
+    "select_A_shallow": {
+      "n_entries": 11,
+      "n_trades_slip15": 11,
+      "slip15": {
+        "pooled": {
+          "n": 11,
+          "win_pct": 45.5,
+          "eff_r": 0.2329,
+          "pnl": 256.21
+        },
+        "years": {
+          "2025": {
+            "n": 4,
+            "win_pct": 50.0,
+            "eff_r": 0.0957,
+            "pnl": 38.26
+          },
+          "2026": {
+            "n": 7,
+            "win_pct": 42.9,
+            "eff_r": 0.3114,
+            "pnl": 217.95
+          }
+        },
+        "years_positive": 2,
+        "both_years_positive": true,
+        "pass_primary": true
+      },
+      "slip15_paper": {
+        "pooled": {
+          "n": 11,
+          "win_pct": 45.5,
+          "eff_r": 0.2329,
+          "pnl": 256.21
+        },
+        "years": {
+          "2025": {
+            "n": 4,
+            "win_pct": 50.0,
+            "eff_r": 0.0957,
+            "pnl": 38.26
+          },
+          "2026": {
+            "n": 7,
+            "win_pct": 42.9,
+            "eff_r": 0.3114,
+            "pnl": 217.95
+          }
+        },
+        "years_positive": 2,
+        "both_years_positive": true,
+        "pass_primary": true
+      },
+      "slip30": {
+        "pooled": {
+          "n": 11,
+          "win_pct": 45.5,
+          "eff_r": 0.1332,
+          "pnl": 146.52
+        },
+        "years": {
+          "2025": {
+            "n": 4,
+            "win_pct": 50.0,
+            "eff_r": -0.0001,
+            "pnl": -0.05
+          },
+          "2026": {
+            "n": 7,
+            "win_pct": 42.9,
+            "eff_r": 0.2094,
+            "pnl": 146.57
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30_not_catastrophe": true,
+      "primary_keep": true
+    },
+    "select_A_first": {
+      "n_entries": 14,
+      "n_trades_slip15": 14,
+      "slip15": {
+        "pooled": {
+          "n": 14,
+          "win_pct": 42.9,
+          "eff_r": 0.1902,
+          "pnl": 266.34
+        },
+        "years": {
+          "2025": {
+            "n": 5,
+            "win_pct": 40.0,
+            "eff_r": 0.014,
+            "pnl": 6.99
+          },
+          "2026": {
+            "n": 9,
+            "win_pct": 44.4,
+            "eff_r": 0.2882,
+            "pnl": 259.35
+          }
+        },
+        "years_positive": 2,
+        "both_years_positive": true,
+        "pass_primary": true
+      },
+      "slip15_paper": {
+        "pooled": {
+          "n": 14,
+          "win_pct": 42.9,
+          "eff_r": 0.1902,
+          "pnl": 266.34
+        },
+        "years": {
+          "2025": {
+            "n": 5,
+            "win_pct": 40.0,
+            "eff_r": 0.014,
+            "pnl": 6.99
+          },
+          "2026": {
+            "n": 9,
+            "win_pct": 44.4,
+            "eff_r": 0.2882,
+            "pnl": 259.35
+          }
+        },
+        "years_positive": 2,
+        "both_years_positive": true,
+        "pass_primary": true
+      },
+      "slip30": {
+        "pooled": {
+          "n": 14,
+          "win_pct": 42.9,
+          "eff_r": 0.0955,
+          "pnl": 133.76
+        },
+        "years": {
+          "2025": {
+            "n": 5,
+            "win_pct": 40.0,
+            "eff_r": -0.0924,
+            "pnl": -46.2
+          },
+          "2026": {
+            "n": 9,
+            "win_pct": 44.4,
+            "eff_r": 0.2,
+            "pnl": 179.96
+          }
+        },
+        "years_positive": 1,
+        "both_years_positive": false,
+        "pass_primary": false
+      },
+      "slip30_not_catastrophe": true,
+      "primary_keep": true
+    }
+  },
+  "gates": {
+    "select_A_primary_keep": true,
+    "soft_winners": [
+      "select_A",
+      "select_A_shallow",
+      "select_A_first"
+    ],
+    "any_both_years": true,
+    "select_A_slip30_ok": true,
+    "pass": true
+  },
+  "completed_at": "2026-07-19T03:56:42Z"
+}

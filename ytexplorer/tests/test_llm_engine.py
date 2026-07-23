@@ -6,6 +6,7 @@ import subprocess
 import pytest
 
 from trading.ytexplorer.metadata_screening import parse_screen_response
+from trading.ytexplorer.candidate_synthesis import parse_synthesis_response
 from trading.ytexplorer.llm_engine import (
     ExtractionError,
     HermesExtractor,
@@ -158,6 +159,27 @@ def test_metadata_screening_requires_one_valid_decision_per_video():
     assert decisions["a"]["score"] == 80
     with pytest.raises(ValueError, match="every supplied video"):
         parse_screen_response(json.dumps({"decisions": []}), {"a"})
+
+
+def test_metadata_screening_partial_mode_keeps_valid_decisions():
+    raw = json.dumps({"decisions": [
+        {"video_id": "a", "verdict": "process", "score": 80, "reason": "Specific rules."},
+        {"video_id": "a", "verdict": "defer", "score": 20, "reason": "Duplicate."},
+    ]})
+    decisions, diagnostics = parse_screen_response(raw, {"a", "b"}, allow_partial=True)
+    assert decisions == {"a": {"verdict": "process", "score": 80.0, "reason": "Specific rules."}}
+    assert any("duplicate" in item for item in diagnostics)
+    assert any("missing" in item for item in diagnostics)
+
+
+def test_candidate_synthesis_partial_mode_keeps_valid_decisions():
+    raw = json.dumps({"decisions": [
+        {"candidate_id": "a", "family": "vwap_intraday", "recommendation": "retain", "rationale": "VWAP trigger."},
+        {"candidate_id": "a", "family": "other", "recommendation": "merge", "rationale": "Duplicate."},
+    ]})
+    decisions, diagnostics = parse_synthesis_response(raw, {"a", "b"}, allow_partial=True)
+    assert decisions["a"]["family"] == "vwap_intraday"
+    assert any("duplicate" in item for item in diagnostics)
 
 
 def test_extractor_accepts_json_fenced_by_model_commentary(tmp_path):

@@ -192,6 +192,19 @@ class ExplorerStore:
                     created_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_metadata_screenings_video ON metadata_screenings(video_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS candidate_syntheses (
+                    synthesis_id TEXT PRIMARY KEY,
+                    candidate_id TEXT NOT NULL REFERENCES candidates(candidate_id),
+                    synthesis_version TEXT NOT NULL,
+                    model TEXT,
+                    prompt_hash TEXT NOT NULL,
+                    family TEXT NOT NULL,
+                    recommendation TEXT NOT NULL,
+                    rationale TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_candidate_syntheses_candidate
+                    ON candidate_syntheses(candidate_id, created_at DESC);
                 CREATE TABLE IF NOT EXISTS pipeline_runs (
                     run_id TEXT PRIMARY KEY,
                     cadence TEXT NOT NULL,
@@ -658,6 +671,85 @@ class ExplorerStore:
                    WHERE ca.candidate_id=?""", (candidate_id,)
             ).fetchone()
         return dict(row) if row else None
+
+    def record_candidate_syntheses(
+        self,
+        decisions: dict[str, dict[str, Any]],
+        *,
+        model: str | None,
+        prompt_hash: str,
+        synthesis_version: str,
+    ) -> None:
+        """Record advisory family labels; this never changes candidate status."""
+        if not decisions:
+            return
+        self.init()
+        now = utc_now()
+        with self.connect() as conn:
+            for candidate_id, decision in decisions.items():
+                conn.execute(
+                    """INSERT INTO candidate_syntheses
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        f"syn_{uuid.uuid4().hex[:12]}", candidate_id, synthesis_version, model,
+                        prompt_hash, decision["family"], decision["recommendation"],
+                        decision["rationale"], now,
+                    ),
+                )
+
+    def candidate_family_groups(self) -> list[dict[str, Any]]:
+        """Latest advisory synthesis for each still-active candidate, grouped by family."""
+        self.init()
+        active = ("triage", "needs-detail", "duplicate", "data-blocked", "parked", "approved-for-brief")
+        placeholders = ",".join("?" for _ in active)
+        query = f"""
+            WITH latest AS (
+                SELECT cs.*, ROW_NUMBER() OVER (
+                    PARTITION BY cs.candidate_id ORDER BY cs.created_at DESC, cs.rowid DESC
+                ) AS ordinal
+                FROM candidate_syntheses cs
+            )
+            SELECT ca.*, cl.trigger_rule, cl.invalidation_rule, v.video_id, v.title AS video_title,
+                   v.url, ch.title AS channel_title, latest.family, latest.recommendation,
+                   latest.rationale, latest.created_at AS synthesized_at
+            FROM candidates ca
+            LEFT JOIN latest ON latest.candidate_id=ca.candidate_id AND latest.ordinal=1
+            LEFT JOIN claims cl ON cl.claim_id=ca.claim_id
+            LEFT JOIN videos v ON v.video_id=cl.video_id
+            LEFT JOIN channels ch ON ch.channel_id=v.channel_id
+            WHERE ca.status IN ({placeholders})
+            ORDER BY COALESCE(latest.family, 'unsynthesized'), ca.priority DESC, ca.updated_at DESC
+        """
+        with self.connect() as conn:
+            rows = self._rows(conn.execute(query, active).fetchall())
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            groups.setdefault(row.get("family") or "unsynthesized", []).append(row)
+        return [
+            {"family": family, "candidates": items, "count": len(items)}
+            for family, items in sorted(groups.items(), key=lambda item: (-len(item[1]), item[0]))
+        ]
+
+    def active_candidates_for_synthesis(self) -> list[dict[str, Any]]:
+        """Active hypotheses with the fields needed for advisory clustering."""
+        self.init()
+        active = ("triage", "needs-detail", "duplicate", "data-blocked", "parked", "approved-for-brief")
+        placeholders = ",".join("?" for _ in active)
+        query = f"""SELECT ca.*, cl.trigger_rule, cl.invalidation_rule
+                     FROM candidates ca LEFT JOIN claims cl ON cl.claim_id=ca.claim_id
+                     WHERE ca.status IN ({placeholders})
+                     ORDER BY ca.priority DESC, ca.updated_at DESC"""
+        with self.connect() as conn:
+            return self._rows(conn.execute(query, active).fetchall())
+
+    def synthesized_candidate_ids(self, synthesis_version: str) -> set[str]:
+        self.init()
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT candidate_id FROM candidate_syntheses WHERE synthesis_version=?",
+                (synthesis_version,),
+            ).fetchall()
+        return {str(row["candidate_id"]) for row in rows}
 
     def transition_candidate(self, candidate_id: str, to_status: str, *, actor: str, rationale: str = "") -> None:
         if to_status not in CANDIDATE_STATUSES:

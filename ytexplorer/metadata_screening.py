@@ -42,7 +42,18 @@ Videos:
 {json.dumps(records, ensure_ascii=False)}"""
 
 
-def parse_screen_response(raw: str, expected_ids: set[str]) -> dict[str, dict[str, Any]]:
+def parse_screen_response(
+    raw: str,
+    expected_ids: set[str],
+    *,
+    allow_partial: bool = False,
+) -> dict[str, dict[str, Any]] | tuple[dict[str, dict[str, Any]], list[str]]:
+    """Parse a screen response, optionally retaining its valid subset.
+
+    A batch contains independent decisions. One duplicated ID should not throw
+    away the other nineteen valid decisions; missing/invalid rows simply use
+    the deterministic fallback in the caller.
+    """
     try:
         cleaned = raw.strip()
         fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, flags=re.IGNORECASE | re.DOTALL)
@@ -58,22 +69,37 @@ def parse_screen_response(raw: str, expected_ids: set[str]) -> dict[str, dict[st
     if not isinstance(decisions, list):
         raise ValueError("metadata screener result needs a decisions list")
     parsed: dict[str, dict[str, Any]] = {}
-    for item in decisions:
+    diagnostics: list[str] = []
+    for position, item in enumerate(decisions, start=1):
         if not isinstance(item, dict):
-            raise ValueError("metadata screener decision is not an object")
+            diagnostics.append(f"decision {position}: not an object")
+            continue
         video_id = item.get("video_id")
         verdict = item.get("verdict")
         score = item.get("score")
         reason = item.get("reason")
-        if video_id not in expected_ids or video_id in parsed:
-            raise ValueError("metadata screener returned an unknown or duplicate video_id")
+        if video_id not in expected_ids:
+            diagnostics.append(f"decision {position}: unknown video_id")
+            continue
+        if video_id in parsed:
+            diagnostics.append(f"decision {position}: duplicate video_id {video_id}")
+            continue
         if verdict not in VERDICTS or not isinstance(score, (int, float)) or not 0 <= float(score) <= 100:
-            raise ValueError("metadata screener returned an invalid verdict or score")
+            diagnostics.append(f"decision {position}: invalid verdict or score")
+            continue
         if not isinstance(reason, str) or not reason.strip():
-            raise ValueError("metadata screener reason is missing")
+            diagnostics.append(f"decision {position}: missing reason")
+            continue
         parsed[video_id] = {"verdict": verdict, "score": float(score), "reason": reason.strip()[:500]}
-    if set(parsed) != expected_ids:
+    missing = expected_ids - set(parsed)
+    if missing:
+        diagnostics.append(f"missing decisions for {len(missing)} video(s)")
+    if not allow_partial and diagnostics:
         raise ValueError("metadata screener did not decide every supplied video")
+    if allow_partial:
+        if not parsed:
+            raise ValueError("metadata screener returned no usable decisions")
+        return parsed, diagnostics
     return parsed
 
 
@@ -82,9 +108,15 @@ class MetadataScreener:
         self.store = store
         self.runner = runner
 
-    def screen(self, videos: list[dict[str, Any]], *, model: str | None = None, timeout: int = 45) -> dict[str, dict[str, Any]]:
+    def screen(
+        self,
+        videos: list[dict[str, Any]],
+        *,
+        model: str | None = None,
+        timeout: int = 45,
+    ) -> tuple[dict[str, dict[str, Any]], list[str]]:
         if not videos:
-            return {}
+            return {}, []
         prompt = build_screen_prompt(videos)
         command = ["hermes", "-z", prompt, "--safe-mode"]
         if model:
@@ -92,11 +124,15 @@ class MetadataScreener:
         proc = self.runner(command, text=True, capture_output=True, timeout=timeout, check=False)
         if proc.returncode:
             raise RuntimeError((proc.stderr or proc.stdout or "metadata screener failed")[:1000])
-        decisions = parse_screen_response(proc.stdout or "", {video["video_id"] for video in videos})
+        decisions, diagnostics = parse_screen_response(
+            proc.stdout or "",
+            {video["video_id"] for video in videos},
+            allow_partial=True,
+        )
         self.store.record_metadata_screenings(
             decisions,
             model=model,
             prompt_hash=_digest(prompt),
             screen_version=SCREEN_VERSION,
         )
-        return decisions
+        return decisions, diagnostics

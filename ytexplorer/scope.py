@@ -17,7 +17,7 @@ _OUT_OF_SCOPE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 def long_only_scope(video: dict[str, Any]) -> tuple[bool, list[str]]:
-    """Return whether title/description fit the long-only research mandate."""
-    text = f"{video.get('title', '')}\n{video.get('description', '')}"
+    """Return whether title, description, and channel fit the long-only mandate."""
+    text = f"{video.get('title', '')}\n{video.get('description', '')}\n{video.get('channel', '')}\n{video.get('channel_title', '')}"
     reasons = [label for pattern, label in _OUT_OF_SCOPE_PATTERNS if pattern.search(text)]
     return not reasons, reasons

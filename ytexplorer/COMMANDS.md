@@ -18,6 +18,7 @@ YouTube search
   → download selected transcripts
   → Hermes extracts exact, cited claims
   → Claims / Research Candidates
+  → advisory Research Families
   → experiment brief and strategy testing
 ```
 
@@ -188,6 +189,9 @@ Open `http://127.0.0.1:8791`.
 - **Inbox** — every discovered video and transcript state.
 - **Claims** — exact evidence extracted from transcripts.
 - **Research Candidates** — ideas ready for rule completion and evaluation.
+- **Research Families** — an advisory grouping of active candidates by shared
+  mechanism. It is source-linked and does not change candidate status or run a
+  backtest.
 - **Channels** — discovered sources and their trading-content audit state.
 - **Search plan** — current configured queries and limits.
 - **Operations** — scheduled-run history, parameters, events, and errors.
@@ -201,7 +205,36 @@ python3 -m trading.ytexplorer.cli --json list candidates --limit 50
 python3 -m trading.ytexplorer.cli --json list channels
 ```
 
-## 8. Move an idea into strategy testing
+## 8. Candidate-family synthesis
+
+After extraction, a bounded Hermes prompt groups active candidates into such
+families as `swing_breakout_volume`, `vwap_intraday`, and `ema_ma_trend`. It
+also recommends `retain`, `merge`, or `needs-detail`. These are review aids,
+not automatic status changes.
+
+The scheduler handles a small number automatically on every normal run, so a
+large backlog drains over time without human intervention:
+
+```yaml
+daily_limits:
+  max_candidate_synthesis_per_run: 4
+  candidate_synthesis_batch_size: 4
+```
+
+To accelerate that bounded, resumable job now:
+
+```bash
+# New or previously unsynthesized candidates only; eight compact records per prompt.
+python3 -m trading.ytexplorer.cli --json synthesize-candidates --batch-size 8
+
+# A small controlled pass.
+python3 -m trading.ytexplorer.cli --json synthesize-candidates --limit 8 --batch-size 8
+```
+
+Each batch is checkpointed in the job ledger. Candidates already classified by
+the current synthesis version are skipped unless `--refresh` is supplied.
+
+## 9. Move an idea into strategy testing
 
 YT Explorer stops at evidence and a research brief. It does not automatically
 write or execute a trading strategy. Once a Research Candidate has explicit

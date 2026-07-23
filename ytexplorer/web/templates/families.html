@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}Research Families — YT Explorer{% endblock %}
+{% block content %}
+<div class="row"><div><h1>Research Families</h1><p class="lede">An advisory clustering of active, long-only research candidates. It does not alter a candidate’s status or create a backtest.</p></div></div>
+{% if groups %}
+{% for group in groups %}
+<section class="card"><div class="row"><div><h2>{{group.family|replace('_', ' ')|title}}</h2><p class="muted">{{group.count}} active candidate{{'' if group.count==1 else 's'}}</p></div></div>
+<table><thead><tr><th>Hypothesis</th><th>Recommendation</th><th class="right">Priority</th><th>Why grouped</th><th>Source</th></tr></thead><tbody>
+{% for c in group.candidates %}<tr><td><a href="/candidates/{{c.candidate_id}}"><strong>{{c.title}}</strong></a><div class="muted clip">{{c.summary}}</div></td><td>{% if c.recommendation %}<span class="pill">{{c.recommendation}}</span>{% else %}<span class="muted">Not yet synthesized</span>{% endif %}</td><td class="right">{{'%.0f'|format(c.priority)}}</td><td class="clip">{{c.rationale or 'Run candidate synthesis to add an advisory explanation.'}}</td><td>{% if c.video_id %}<a href="/videos/{{c.video_id}}">{{c.channel_title}}</a>{% else %}—{% endif %}</td></tr>{% endfor %}
+</tbody></table></section>
+{% endfor %}
+{% else %}<section class="card"><p class="empty">No active research candidates yet.</p></section>{% endif %}
+{% endblock %}

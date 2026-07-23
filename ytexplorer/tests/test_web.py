@@ -25,6 +25,7 @@ def test_dashboard_and_candidate_page_share_store(tmp_path):
     detail = client.get(f"/candidates/{candidate}")
     assert detail.status_code == 200
     assert "Candidate one" in detail.text
+    assert client.get("/families").status_code == 200
     response = client.post(f"/candidates/{candidate}/transition", data={"status": "parked", "rationale": "duplicate"})
     assert response.status_code == 200
     assert store.get_candidate(candidate)["status"] == "parked"

@@ -354,6 +354,60 @@ def cmd_recover(args: argparse.Namespace) -> None:
     _print({"retried": retried, "promoted_needs_detail": promoted}, as_json=args.json)
 
 
+def cmd_synthesize_candidates(args: argparse.Namespace) -> None:
+    """Group active hypotheses into advisory research families with Hermes."""
+    from .candidate_synthesis import CandidateSynthesizer, SYNTHESIS_VERSION
+
+    store = _store(args)
+    candidates = store.active_candidates_for_synthesis()
+    if not args.refresh:
+        completed = store.synthesized_candidate_ids(SYNTHESIS_VERSION)
+        candidates = [candidate for candidate in candidates if candidate["candidate_id"] not in completed]
+    if args.limit is not None:
+        candidates = candidates[:max(0, args.limit)]
+    batch_size = max(1, args.batch_size)
+    batches = [candidates[index:index + batch_size] for index in range(0, len(candidates), batch_size)]
+    progress = _BatchProgress("Synthesize candidates", len(candidates), enabled=not args.no_progress)
+    processed = 0
+    decisions = 0
+    warnings: list[str] = []
+    errors: list[str] = []
+    try:
+        synth = CandidateSynthesizer(store)
+        for batch_number, batch in enumerate(batches, start=1):
+            try:
+                parsed, diagnostics = synth.synthesize(batch, model=args.model, timeout=args.timeout)
+                processed += len(batch)
+                decisions += len(parsed)
+                warnings.extend(diagnostics)
+                store.record_job(
+                    "candidate-synthesis-batch", f"{SYNTHESIS_VERSION}:{batch_number}",
+                    json.dumps({"selected": len(batch), "decisions": len(parsed), "warnings": diagnostics}, sort_keys=True),
+                )
+            except Exception as exc:
+                error = str(exc)
+                errors.append(error)
+                store.record_job(
+                    "candidate-synthesis-batch", f"{SYNTHESIS_VERSION}:{batch_number}",
+                    json.dumps({"selected": len(batch), "error": error}, sort_keys=True),
+                )
+            finally:
+                progress.update(len(batch))
+    finally:
+        progress.close()
+    outcome = {
+        "synthesis_version": SYNTHESIS_VERSION,
+        "selected": len(candidates),
+        "processed": processed,
+        "decisions": decisions,
+        "warnings": warnings,
+        "errors": errors,
+        "families_url": "http://127.0.0.1:8791/families",
+    }
+    store.record_job("candidate-synthesis", SYNTHESIS_VERSION, json.dumps(outcome, sort_keys=True))
+    _print(outcome, as_json=args.json)
+
+
 def cmd_run_scheduled(args: argparse.Namespace) -> None:
     from .pipeline import run_scheduled
 
@@ -637,6 +691,15 @@ def build_parser() -> argparse.ArgumentParser:
     recover.add_argument("--model", help="Hermes model override")
     recover.add_argument("--timeout", type=int, default=90)
     recover.set_defaults(func=cmd_recover)
+
+    synthesize = sub.add_parser("synthesize-candidates", help="group active candidates into advisory research families")
+    synthesize.add_argument("--batch-size", type=int, default=8,
+                            help="candidates per bounded Hermes prompt (default: 8)")
+    synthesize.add_argument("--model", help="Hermes model override")
+    synthesize.add_argument("--timeout", type=int, default=90)
+    synthesize.add_argument("--limit", type=int, help="maximum unsynthesized candidates to process")
+    synthesize.add_argument("--refresh", action="store_true", help="resynthesize candidates that already have this version")
+    synthesize.set_defaults(func=cmd_synthesize_candidates)
 
     scheduled = sub.add_parser("run-scheduled", help="run the configured autonomous discovery plan")
     scheduled.add_argument("--plan", type=Path, help="query-plan YAML (default: ytexplorer/config/queries.yaml)")

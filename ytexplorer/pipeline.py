@@ -85,6 +85,7 @@ def screen_and_rank_videos(
     to_screen = baseline[:max(0, screen_limit)]
     decisions: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
+    warnings: list[str] = []
     if to_screen:
         from .metadata_screening import MetadataScreener
 
@@ -92,7 +93,9 @@ def screen_and_rank_videos(
         for start in range(0, len(to_screen), max(1, batch_size)):
             batch = to_screen[start:start + max(1, batch_size)]
             try:
-                decisions.update(screener.screen(batch, model=model, timeout=min(timeout, 45)))
+                batch_decisions, diagnostics = screener.screen(batch, model=model, timeout=min(timeout, 45))
+                decisions.update(batch_decisions)
+                warnings.extend(diagnostics)
             except Exception as exc:
                 errors.append(str(exc))
                 if run_id:
@@ -119,11 +122,16 @@ def screen_and_rank_videos(
             video.get("view_count") or 0,
         )
     ranked = sorted(eligible, key=key, reverse=True)
-    summary = {"screened": len(decisions), "screened_out_of_scope": screened_out, "screen_errors": errors}
+    summary = {
+        "screened": len(decisions),
+        "screened_out_of_scope": screened_out,
+        "screen_errors": errors,
+        "screen_warnings": warnings,
+    }
     if run_id:
         store.append_pipeline_event(
             run_id, stage,
-            f"screened {len(decisions)}/{len(to_screen)} metadata records; {screened_out} out of scope; {len(errors)} fallback batches",
+            f"screened {len(decisions)}/{len(to_screen)} metadata records; {screened_out} out of scope; {len(errors)} fallback batches; {len(warnings)} partial-output warnings",
             "ok" if not errors else "error",
         )
     return ranked, summary
@@ -314,6 +322,55 @@ def recover_invalid_extractions(
     return result
 
 
+def synthesize_candidate_backlog(
+    store: ExplorerStore,
+    *,
+    limit: int,
+    batch_size: int,
+    model: str | None = None,
+    timeout: int = 90,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    """Incrementally organize active hypotheses after extraction.
+
+    The output is advisory only: it records family labels and suggested next
+    review action, never changes a candidate state or starts a backtest.
+    """
+    from .candidate_synthesis import CandidateSynthesizer, SYNTHESIS_VERSION
+
+    completed = store.synthesized_candidate_ids(SYNTHESIS_VERSION)
+    available = [row for row in store.active_candidates_for_synthesis() if row["candidate_id"] not in completed]
+    selected = available[:max(0, limit)]
+    result: dict[str, Any] = {"pending": len(available), "selected": len(selected), "decisions": 0, "warnings": [], "errors": []}
+    if not selected:
+        return result
+    if run_id:
+        store.append_pipeline_event(run_id, "candidate-synthesis", f"selected {len(selected)}/{len(available)} unsynthesized candidates")
+    synthesizer = CandidateSynthesizer(store)
+    size = max(1, batch_size)
+    for index in range(0, len(selected), size):
+        batch = selected[index:index + size]
+        try:
+            decisions, diagnostics = synthesizer.synthesize(batch, model=model, timeout=timeout)
+            result["decisions"] += len(decisions)
+            result["warnings"].extend(diagnostics)
+            store.record_job(
+                "candidate-synthesis-batch", f"{SYNTHESIS_VERSION}:{index // size + 1}",
+                json.dumps({"selected": len(batch), "decisions": len(decisions), "warnings": diagnostics}, sort_keys=True),
+            )
+            if run_id:
+                store.append_pipeline_event(run_id, "candidate-synthesis", f"{len(decisions)}/{len(batch)} classified", "ok")
+        except Exception as exc:
+            result["errors"].append(str(exc))
+            store.record_job(
+                "candidate-synthesis-batch", f"{SYNTHESIS_VERSION}:{index // size + 1}",
+                json.dumps({"selected": len(batch), "error": str(exc)}, sort_keys=True),
+            )
+            if run_id:
+                store.append_pipeline_event(run_id, "candidate-synthesis", str(exc), "error")
+    return result
+
+
 def run_scheduled(
     store: ExplorerStore, *, plan_path: Path | str | None = None, cadence: str = "daily",
     model: str | None = None, dry_run: bool = False, as_of: date | None = None,
@@ -455,6 +512,14 @@ def run_scheduled(
         run_id=run_id,
         progress=progress,
     )
+    candidate_synthesis = synthesize_candidate_backlog(
+        store,
+        limit=max(0, int(limits.get("max_candidate_synthesis_per_run", 0))),
+        batch_size=max(1, int(limits.get("candidate_synthesis_batch_size", 4))),
+        model=model,
+        timeout=hermes_timeout,
+        run_id=run_id,
+    )
 
     audit_outcomes = []
     for channel_id in sorted(newly_discovered_channels)[:int(limits.get("max_new_channels_to_audit", 3))]:
@@ -473,6 +538,7 @@ def run_scheduled(
         "run_id": run_id, "mode": "run", "cadence": cadence, "run_date": run_date.isoformat(),
         "timezone": plan["timezone"], "queries": outcomes, "historical_backfill": historical_backfill,
         "recovery": recovery,
+        "candidate_synthesis": candidate_synthesis,
         "channel_audits": audit_outcomes,
         "parameters": {
             "queries": [item.__dict__ for item in selected],
@@ -484,6 +550,8 @@ def run_scheduled(
                 "metadata_screen_batch_size": int(limits.get("metadata_screen_batch_size", 20)),
                 "max_metadata_screen_videos_per_query": int(limits.get("max_metadata_screen_videos_per_query", 20)),
                 "max_metadata_screen_videos_per_backfill": int(limits.get("max_metadata_screen_videos_per_backfill", 40)),
+                "max_candidate_synthesis_per_run": max(0, int(limits.get("max_candidate_synthesis_per_run", 0))),
+                "candidate_synthesis_batch_size": max(1, int(limits.get("candidate_synthesis_batch_size", 4))),
                 "max_new_channels_to_audit": int(limits.get("max_new_channels_to_audit", 3)),
                 "channel_sample_size": int(limits.get("channel_sample_size", 12)),
             },

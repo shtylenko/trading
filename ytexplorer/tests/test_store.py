@@ -48,3 +48,18 @@ def test_pipeline_run_history_is_newest_first_and_exposes_parameters(tmp_path):
     runs = store.list_pipeline_runs()
     assert [run["run_id"] for run in runs] == [second, first]
     assert runs[1]["query_specs"] == [{"id": "a"}]
+
+
+def test_candidate_synthesis_is_advisory_and_groups_active_candidates(tmp_path):
+    store = ExplorerStore(tmp_path / "explorer.sqlite3")
+    store.upsert_video(_video())
+    claim = store.add_claim(video_id="v1", claim_type="setup", summary="Rule", evidence_quote="quoted rule")
+    candidate = store.add_candidate(title="VWAP reclaim", summary="A thesis", claim_id=claim, priority=10)
+    store.record_candidate_syntheses(
+        {candidate: {"family": "vwap_intraday", "recommendation": "retain", "rationale": "VWAP-based entry."}},
+        model="test", prompt_hash="hash", synthesis_version="test-v1",
+    )
+    groups = store.candidate_family_groups()
+    assert groups[0]["family"] == "vwap_intraday"
+    assert groups[0]["candidates"][0]["candidate_id"] == candidate
+    assert store.get_candidate(candidate)["status"] == "triage"

@@ -43,6 +43,7 @@ def test_long_only_scope_excludes_futures_options_and_short_selling():
     for title in ("VWAP futures strategy", "Options income strategy", "Short selling setup with stops", "Bearish continuation trade"):
         assert long_only_scope({"title": title})[0] is False
     assert long_only_scope({"title": "Long-only stock swing trading strategy"})[0] is True
+    assert long_only_scope({"title": "VWAP trend pullback", "channel_title": "Axia Futures"})[0] is False
 
 
 def test_transcript_reservation_is_atomic(tmp_path):

@@ -12,6 +12,10 @@ daily_limits:
   metadata_screen_batch_size: 20
   max_metadata_screen_videos_per_query: 20
   max_metadata_screen_videos_per_backfill: 40
+  # Advisory clustering is intentionally small: it catches up automatically
+  # without turning a daily discovery run into a second large Hermes job.
+  max_candidate_synthesis_per_run: 4
+  candidate_synthesis_batch_size: 4
 queries:
   - id: day-trading
     query: "day trading"

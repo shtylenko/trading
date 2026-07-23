@@ -87,6 +87,10 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
             events=store.candidate_events(candidate_id), experiments=store.experiment_links(candidate_id),
         )
 
+    @app.get("/families", response_class=HTMLResponse)
+    def families(request: Request):
+        return render(request, "families.html", groups=store.candidate_family_groups())
+
     @app.post("/candidates/{candidate_id}/transition")
     def transition(candidate_id: str, status: str = Form(...), rationale: str = Form("")):
         try:

@@ -1,0 +1,46 @@
+{
+  "disposition": "reference",
+  "rationale": "Beginner educational overview of 18 standard chart patterns (ascending/descending triangle, pennant, wedge, rounding top/bottom, cup and handle). Each pattern is described with basic entry, stop-loss, and target rules, but the content is generic technical-analysis education — no proprietary or novel mechanical claims, no performance data, and no falsifiable edge. The speaker uses probabilistic language ('chances of the market falling/rising') throughout, confirming an instructional rather than research-intake purpose.",
+  "claims": [
+    {
+      "claim_type": "setup",
+      "summary": "Ascending triangle: continuation bullish pattern forming in a prior uptrend. Resistance is flat (R1=R2) while support rises (S1<S2<S3). Breakout above resistance is the entry trigger.",
+      "evidence_start": null,
+      "evidence_end": null,
+      "evidence_fragment_id": "F005",
+      "horizon": "swing",
+      "trigger_rule": "Price breaks above the flat resistance level after at least two touches",
+      "invalidation_rule": "Price breaks below the rising support trendline before the breakout",
+      "required_data": ["OHLCV bars sufficient to identify swing highs/lows"],
+      "missing_fields": ["minimum bar count for pattern formation", "breakout confirmation threshold (close vs. wick)", "volume filter"],
+      "extract_confidence": 0.85
+    },
+    {
+      "claim_type": "entry",
+      "summary": "Bullish pennant: entry in the candle after the breakout candle. Stop-loss below the breakout candle. Target equals the height of the preceding pole.",
+      "evidence_start": null,
+      "evidence_end": null,
+      "evidence_fragment_id": "F009",
+      "horizon": "swing",
+      "trigger_rule": "Price breaks above the converging support/resistance lines of the pennant after at least two touches each side",
+      "invalidation_rule": "Price breaks below the lower trendline of the pennant",
+      "required_data": ["OHLCV bars showing prior uptrend pole and the converging pennant"],
+      "missing_fields": ["minimum pole length", "pennant duration limits", "volume confirmation"],
+      "extract_confidence": 0.8
+    },
+    {
+      "claim_type": "setup",
+      "summary": "Cup and handle: rounding bottom (cup) followed by a smaller rounding bottom (handle) below the cup's rim. A breakout above the rim resistance is the buy signal. A second touch of the rim strengthens the pattern.",
+      "evidence_start": null,
+      "evidence_end": null,
+      "evidence_fragment_id": "F016",
+      "horizon": "swing",
+      "trigger_rule": "Price breaks above the resistance at the cup's rim after forming the handle",
+      "invalidation_rule": "Not explicitly stated in the source",
+      "required_data": ["OHLCV bars showing the full cup and handle shape"],
+      "missing_fields": ["minimum cup depth", "cup/handle duration ratio", "breakout confirmation", "stop-loss placement"],
+      "extract_confidence": 0.7
+    }
+  ],
+  "candidate": null
+}

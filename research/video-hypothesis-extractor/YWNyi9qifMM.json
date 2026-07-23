@@ -1,0 +1,20 @@
+{
+  "disposition": "reference",
+  "rationale": "Educational overview of Wells Wilder's classic technical indicators (RSI, ATR, Parabolic SAR, ADX) from 'New Concepts in Technical Trading Systems'. No specific mechanical entry/exit/invalidation rules are stated. The content is generic indicator education — how each indicator works conceptually and why discipline matters — without a concrete, testable setup. 'RSI above 70/below 30' is mentioned only to be dismissed as simplistic (F012: 'They think 70 means sell, 30 means buy. But a rich trader understands that RSI measures psychology'). The closest thing to a system (F019-F021) is a high-level philosophy: combine indicators, control risk, be disciplined. No numeric triggers, no invalidation conditions, no exit rules beyond 'Parabolic SAR dot flips' which is the indicator's built-in trailing stop behavior, not a stated strategy rule.",
+  "claims": [
+    {
+      "claim_type": "market_context",
+      "summary": "Video surveys four indicators from Wilder's book: RSI (psychology/momentum), ATR (volatility), Parabolic SAR (trailing stop), ADX (trend strength). Presented as educational overview, not as a specific strategy with stated rules.",
+      "evidence_start": null,
+      "evidence_end": null,
+      "evidence_fragment_id": "F003",
+      "horizon": "unknown",
+      "trigger_rule": null,
+      "invalidation_rule": null,
+      "required_data": [],
+      "missing_fields": ["trigger_rule", "invalidation_rule", "exit_rule", "horizon", "required_data"],
+      "extract_confidence": 0.0
+    }
+  ],
+  "candidate": null
+}

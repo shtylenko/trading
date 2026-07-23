@@ -755,6 +755,7 @@ def init(
             "decision_policy": m.get("decision_policy"),
             "session_from_open": m.get("session_from_open"),
             "five_minute_context": m.get("five_minute_context"),
+            "candlebar_context": m.get("candlebar_context"),
             "completed_five_minute_entry_required": m.get(
                 "completed_five_minute_entry_required"
             ),

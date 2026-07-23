@@ -9,6 +9,32 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
 
 ---
 
+### 4.1.0 — deterministic candlebars + entry/exit confluence scoring  ⏳ SAMPLE CANDIDATE — NOT YET VALIDATED
+- **Why:** the transcript teaches reading repeatable price patterns together with
+  volume, VWAP, EMA, and MACD, while treating topping tails and failed breakouts as
+  management evidence. Leaving those shapes to free-form model vision would make
+  identical OHLCV bars produce non-reproducible evidence.
+- **Change:** opt-in replay context now emits causal deterministic events for
+  candle-over-candle, micro-pullback break, bull-flag break, bearish topping tail,
+  and bearish breakout failure on completed 1-minute and 5-minute bars. The 4.1
+  skill retains every 4.0 completed-5-minute hard entry gate, then requires a
+  documented 75/100 pattern-volume-trend-candle-time score. Management preserves
+  the immediate failed-break bailout and adds a 50/100 exit-pressure score that
+  combines bearish geometry with VWAP, red-volume, MACD, or stalled-price evidence.
+- **Type:** experimental operationalization + replay contract. Detector quality is
+  explicitly geometry in `[0,1]`, not probability; correlated patterns do not
+  stack. The 75/50 thresholds and weights are engineering hypotheses, not Cameron
+  quotes, and must not be tuned against the known 100-set.
+- **Compatibility:** `candlebar_context` is frontmatter-opt-in. Historical versions
+  receive their original JSON stream, so their sealed behavior does not change.
+- **Test:** focused unit/regression coverage plus a cached replay smoke test. Next,
+  run a paired repeated 4.0.0 → 4.1.0 batch on the pinned set, inspect decision-score
+  distributions and event frequency, then validate any retained hypothesis on a
+  disjoint holdout.
+- **Decision:** ⏳ HOLD — sample candidate only; 3.0.0 remains the active baseline.
+
+---
+
 ### 3.4.0 — parametrized §C re-entry budget + cutoff time  ⏳ CANDIDATE — NOT YET VALIDATED
 - **Why:** §C hard-capped re-entries at **one** and stopped the loop the moment the
   agent went flat after using it, so a choppy morning with several distinct A-setups

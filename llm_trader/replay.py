@@ -52,6 +52,7 @@ import pandas as pd
 
 from trading.marketdata import fetch_bars
 
+from .candlebars import PatternEvent, detect_patterns
 from .config import DATA_DIR, ScanConfig
 from .indicators import (
     DAILY_REPLAY_PLAN_LOOKBACK_BARS,
@@ -304,6 +305,7 @@ def replay(
     from_open: bool = False,
     neutral_meta: bool = False,
     five_minute_context: bool = False,
+    candlebar_context: bool = False,
     delay: float = 0.0,
     force: bool = False,
     fmt: str = "human",
@@ -374,6 +376,7 @@ def replay(
             return _stream_jsonl(
                 setup, df, start_t, anchor, streams, delay, force=force, ext_df=ext_df,
                 neutral_meta=neutral_meta, five_minute_context=five_minute_context,
+                candlebar_context=candlebar_context,
             )
         return _stream_human(setup, df, start_t, anchor, streams, delay)
     finally:
@@ -765,6 +768,7 @@ def _stream_jsonl(
     setup, df, start_t, anchor, streams, delay, force: bool = False,
     ext_df: Optional[pd.DataFrame] = None, *, neutral_meta: bool = False,
     five_minute_context: bool = False,
+    candlebar_context: bool = False,
 ) -> int:
     ctx = _context(setup.ticker, setup.day, force=force, ext_df=ext_df)
     meta = {
@@ -798,7 +802,21 @@ def _stream_jsonl(
                             "actual 1-min entry; vs_anchor_pct below is vs anchor_px."),
             "reason": setup.reason,
         })
+    if candlebar_context:
+        meta.update({
+            "candlebar_context": True,
+            "candlebar_score_note": (
+                "geometry quality in [0,1], not a probability or trading instruction"
+            ),
+        })
     _emit(json.dumps(meta), streams)
+
+    pattern_events_by_time: dict[pd.Timestamp, list[dict]] = {}
+    if candlebar_context:
+        for event in detect_patterns(df[["open", "high", "low", "close", "volume"]]):
+            pattern_events_by_time.setdefault(event.timestamp, []).append(
+                _pattern_record(event, resolution="1min")
+            )
 
     n = 0
     day_high = float("-inf")
@@ -815,6 +833,7 @@ def _stream_jsonl(
         is_entry = setup.entry_px is not None and ts.strftime("%H:%M") == setup.time_et
         if is_entry:
             entry_idx = n
+        minute_patterns = pattern_events_by_time.get(pd.Timestamp(ts), [])
         bar5 = None
         if five_minute_context:
             bucket = ts.replace(minute=(ts.minute // 5) * 5, second=0, microsecond=0)
@@ -848,6 +867,23 @@ def _stream_jsonl(
                     if prior_avg_volume else None,
                 }
                 completed5.append(dict(active5))
+                if candlebar_context:
+                    five_frame = pd.DataFrame(
+                        [
+                            {
+                                "open": b["o"], "high": b["h"], "low": b["l"],
+                                "close": b["c"], "volume": b["v"],
+                            }
+                            for b in completed5
+                        ],
+                        index=[b["bucket"] for b in completed5],
+                    )
+                    last_i = len(five_frame) - 1
+                    bar5["candlebar_patterns"] = [
+                        _pattern_record(event, resolution="5min")
+                        for event in detect_patterns(five_frame)
+                        if event.index == last_i
+                    ]
         tick = {
             "type": "tick",
             "i": n,
@@ -880,6 +916,8 @@ def _stream_jsonl(
             })
         if five_minute_context:
             tick["bar5_complete"] = bar5
+        if candlebar_context:
+            tick["candlebar_patterns"] = minute_patterns
         _emit(json.dumps(tick), streams)
         n += 1
         if delay > 0:
@@ -899,6 +937,18 @@ def _stream_jsonl(
         })
     _emit(json.dumps(end), streams)
     return n
+
+
+def _pattern_record(event: PatternEvent, *, resolution: str) -> dict:
+    """Stable JSON representation of one completed-bar observation."""
+    return {
+        "pattern": event.pattern,
+        "direction": event.direction,
+        "score": round(float(event.score), 4),
+        "resolution": resolution,
+        "time": event.timestamp.strftime("%H:%M"),
+        "evidence": dict(event.evidence),
+    }
 
 
 # ───────────────────────────── CLI ──────────────────────────────────────────
@@ -933,6 +983,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="hide the scanner's historical trigger/RVOL/reason from JSONL output")
     p.add_argument("--five-minute-context", action="store_true",
                    help="include one completed 5-minute candle after each fifth minute")
+    p.add_argument("--candlebar-context", action="store_true",
+                   help="include deterministic patterns on completed 1m/5m candles")
     p.add_argument("--delay", type=float, default=0.0,
                    help="seconds to pause between bars (stream ~live; default 0). "
                         "Use 60 for one tick per wall-clock minute.")
@@ -975,6 +1027,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         from_open=args.from_open,
         neutral_meta=args.neutral_meta,
         five_minute_context=args.five_minute_context,
+        candlebar_context=args.candlebar_context,
         delay=args.delay,
         force=args.force,
         fmt=args.format,

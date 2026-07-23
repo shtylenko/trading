@@ -443,6 +443,7 @@ def start_isolated(
     from_open: bool = False,
     neutral_meta: bool = False,
     five_minute_context: bool = False,
+    candlebar_context: bool = False,
     db: str | Path = DEFAULT_DB,
     at_time: Optional[str] = None,
     strategy: Optional[str] = None,
@@ -511,6 +512,7 @@ def start_isolated(
         from_open=from_open,
         neutral_meta=neutral_meta,
         five_minute_context=five_minute_context,
+        candlebar_context=candlebar_context,
         delay=0,
         force=False,
         fmt="jsonl",
@@ -540,6 +542,7 @@ def start(
     from_open: bool = False,
     neutral_meta: bool = False,
     five_minute_context: bool = False,
+    candlebar_context: bool = False,
     db: str | Path = DEFAULT_DB,
     force: bool = False,
     at_time: Optional[str] = None,
@@ -639,6 +642,8 @@ def start(
         from_open = True
     if skill.get("five_minute_context") in (True, "true", "True", "1", "yes"):
         five_minute_context = True
+    if skill.get("candlebar_context") in (True, "true", "True", "1", "yes"):
+        candlebar_context = True
     if skill.get("completed_five_minute_entry_required") in (True, "true", "True", "1", "yes"):
         neutral_meta = True  # v4 warrior: don't leak scanner trigger
     # Daily swing sessions begin before their scanner reference date.  The
@@ -655,6 +660,7 @@ def start(
         from_open=from_open,
         neutral_meta=neutral_meta,
         five_minute_context=five_minute_context,
+        candlebar_context=candlebar_context,
         delay=0,
         force=force,
         fmt="jsonl",
@@ -767,6 +773,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="hide scanner trigger/time/RVOL/reason from the visible stream")
     ps.add_argument("--five-minute-context", action="store_true",
                     help="add a completed 5-minute candle to each fifth revealed tick")
+    ps.add_argument("--candlebar-context", action="store_true",
+                    help="add deterministic patterns on completed 1m/5m candles")
     ps.add_argument("--db", default=str(DEFAULT_DB))
     ps.add_argument("--force", action="store_true")
 
@@ -785,7 +793,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                      after=args.after, from_open=args.from_open, db=args.db,
                      force=args.force, at_time=args.at_time,
                      neutral_meta=args.neutral_meta,
-                     five_minute_context=args.five_minute_context)
+                     five_minute_context=args.five_minute_context,
+                     candlebar_context=args.candlebar_context)
     if args.cmd == "next":
         return next_(args.session)
     if args.cmd == "status":

@@ -16,6 +16,7 @@ from trading.llm_trader import recorder, skillmeta
 _SKILL = """---
 name: trade-simulator
 version: 1.4.2
+candlebar_context: true
 description: a test skill
 ---
 
@@ -39,6 +40,7 @@ def test_read_skill_meta_parses_version_and_hashes(tmp_path):
     m = skillmeta.read_skill_meta(p)
     assert m["name"] == "trade-simulator"
     assert m["version"] == "1.4.2"
+    assert m["candlebar_context"] == "true"
     assert m["content_hash"].startswith("sha256:")
     # hash is stable for identical bytes, changes when content changes
     assert skillmeta.read_skill_meta(p)["content_hash"] == m["content_hash"]

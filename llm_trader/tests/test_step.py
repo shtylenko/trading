@@ -83,6 +83,32 @@ def test_multiday_start_forces_neutral_meta(tmp_path, monkeypatch):
     assert seen["neutral_meta"] is True
 
 
+def test_start_enables_candlebar_context_from_skill_stamp(tmp_path, monkeypatch):
+    _install_fake_provider(monkeypatch)
+    sdir = tmp_path / "patterns"
+    sdir.mkdir()
+    (sdir / "session.json").write_text(json.dumps({
+        "ticker": "TEST", "historical_date": "2025-03-10",
+        "skill": {
+            "session_from_open": "true",
+            "five_minute_context": "true",
+            "candlebar_context": "true",
+        },
+    }))
+    seen = {}
+
+    def fake_replay(_setup, **kw):
+        seen.update(kw)
+        Path(kw["out_file"]).write_text("\n".join(json.dumps(x) for x in _SEALED) + "\n")
+        return 2
+
+    monkeypatch.setattr(replay, "replay", fake_replay)
+    assert step.start(sdir, out=StringIO()) == 0
+    assert seen["from_open"] is True
+    assert seen["five_minute_context"] is True
+    assert seen["candlebar_context"] is True
+
+
 def test_start_surfaces_a_replay_data_integrity_failure(tmp_path, monkeypatch):
     _install_fake_provider(monkeypatch)
     sdir = tmp_path / "bad-daily"

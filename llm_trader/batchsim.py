@@ -1086,6 +1086,7 @@ def _preseal(work: dict, skill_path: Path, version: str, session_id: str) -> tup
             from_open=work.get("session_from_open", False),
             neutral_meta=work.get("session_from_open", False),
             five_minute_context=work.get("five_minute_context", False),
+            candlebar_context=work.get("candlebar_context", False),
             db=work.get("db") or ENTRIES_DB,
             strategy=strategy_id,
         )
@@ -1778,11 +1779,14 @@ def run(
     decision_policy = _deterministic_policy_id(skill_meta, strategy_id)
     session_from_open = str(skill_meta.get("session_from_open")).lower() == "true"
     five_minute_context = str(skill_meta.get("five_minute_context")).lower() == "true"
+    candlebar_context = str(skill_meta.get("candlebar_context")).lower() == "true"
     engine_owned_targets = str(
         skill_meta.get("scanner_plan_targets_engine_owned")
     ).strip().lower() in {"1", "true", "yes"}
     if five_minute_context and not session_from_open:
         raise ValueError("five_minute_context requires session_from_open: true")
+    if candlebar_context and not five_minute_context:
+        raise ValueError("candlebar_context requires five_minute_context: true")
     horizon = skill_meta.get("horizon") or strat.horizon.kind
     bar_resolution = skill_meta.get("bar_resolution") or strat.horizon.bar_resolution
     skill_text = skill_path.read_text(encoding="utf-8")
@@ -1866,6 +1870,7 @@ def run(
                 "dry_run": dry_run,
                 "session_from_open": session_from_open,
                 "five_minute_context": five_minute_context,
+                "candlebar_context": candlebar_context,
                 "engine_owned_targets": engine_owned_targets,
                 "horizon": horizon,
                 "bar_resolution": bar_resolution,

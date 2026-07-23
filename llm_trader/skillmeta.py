@@ -136,6 +136,7 @@ def read_skill_meta(path: str | Path) -> dict:
         # candles without changing historical replay contracts.
         "session_from_open": fm.get("session_from_open"),
         "five_minute_context": fm.get("five_minute_context"),
+        "candlebar_context": fm.get("candlebar_context"),
         "completed_five_minute_entry_required": fm.get("completed_five_minute_entry_required"),
         # Multi-strategy / multi-horizon contracts
         "strategy": fm.get("strategy"),

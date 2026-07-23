@@ -63,6 +63,45 @@ def test_neutral_open_stream_hides_scanner_trigger_and_emits_completed_bar5(monk
     assert "run_vs_anchor_pct" not in end
 
 
+def test_candlebar_context_is_opt_in_and_emits_completed_1m_and_5m_events(monkeypatch):
+    idx = pd.date_range("2025-03-10 09:30", periods=10, freq="min", tz="America/New_York")
+    opens = [10.00, 10.08, 10.16, 10.24, 10.32, 10.40, 10.50, 10.60, 10.70, 10.80]
+    closes = [10.08, 10.16, 10.24, 10.32, 10.40, 10.50, 10.60, 10.70, 10.80, 10.90]
+    highs = [close + 0.02 for close in closes]
+    lows = [open_ - 0.02 for open_ in opens]
+    df = pd.DataFrame({
+        "open": opens, "high": highs, "low": lows, "close": closes,
+        "volume": [100] * 5 + [200] * 5,
+        "cum_vol": [100, 200, 300, 400, 500, 700, 900, 1100, 1300, 1500],
+        "vwap": [10.0] * 10, "ema9": closes, "ema20": opens,
+        "macd": [0.1] * 10, "macd_signal": [0.05] * 10,
+        "macd_hist": [0.05] * 10, "session_high": highs,
+        "new_high": [True] * 10, "rvol_bar": [1.0] * 10,
+    }, index=idx)
+    monkeypatch.setattr(replay, "fetch_minute_bars", lambda *args, **kwargs: df)
+    monkeypatch.setattr(replay, "_enrich", lambda frame: frame)
+    monkeypatch.setattr(replay, "_context", lambda *args, **kwargs: {
+        "prior_close": None, "prior_high": None, "prior_low": None,
+        "pm_high": None, "pm_low": None, "context_warnings": [],
+    })
+    setup = Setup("TEST", date(2025, 3, 10), "10:20", 12.34, None, None, None, "hidden")
+
+    out = StringIO()
+    replay.replay(
+        setup, from_open=True, neutral_meta=True, five_minute_context=True,
+        candlebar_context=True, fmt="jsonl", out=out,
+    )
+    rows = [json.loads(line) for line in out.getvalue().splitlines()]
+    meta, ticks = rows[0], rows[1:-1]
+
+    assert meta["candlebar_context"] is True
+    assert "not a probability" in meta["candlebar_score_note"]
+    assert "candle_over_candle" in {p["pattern"] for p in ticks[1]["candlebar_patterns"]}
+    complete5 = ticks[9]["bar5_complete"]
+    assert "candle_over_candle" in {p["pattern"] for p in complete5["candlebar_patterns"]}
+    assert all(p["resolution"] == "5min" for p in complete5["candlebar_patterns"])
+
+
 def test_causal_cup_plan_is_hidden_in_meta_and_revealed_on_plan_bar(monkeypatch):
     idx = pd.bdate_range("2024-01-02", periods=330, tz="America/New_York")
     close = pd.Series(range(100, 430), index=idx, dtype=float)

@@ -444,6 +444,12 @@ def start_isolated(
     neutral_meta: bool = False,
     five_minute_context: bool = False,
     candlebar_context: bool = False,
+    strict_prior_three_context: bool = False,
+    require_complete_five_minute_bars: bool = False,
+    scanner_event_context: bool = False,
+    scanner_event_start: bool = False,
+    scanner_event_release_delay_minutes: int = 0,
+    scanner_event_include_reason: bool = True,
     db: str | Path = DEFAULT_DB,
     at_time: Optional[str] = None,
     strategy: Optional[str] = None,
@@ -513,6 +519,12 @@ def start_isolated(
         neutral_meta=neutral_meta,
         five_minute_context=five_minute_context,
         candlebar_context=candlebar_context,
+        strict_prior_three_context=strict_prior_three_context,
+        require_complete_five_minute_bars=require_complete_five_minute_bars,
+        scanner_event_context=scanner_event_context,
+        scanner_event_start=scanner_event_start,
+        scanner_event_release_delay_minutes=scanner_event_release_delay_minutes,
+        scanner_event_include_reason=scanner_event_include_reason,
         delay=0,
         force=False,
         fmt="jsonl",
@@ -543,6 +555,12 @@ def start(
     neutral_meta: bool = False,
     five_minute_context: bool = False,
     candlebar_context: bool = False,
+    strict_prior_three_context: bool = False,
+    require_complete_five_minute_bars: bool = False,
+    scanner_event_context: bool = False,
+    scanner_event_start: bool = False,
+    scanner_event_release_delay_minutes: int = 0,
+    scanner_event_include_reason: bool = True,
     db: str | Path = DEFAULT_DB,
     force: bool = False,
     at_time: Optional[str] = None,
@@ -644,6 +662,20 @@ def start(
         five_minute_context = True
     if skill.get("candlebar_context") in (True, "true", "True", "1", "yes"):
         candlebar_context = True
+    if skill.get("strict_prior_three_context") in (True, "true", "True", "1", "yes"):
+        strict_prior_three_context = True
+    if skill.get("require_complete_five_minute_bars") in (True, "true", "True", "1", "yes"):
+        require_complete_five_minute_bars = True
+    if skill.get("scanner_event_context") in (True, "true", "True", "1", "yes"):
+        scanner_event_context = True
+    if skill.get("scanner_event_start") in (True, "true", "True", "1", "yes"):
+        scanner_event_start = True
+    if skill.get("scanner_event_release_delay_minutes") is not None:
+        scanner_event_release_delay_minutes = int(skill["scanner_event_release_delay_minutes"])
+    if skill.get("scanner_event_include_reason") is not None:
+        scanner_event_include_reason = skill.get("scanner_event_include_reason") in (
+            True, "true", "True", "1", "yes"
+        )
     if skill.get("completed_five_minute_entry_required") in (True, "true", "True", "1", "yes"):
         neutral_meta = True  # v4 warrior: don't leak scanner trigger
     # Daily swing sessions begin before their scanner reference date.  The
@@ -661,6 +693,12 @@ def start(
         neutral_meta=neutral_meta,
         five_minute_context=five_minute_context,
         candlebar_context=candlebar_context,
+        strict_prior_three_context=strict_prior_three_context,
+        require_complete_five_minute_bars=require_complete_five_minute_bars,
+        scanner_event_context=scanner_event_context,
+        scanner_event_start=scanner_event_start,
+        scanner_event_release_delay_minutes=scanner_event_release_delay_minutes,
+        scanner_event_include_reason=scanner_event_include_reason,
         delay=0,
         force=force,
         fmt="jsonl",
@@ -775,6 +813,14 @@ def build_parser() -> argparse.ArgumentParser:
                     help="add a completed 5-minute candle to each fifth revealed tick")
     ps.add_argument("--candlebar-context", action="store_true",
                     help="add deterministic patterns on completed 1m/5m candles")
+    ps.add_argument("--strict-prior-three-context", action="store_true",
+                    help="withhold prior_3_* values until three completed 5m bars exist")
+    ps.add_argument("--require-complete-five-minute-bars", action="store_true",
+                    help="emit 5m context only for buckets with all five minutes")
+    ps.add_argument("--scanner-event-context", action="store_true",
+                    help="release scanner fields only on its trigger minute")
+    ps.add_argument("--scanner-event-start", action="store_true",
+                    help="warm privately from open; reveal the scanner event as tick zero")
     ps.add_argument("--db", default=str(DEFAULT_DB))
     ps.add_argument("--force", action="store_true")
 
@@ -794,7 +840,11 @@ def main(argv: Optional[list[str]] = None) -> int:
                      force=args.force, at_time=args.at_time,
                      neutral_meta=args.neutral_meta,
                      five_minute_context=args.five_minute_context,
-                     candlebar_context=args.candlebar_context)
+                     candlebar_context=args.candlebar_context,
+                     strict_prior_three_context=args.strict_prior_three_context,
+                     require_complete_five_minute_bars=args.require_complete_five_minute_bars,
+                     scanner_event_context=args.scanner_event_context,
+                     scanner_event_start=args.scanner_event_start)
     if args.cmd == "next":
         return next_(args.session)
     if args.cmd == "status":

@@ -137,6 +137,12 @@ def read_skill_meta(path: str | Path) -> dict:
         "session_from_open": fm.get("session_from_open"),
         "five_minute_context": fm.get("five_minute_context"),
         "candlebar_context": fm.get("candlebar_context"),
+        "strict_prior_three_context": fm.get("strict_prior_three_context"),
+        "require_complete_five_minute_bars": fm.get("require_complete_five_minute_bars"),
+        "scanner_event_context": fm.get("scanner_event_context"),
+        "scanner_event_start": fm.get("scanner_event_start"),
+        "scanner_event_release_delay_minutes": fm.get("scanner_event_release_delay_minutes"),
+        "scanner_event_include_reason": fm.get("scanner_event_include_reason"),
         "completed_five_minute_entry_required": fm.get("completed_five_minute_entry_required"),
         # Multi-strategy / multi-horizon contracts
         "strategy": fm.get("strategy"),

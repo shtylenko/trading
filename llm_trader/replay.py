@@ -306,6 +306,12 @@ def replay(
     neutral_meta: bool = False,
     five_minute_context: bool = False,
     candlebar_context: bool = False,
+    strict_prior_three_context: bool = False,
+    require_complete_five_minute_bars: bool = False,
+    scanner_event_context: bool = False,
+    scanner_event_start: bool = False,
+    scanner_event_release_delay_minutes: int = 0,
+    scanner_event_include_reason: bool = True,
     delay: float = 0.0,
     force: bool = False,
     fmt: str = "human",
@@ -369,7 +375,16 @@ def replay(
             return 3
 
         df = _enrich(df)
+        if scanner_event_release_delay_minutes < 0:
+            raise ValueError("scanner_event_release_delay_minutes must be non-negative")
         start_t = RTH_OPEN if from_open else setup.entry_time
+        release_dt = datetime.combine(setup.day, setup.entry_time) + timedelta(
+            minutes=scanner_event_release_delay_minutes
+        )
+        scanner_event_release_t = release_dt.time()
+        visible_start_t = scanner_event_release_t if scanner_event_start else start_t
+        if scanner_event_start and (not from_open or not scanner_event_context):
+            raise ValueError("scanner_event_start requires from_open and scanner_event_context")
         anchor = setup.entry_px if setup.entry_px else float(df["open"].iloc[0])
 
         if fmt == "jsonl":
@@ -377,6 +392,12 @@ def replay(
                 setup, df, start_t, anchor, streams, delay, force=force, ext_df=ext_df,
                 neutral_meta=neutral_meta, five_minute_context=five_minute_context,
                 candlebar_context=candlebar_context,
+                strict_prior_three_context=strict_prior_three_context,
+                require_complete_five_minute_bars=require_complete_five_minute_bars,
+                scanner_event_context=scanner_event_context,
+                visible_start_t=visible_start_t,
+                scanner_event_release_t=scanner_event_release_t,
+                scanner_event_include_reason=scanner_event_include_reason,
             )
         return _stream_human(setup, df, start_t, anchor, streams, delay)
     finally:
@@ -769,6 +790,12 @@ def _stream_jsonl(
     ext_df: Optional[pd.DataFrame] = None, *, neutral_meta: bool = False,
     five_minute_context: bool = False,
     candlebar_context: bool = False,
+    strict_prior_three_context: bool = False,
+    require_complete_five_minute_bars: bool = False,
+    scanner_event_context: bool = False,
+    visible_start_t: Optional[dtime] = None,
+    scanner_event_release_t: Optional[dtime] = None,
+    scanner_event_include_reason: bool = True,
 ) -> int:
     ctx = _context(setup.ticker, setup.day, force=force, ext_df=ext_df)
     meta = {
@@ -789,7 +816,10 @@ def _stream_jsonl(
         # The scanner chose the ticker/date, but the trader must discover its own
         # entry from the live tape. Do not reveal the scanner's completed-bar trigger,
         # its all-day RVOL, or its retrospective explanation.
-        meta["session_start"] = RTH_OPEN.strftime("%H:%M")
+        meta["session_start"] = (
+            "scanner_event" if visible_start_t and visible_start_t != RTH_OPEN
+            else RTH_OPEN.strftime("%H:%M")
+        )
         meta["scanner_trigger_hidden"] = True
     else:
         meta.update({
@@ -809,6 +839,14 @@ def _stream_jsonl(
                 "geometry quality in [0,1], not a probability or trading instruction"
             ),
         })
+    if strict_prior_three_context:
+        meta["strict_prior_three_context"] = True
+    if require_complete_five_minute_bars:
+        meta["require_complete_five_minute_bars"] = True
+    if scanner_event_context:
+        if not neutral_meta or start_t != RTH_OPEN:
+            raise ValueError("scanner_event_context requires neutral_meta and from_open")
+        meta["scanner_event_context"] = True
     _emit(json.dumps(meta), streams)
 
     pattern_events_by_time: dict[pd.Timestamp, list[dict]] = {}
@@ -831,6 +869,10 @@ def _stream_jsonl(
         hi = float(row["high"])
         day_high = max(day_high, hi)
         is_entry = setup.entry_px is not None and ts.strftime("%H:%M") == setup.time_et
+        is_scanner_event_release = (
+            scanner_event_release_t is not None
+            and ts.time() == scanner_event_release_t
+        )
         if is_entry:
             entry_idx = n
         minute_patterns = pattern_events_by_time.get(pd.Timestamp(ts), [])
@@ -843,47 +885,65 @@ def _stream_jsonl(
                     "time": bucket.strftime("%H:%M"),
                     "o": float(row["open"]), "h": hi, "l": float(row["low"]),
                     "c": close, "v": int(row["volume"]),
+                    "observed_minutes": [ts.minute % 5],
                 }
             else:
                 active5["h"] = max(active5["h"], hi)
                 active5["l"] = min(active5["l"], float(row["low"]))
                 active5["c"] = close
                 active5["v"] += int(row["volume"])
+                active5["observed_minutes"].append(ts.minute % 5)
             # The 5-minute candle is actionable only after minute :04/:09/... closes.
             if ts.minute % 5 == 4:
-                prior = completed5[-3:]
-                prior_high = max((b["h"] for b in prior), default=None)
-                prior_low = min((b["l"] for b in prior), default=None)
-                prior_avg_volume = (sum(b["v"] for b in prior) / len(prior)) if prior else None
-                bar5 = {
-                    "time": active5["time"],
-                    "o": round(active5["o"], 4), "h": round(active5["h"], 4),
-                    "l": round(active5["l"], 4), "c": round(active5["c"], 4),
-                    "v": active5["v"],
-                    "prior_3_high": round(prior_high, 4) if prior_high is not None else None,
-                    "prior_3_low": round(prior_low, 4) if prior_low is not None else None,
-                    "prior_3_avg_volume": round(prior_avg_volume, 2) if prior_avg_volume else None,
-                    "volume_ratio": round(active5["v"] / prior_avg_volume, 2)
-                    if prior_avg_volume else None,
-                }
-                completed5.append(dict(active5))
-                if candlebar_context:
-                    five_frame = pd.DataFrame(
-                        [
-                            {
-                                "open": b["o"], "high": b["h"], "low": b["l"],
-                                "close": b["c"], "volume": b["v"],
-                            }
-                            for b in completed5
-                        ],
-                        index=[b["bucket"] for b in completed5],
+                complete = sorted(set(active5["observed_minutes"])) == [0, 1, 2, 3, 4]
+                if complete or not require_complete_five_minute_bars:
+                    prior = completed5[-3:]
+                    prior_count = len(prior)
+                    prior_ready = prior_count == 3 or not strict_prior_three_context
+                    prior_high = (
+                        max((b["h"] for b in prior), default=None) if prior_ready else None
                     )
-                    last_i = len(five_frame) - 1
-                    bar5["candlebar_patterns"] = [
-                        _pattern_record(event, resolution="5min")
-                        for event in detect_patterns(five_frame)
-                        if event.index == last_i
-                    ]
+                    prior_low = (
+                        min((b["l"] for b in prior), default=None) if prior_ready else None
+                    )
+                    prior_avg_volume = (
+                        sum(b["v"] for b in prior) / len(prior)
+                        if prior and prior_ready else None
+                    )
+                    bar5 = {
+                        "time": active5["time"],
+                        "o": round(active5["o"], 4), "h": round(active5["h"], 4),
+                        "l": round(active5["l"], 4), "c": round(active5["c"], 4),
+                        "v": active5["v"],
+                        "prior_3_high": round(prior_high, 4) if prior_high is not None else None,
+                        "prior_3_low": round(prior_low, 4) if prior_low is not None else None,
+                        "prior_3_avg_volume": round(prior_avg_volume, 2) if prior_avg_volume else None,
+                        "volume_ratio": round(active5["v"] / prior_avg_volume, 2)
+                        if prior_avg_volume else None,
+                    }
+                    if strict_prior_three_context:
+                        bar5["prior_3_count"] = prior_count
+                    if require_complete_five_minute_bars:
+                        bar5["observed_minute_count"] = 5
+                    completed5.append(dict(active5))
+                    if candlebar_context:
+                        five_frame = pd.DataFrame(
+                            [
+                                {
+                                    "open": b["o"], "high": b["h"], "low": b["l"],
+                                    "close": b["c"], "volume": b["v"],
+                                }
+                                for b in completed5
+                            ],
+                            index=[b["bucket"] for b in completed5],
+                        )
+                        last_i = len(five_frame) - 1
+                        bar5["candlebar_patterns"] = [
+                            _pattern_record(event, resolution="5min")
+                            for event in detect_patterns(five_frame)
+                            if event.index == last_i
+                        ]
+                active5 = None
         tick = {
             "type": "tick",
             "i": n,
@@ -914,10 +974,29 @@ def _stream_jsonl(
                 "vs_anchor_pct": round((close - anchor) / anchor * 100.0, 3) if anchor else None,
                 "is_entry_bar": is_entry,
             })
+        if scanner_event_context and is_scanner_event_release:
+            # Five-minute bars are left-labelled.  A scanner breakout labelled
+            # 09:35 becomes actionable only after its final 09:39 one-minute
+            # bar closes; callers pass that release delay explicitly.  The
+            # policy sees neither the trigger nor its timing before this tick.
+            tick["scanner_event"] = {
+                "time": ts.strftime("%H:%M"),
+                "trigger": round(float(setup.entry_px), 4) if setup.entry_px is not None else None,
+                "rvol": round(float(setup.rvol), 4) if setup.rvol is not None else None,
+                "signal": "historical_scanner_trigger",
+            }
+            if ts.strftime("%H:%M") != setup.time_et:
+                tick["scanner_event"]["source_time"] = setup.time_et
+            if scanner_event_include_reason:
+                tick["scanner_event"]["reason"] = setup.reason
         if five_minute_context:
             tick["bar5_complete"] = bar5
         if candlebar_context:
             tick["candlebar_patterns"] = minute_patterns
+        # Pre-trigger bars are used solely to build causal indicators and 5m
+        # state.  They are never visible to a scanner-triggered policy.
+        if visible_start_t is not None and t < visible_start_t:
+            continue
         _emit(json.dumps(tick), streams)
         n += 1
         if delay > 0:
@@ -985,6 +1064,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="include one completed 5-minute candle after each fifth minute")
     p.add_argument("--candlebar-context", action="store_true",
                    help="include deterministic patterns on completed 1m/5m candles")
+    p.add_argument("--strict-prior-three-context", action="store_true",
+                   help="withhold prior_3_* 5m aggregates until three prior bars exist")
+    p.add_argument("--require-complete-five-minute-bars", action="store_true",
+                   help="emit 5m context only when all five constituent minutes exist")
+    p.add_argument("--scanner-event-context", action="store_true",
+                   help="release scanner event fields only on the trigger minute (requires from-open neutral stream)")
+    p.add_argument("--scanner-event-start", action="store_true",
+                   help="warm from open privately but make scanner event the first visible tick")
     p.add_argument("--delay", type=float, default=0.0,
                    help="seconds to pause between bars (stream ~live; default 0). "
                         "Use 60 for one tick per wall-clock minute.")
@@ -1027,6 +1114,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         from_open=args.from_open,
         neutral_meta=args.neutral_meta,
         five_minute_context=args.five_minute_context,
+        strict_prior_three_context=args.strict_prior_three_context,
+        require_complete_five_minute_bars=args.require_complete_five_minute_bars,
+        scanner_event_context=args.scanner_event_context,
+        scanner_event_start=args.scanner_event_start,
         candlebar_context=args.candlebar_context,
         delay=args.delay,
         force=args.force,

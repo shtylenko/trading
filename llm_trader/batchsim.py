@@ -1087,6 +1087,12 @@ def _preseal(work: dict, skill_path: Path, version: str, session_id: str) -> tup
             neutral_meta=work.get("session_from_open", False),
             five_minute_context=work.get("five_minute_context", False),
             candlebar_context=work.get("candlebar_context", False),
+            strict_prior_three_context=work.get("strict_prior_three_context", False),
+            require_complete_five_minute_bars=work.get("require_complete_five_minute_bars", False),
+            scanner_event_context=work.get("scanner_event_context", False),
+            scanner_event_start=work.get("scanner_event_start", False),
+            scanner_event_release_delay_minutes=work.get("scanner_event_release_delay_minutes", 0),
+            scanner_event_include_reason=work.get("scanner_event_include_reason", True),
             db=work.get("db") or ENTRIES_DB,
             strategy=strategy_id,
         )
@@ -1431,9 +1437,53 @@ def _run_one(work: dict) -> dict:
         return _result("isolation-error", error=str(e))
 
 
-def _policy_module_for(strategy_id: str):
-    """Return the deterministic policy module for a plan-first strategy family."""
+def _policy_module_for(strategy_id: str, policy_id: Optional[str] = None):
+    """Return the immutable deterministic policy implementation named by a skill.
+
+    A strategy may have more than one sealed deterministic policy generation.
+    Resolving by ``policy_id`` keeps a later candidate from silently changing the
+    behavior of an earlier version that happens to share the same strategy family.
+    ``None`` preserves the historical default for callers that only need the
+    original policy module.
+    """
     sid = (strategy_id or "").strip().lower().replace("-", "_")
+    if sid == "warrior":
+        from .strategies.warrior import policy as v1
+        if policy_id in {None, v1.POLICY_ID}:
+            return v1
+        if policy_id == "warrior_pattern_score_v2":
+            from .strategies.warrior import policy_v2 as v2
+            return v2
+        if policy_id == "warrior_pattern_score_v3":
+            from .strategies.warrior import policy_v3 as v3
+            return v3
+        if policy_id == "warrior_pattern_score_v4":
+            from .strategies.warrior import policy_v4 as v4
+            return v4
+        if policy_id == "warrior_pattern_score_v5":
+            from .strategies.warrior import policy_v5 as v5
+            return v5
+        if policy_id == "warrior_pattern_score_v6":
+            from .strategies.warrior import policy_v6 as v6
+            return v6
+        if policy_id == "warrior_pattern_score_v7":
+            from .strategies.warrior import policy_v7 as v7
+            return v7
+        if policy_id == "warrior_pattern_score_v8":
+            from .strategies.warrior import policy_v8 as v8
+            return v8
+        if policy_id == "warrior_pattern_score_v9":
+            from .strategies.warrior import policy_v9 as v9
+            return v9
+        if policy_id == "warrior_pattern_score_v10":
+            from .strategies.warrior import policy_v10 as v10
+            return v10
+        if policy_id == "warrior_pattern_score_v11":
+            from .strategies.warrior import policy_v11 as v11
+            return v11
+        raise ValueError(
+            f"no deterministic Warrior policy implementation for {policy_id!r}"
+        )
     if sid == "cup_handle":
         from .strategies.cup_handle import policy as mod
         return mod
@@ -1458,7 +1508,7 @@ def _run_policy_one(work: dict) -> dict:
     There is deliberately no prompt, model process, sandbox, or transcript.
     """
     strategy_id = work.get("strategy") or "cup_handle"
-    policy_mod = _policy_module_for(strategy_id)
+    policy_mod = _policy_module_for(strategy_id, work.get("decision_policy"))
 
     sdir = Path(work["sdir"])
     sid = sdir.name
@@ -1532,20 +1582,22 @@ def runner_contract() -> dict:
 
 def deterministic_policy_runner_contract(policy_id: str, strategy_id: str = "cup_handle") -> dict:
     """Immutable provenance for a no-agent deterministic policy runner."""
-    policy_mod = _policy_module_for(strategy_id)
+    policy_mod = _policy_module_for(strategy_id, policy_id)
     if policy_id != policy_mod.POLICY_ID:
         raise ValueError(
             f"unsupported deterministic policy {policy_id!r} for strategy {strategy_id!r}"
         )
-    return {
+    subjects = getattr(
+        policy_mod,
+        "POLICY_CONTRACT_SUBJECTS",
+        (policy_mod.decisions_for_ticks, policy_mod.apply_to_session),
+    )
+    contract = {
         "harness_version": "deterministic_policy_v1",
         "decision_source": policy_mod.DECISION_SOURCE,
         "policy_id": policy_id,
         "strategy": strategy_id,
-        "policy_hash": _source_hash(
-            policy_mod.decisions_for_ticks,
-            policy_mod.apply_to_session,
-        ),
+        "policy_hash": _source_hash(*subjects),
         "harness_hash": _source_hash(
             _preseal,
             _run_policy_one,
@@ -1553,6 +1605,14 @@ def deterministic_policy_runner_contract(policy_id: str, strategy_id: str = "cup
             step.start_isolated,
         ),
     }
+    policy_spec = getattr(policy_mod, "POLICY_SPEC", None)
+    if policy_spec is not None:
+        # The source hash captures algorithm changes. This canonical value also
+        # freezes policy constants referenced by name from that source.
+        contract["policy_spec"] = json.loads(
+            json.dumps(policy_spec, sort_keys=True, separators=(",", ":"))
+        )
+    return contract
 
 
 def _file_hash(path: Path) -> str:
@@ -1602,6 +1662,7 @@ def _deterministic_policy_id(skill_meta: dict, strategy_id: str) -> Optional[str
         raise ValueError(f"unsupported decision_source {source!r}")
     sid = (strategy_id or "").strip().lower().replace("-", "_")
     if sid not in {
+        "warrior",
         "cup_handle",
         "trend_pullback",
         "breakout_first_pullback",
@@ -1610,8 +1671,13 @@ def _deterministic_policy_id(skill_meta: dict, strategy_id: str) -> Optional[str
         raise ValueError(
             f"deterministic_policy is not implemented for strategy {strategy_id!r}"
         )
-    policy_mod = _policy_module_for(sid)
     policy_id = skill_meta.get("decision_policy")
+    try:
+        policy_mod = _policy_module_for(sid, policy_id)
+    except ValueError as e:
+        raise ValueError(
+            f"{sid} deterministic_policy has unsupported decision_policy {policy_id!r}"
+        ) from e
     if policy_id != policy_mod.POLICY_ID:
         raise ValueError(
             f"{sid} deterministic_policy requires decision_policy "
@@ -1652,8 +1718,9 @@ def _validate_causal_testset(
     if invalid:
         preview = "\n  - ".join(invalid[:8])
         more = f"\n  ... and {len(invalid) - 8} more" if len(invalid) > 8 else ""
+        strategy_label = strategy_id.replace("_", "-")
         raise ValueError(
-            f"batch testset is incompatible with the causal {strategy_id} skill:\n  - "
+            f"batch testset is incompatible with the causal {strategy_label} skill:\n  - "
             + preview + more
             + f"\nRe-run the {strategy_id} scanner and regenerate this test set before running agents."
         )
@@ -1780,6 +1847,20 @@ def run(
     session_from_open = str(skill_meta.get("session_from_open")).lower() == "true"
     five_minute_context = str(skill_meta.get("five_minute_context")).lower() == "true"
     candlebar_context = str(skill_meta.get("candlebar_context")).lower() == "true"
+    strict_prior_three_context = (
+        str(skill_meta.get("strict_prior_three_context")).lower() == "true"
+    )
+    require_complete_five_minute_bars = (
+        str(skill_meta.get("require_complete_five_minute_bars")).lower() == "true"
+    )
+    scanner_event_context = str(skill_meta.get("scanner_event_context")).lower() == "true"
+    scanner_event_start = str(skill_meta.get("scanner_event_start")).lower() == "true"
+    scanner_event_release_delay_minutes = int(
+        skill_meta.get("scanner_event_release_delay_minutes") or 0
+    )
+    scanner_event_include_reason = str(
+        skill_meta.get("scanner_event_include_reason", "true")
+    ).lower() == "true"
     engine_owned_targets = str(
         skill_meta.get("scanner_plan_targets_engine_owned")
     ).strip().lower() in {"1", "true", "yes"}
@@ -1787,6 +1868,16 @@ def run(
         raise ValueError("five_minute_context requires session_from_open: true")
     if candlebar_context and not five_minute_context:
         raise ValueError("candlebar_context requires five_minute_context: true")
+    if strict_prior_three_context and not five_minute_context:
+        raise ValueError("strict_prior_three_context requires five_minute_context: true")
+    if require_complete_five_minute_bars and not five_minute_context:
+        raise ValueError("require_complete_five_minute_bars requires five_minute_context: true")
+    if scanner_event_context and not session_from_open:
+        raise ValueError("scanner_event_context requires session_from_open: true")
+    if scanner_event_start and not scanner_event_context:
+        raise ValueError("scanner_event_start requires scanner_event_context: true")
+    if scanner_event_release_delay_minutes < 0:
+        raise ValueError("scanner_event_release_delay_minutes must be non-negative")
     horizon = skill_meta.get("horizon") or strat.horizon.kind
     bar_resolution = skill_meta.get("bar_resolution") or strat.horizon.bar_resolution
     skill_text = skill_path.read_text(encoding="utf-8")
@@ -1871,6 +1962,12 @@ def run(
                 "session_from_open": session_from_open,
                 "five_minute_context": five_minute_context,
                 "candlebar_context": candlebar_context,
+                "strict_prior_three_context": strict_prior_three_context,
+                "require_complete_five_minute_bars": require_complete_five_minute_bars,
+                "scanner_event_context": scanner_event_context,
+                "scanner_event_start": scanner_event_start,
+                "scanner_event_release_delay_minutes": scanner_event_release_delay_minutes,
+                "scanner_event_include_reason": scanner_event_include_reason,
                 "engine_owned_targets": engine_owned_targets,
                 "horizon": horizon,
                 "bar_resolution": bar_resolution,
@@ -2557,13 +2654,13 @@ def _deterministic_policy_integrity_errors(sdir: Path, session: dict) -> list[st
     output re-derived from the sealed stream.
     """
     strategy_id = str(session.get("strategy") or "cup_handle")
+    skill = session.get("skill") or {}
     try:
-        policy_mod = _policy_module_for(strategy_id)
+        policy_mod = _policy_module_for(strategy_id, skill.get("decision_policy"))
     except ValueError as e:
         return [str(e)]
 
     errors: list[str] = []
-    skill = session.get("skill") or {}
     stamp = session.get("decision_policy")
     if str(skill.get("decision_source") or "").strip().lower() != policy_mod.DECISION_SOURCE:
         errors.append("skill is missing decision_source: deterministic_policy")
@@ -2581,7 +2678,10 @@ def _deterministic_policy_integrity_errors(sdir: Path, session: dict) -> list[st
 
     try:
         _meta, ticks, _end = recorder._parse_stream(Path(sdir) / "stream.jsonl")
-        expected = policy_mod.decisions_for_ticks(ticks)
+        if getattr(policy_mod, "USES_SESSION_EXECUTION_CONFIG", False):
+            expected = policy_mod.decisions_for_ticks(ticks, session.get("config", {}))
+        else:
+            expected = policy_mod.decisions_for_ticks(ticks)
         plan_by_i = {
             tick.get("i"): tick.get("scanner_plan")
             for tick in ticks if isinstance(tick, dict)

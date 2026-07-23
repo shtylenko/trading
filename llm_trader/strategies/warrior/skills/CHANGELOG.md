@@ -9,6 +9,194 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
 
 ---
 
+### 5.12.0 — scanner-event-close causality correction  ⏳ VALIDATED WIRING — NOT PROMOTED
+- **Why:** the market-data contract uses left-labelled five-minute bars. A
+  scanner breakout labelled `09:35` is computed from the `09:35`–`09:39`
+  interval, so it cannot be available at `09:35`. The earlier scanner-event
+  candidates released that information four minutes early.
+- **Change:** private indicator/5m warm-up still begins at 09:30, but a scanner
+  event is released only on the completed bar's final minute (`09:39` for a
+  `09:35` label). The event records its source time separately and excludes the
+  historical prose reason, which embeds a non-PIT float snapshot. The entry,
+  brackets, and management rules are otherwise unchanged from 5.11.
+- **Data audit:** gap and RVOL are computed from the open and prior daily bars;
+  the 5m detector is sequential and its volume/VWAP features are backward-only.
+  Float remains a current snapshot in scanner selection, so this is a
+  **conditional historical replay**, not a proof of a fully point-in-time
+  universe. v5.12 does not consume float or the withheld prose reason in its
+  decision policy.
+- **Residual OOS:** all **12** unused regular-hours `(ticker,date)` rows left
+  after excluding every prior Warrior test set were sealed as
+  `testset_5x_causal_oos_12.json`. Batch
+  `warrior-5.12.0-causal-close-oos12-final-20260723` completed **12/12**, had
+  zero audit voids, traded **1/12**, and produced **+$10.23 / +0.02 effective
+  R per setup**. The two-worker reproduction had byte-identical streams and
+  decision logs, the same P&L, and zero audit voids.
+- **Management-only diagnostic:** on the already-contaminated 100-row panel,
+  restrict the 3.0 vs 5.11 comparison to the 15 setups with identical entry
+  minute and average fill. v5.11 realized **8.78R** versus 3.0's **9.18R**
+  (−0.40R); runner handling on JEM was the largest deficit, while v5 improved
+  DTSS and STEM. This does not justify a rule edit on the inspected panel.
+- **Decision:** retain the causal replay contract and do **not** promote any
+  v5 candidate. The valid residual sample is only one trade, and the principal
+  performance difference remains entry participation rather than management.
+  Expand the point-in-time scanner universe before the next selection test.
+
+### 5.10.0–5.11.0 — scanner-event immediate timing decomposition  ⚠️ TIMING-OPTIMISTIC — NOT PROMOTED
+- **Why:** aligned 3.0/5.8 analysis showed 3.0 entered 0–4 minutes after the
+  scanner event. 5.8's strict three-prior-five-minute gate routinely entered
+  20–35 minutes late. 5.10 removed that delay with a five-minute 1m
+  confirmation window.
+- **5.10 test:** `warrior-5.10.0-immediate-dev100u-20260723`: **+$582.00 /
+  +0.146 effective R per setup, 72 trades**, zero audit voids. Per-delay
+  analysis isolated the decisive refinement: event-minute entries were +22.76R
+  over 21 trades, while entries delayed 2–3 minutes lost −4.60R.
+- **5.11 change:** permit a scanner-confirmed entry only on the scanner event
+  minute; do not chase a later one-minute confirmation. It retains causal
+  private warm-up, current price/VWAP/MACD/new-high checks, a one-minute
+  structural stop, deterministic brackets, and deterministic exits.
+- **Development:** `warrior-5.11.0-event-minute-dev100u-20260723`: **+$773.46
+  / +0.194 effective R per setup**, 21 trades, 57.1% wins, zero audit voids.
+  This is materially better than 5.10 but below the historical clean 3.0
+  panel (+$988.08 / +0.25), whose agent runner has a different contract.
+- **Untouched holdout:** `warrior-5.11.0-event-minute-holdout27-20260723`:
+  **+$93.08 / +0.086 effective R per setup**, 4 trades, 75% wins, zero voids.
+  A single-worker rerun was semantically identical across decisions, actions,
+  and P&L and also voided zero leaves.
+- **Causality correction:** the scan detector consumes left-labelled completed
+  five-minute bars, but these versions exposed the resulting event at the bar's
+  label rather than its close. Their results are useful timing diagnostics only,
+  not valid causal performance evidence; v5.12 supersedes their event-release
+  contract.
+- **Decision:** ❌ do **not** promote. Preserve the results for diagnosis only;
+  evaluate future candidates under v5.12's bar-close release contract.
+
+### 5.8.0 — private warm-up / scanner-event-first candidate  ⏳ SMOKE-VALIDATED — NOT PROMOTED
+- **Why:** 5.7 correctly delayed the scanner data until its trigger minute, but
+  still exposed the full 09:30→trigger tape to the policy. That is not direct
+  scanner parity: a real scanner-selected workflow begins making decisions when
+  the scanner fires.
+- **Change:** pre-trigger minutes now warm indicators and completed-five-minute
+  structure privately. The first published decision tick is the scanner event
+  itself (`i=0`); it includes the trigger, RVOL, and reason. All subsequent
+  scoring remains the same deterministic v5.7 policy.
+- **Test:** replay regression proves the first visible tick is the scanner event
+  while causal warm-up is retained. `warrior-5.8.0-scanner-start-smoke-20260723`
+  completed 10/10 leaves: 3 trades, +$23.10 / +0.06 effective R per setup, no
+  audit voids. Persisted-stream validation found zero leaves with a pre-event
+  visible tick.
+- **Decision:** ⏳ hold; this is the correct contract for a broad 3.0 parity
+  evaluation, not a profitability claim.
+
+### 5.7.0 — causal scanner-event parity candidate  ⏳ SMOKE-VALIDATED — NOT PROMOTED
+- **Why:** 3.0 received the scanner event itself (timestamp, trigger level,
+  RVOL, and reason), while 5.x only received a scanner-selected ticker/date and
+  had to rediscover the event from the open. This made their entry contracts
+  materially different.
+- **Change:** v5.7 still begins at 09:30 with neutral metadata, but releases a
+  one-time `scanner_event` only on its recorded trigger minute. The policy
+  stores that event causally, refuses all entries before it, and requires price
+  to remain at or above its trigger alongside deterministic confluence scoring.
+- **Causality test:** replay regression proves no scanner event exists before
+  the trigger tick. In the 10-row smoke, all three entries occurred after their
+  persisted scanner events; zero leaves were voided by audit.
+- **Smoke:** `warrior-5.7.0-scanner-event-smoke-20260723`: 3 trades, +$23.10
+  / +0.06 effective R per setup. This is only a wiring/correctness smoke,
+  not a comparison or promotion result.
+- **Decision:** ⏳ hold. Run the larger development panel before interpreting
+  profitability or comparing with 3.0.
+
+### 5.3.0–5.6.0 — high-score/early-only selection sweep  ❌ REJECT — HOLDOUT NO-TRADE
+- **Development sequence:** Starting from the complete-five-minute contract,
+  5.2 limited entries to before 10:00 ET; 5.3 raised the score floor to 85;
+  5.4 raised it to 90; 5.5 raised exit-pressure from 50 to 70; and 5.6 tested
+  80. Every batch used the same pinned 100-row `testset_100u.json` and a
+  deterministic no-LLM runner.
+- **Development results:** 5.2: −$14.60 (19 trades); 5.3: −$0.44 (14);
+  5.4: +$66.09 / +1.65R (4); 5.5: **+$81.07 / +2.03R (4)**; 5.6: +$70.19
+  / +1.76R (4). The 5.5 single-worker rerun was semantically identical for
+  decisions, actions, and P&L across all 100 leaves. A full batch audit voided
+  zero leaves.
+- **Holdout:** the untouched `testset_5x_holdout_27.json` is the 27-row
+  difference between `testset_100.json` and the 100u development panel. On
+  `warrior-5.5.0-holdout27-20260723`, 5.5 stood down on **27/27** and earned
+  **$0.00 / 0.00 effective R**. Its audit also voided zero leaves.
+- **Decision:** ❌ **REJECT / DO NOT PROMOTE.** The development gain came from
+  an entry filter too selective to demonstrate out-of-sample participation.
+  3.0.0 remains the active strategy. Retain the deterministic replay and
+  complete-five-minute reliability work, but do not claim that any v5 setting
+  is more profitable or more reliable than 3.0.0.
+
+### 5.2.0 — early-session entry selection  ✅ DEV-PANEL IMPROVEMENT — HOLDOUT PENDING
+- **Why:** on the 100-row from-open deterministic 5.1.0 development panel, the
+  09:xx entry cohort averaged +0.042R/trade while the 10:xx cohort averaged
+  −0.073R/trade. This is a narrowly scoped timing-selection hypothesis, not a
+  claim that late-morning breakouts are intrinsically invalid.
+- **Change:** retain the v5.1 complete-five-minute feed contract, all entry-score
+  weights, brackets, stops, scales, and exits; prohibit new entries at or after
+  10:00 ET. Existing positions still receive the unchanged management policy.
+- **Test:** `warrior-5.2.0-dev100u-before1000-20260723`, exact same 100-row
+  `testset_100u.json`, deterministic no-LLM runner: **19 trades, 81 stand-downs,
+  −$14.60 / −0.004 effective R per setup**, versus v5.1's 47 trades, 53
+  stand-downs, **−$56.43 / −0.014**. The 28 deliberately omitted v5.1 trades
+  summed **−$41.83 / −1.05R**; the 19 retained leaves had byte-identical outcomes.
+  The runner contracts differ by design, so `batchsim compare` correctly does
+  not treat this as a formal paired statistical result.
+- **Decision:** ✅ retain as the current development branch; **do not promote**.
+  It still loses on the full panel and needs further isolated development work,
+  followed by the untouched 27-name holdout and reproducibility audit.
+
+### 5.1.0 — complete-five-minute data contract  ✅ RELIABILITY FIX — NO ALPHA CLAIM
+- **Why:** legacy replay could label a clock-aligned five-minute candle complete
+  even when a constituent 1-minute bar was absent. That lets a causal policy act
+  on synthetic structural evidence.
+- **Change:** emit an eligible 5-minute candle only if all five constituent
+  minutes are observed; preserve legacy behavior unless a skill opts into this
+  contract.
+- **Test:** replay regression coverage for gapped buckets plus
+  `warrior-5.1.0-dev100u-complete5m-20260723`: 47 trades, **−$56.43**, versus
+  v5.0's 54 trades, **−$49.98**. It rejected seven gap-dependent v5.0 trades;
+  their net result was +$5.26, so the integrity correction is not an alpha win.
+- **Decision:** ✅ keep the feed contract for every later candidate because it is
+  required for valid backtests; do not cite it as performance improvement.
+
+### 5.0.0 — deterministic Warrior pattern policy  ⏳ MAJOR CANDIDATE — NOT YET VALIDATED
+- **Why:** the 4.1 DRUG smoke exposed two separable problems: the agent entered
+  before three prior five-minute candles actually existed, and it stopped while
+  long, allowing a forced end-of-day close to appear as a large profitable result.
+  More broadly, identical indicator/pattern evidence should not produce different
+  entry, bailout, or scale decisions from one model run to another.
+- **Change:** `warrior_pattern_score_v1` moves the 4.1 entry and exit cards into a
+  causal Python state machine. It makes one entry attempt, attaches engine-owned
+  +1R/+2R thirds, promotes the stop to break-even mechanically, repeats capped
+  exits until flat, and forces a policy-authored flat intent by 15:55. Batchsim
+  uses the no-agent deterministic-policy runner and exact replay audit.
+- **Data compatibility:** a new opt-in `strict_prior_three_context` field publishes
+  `prior_3_count` and withholds all `prior_3_*` aggregates until count three.
+  Sealed 4.x versions retain their legacy stream contract.
+- **Type:** major decision-path and execution-interface rebaseline. Pattern weights
+  and 75/50 thresholds remain experimental guardrails, not Cameron numbers.
+- **Test:** focused/unit integration passed; cached DRUG smoke entered only after
+  three true prior 5-minute bars, exited by policy (not forced), and repeated with
+  byte-identical decisions: +$86.42 / +2.16 planned R. On the exact 10-row
+  `testset_isolation_smoke_10u.json` bytes, 5.0 traded 5 and stood down on 5:
+  +$23.11 / +0.058 effective R per setup versus the historical clean 3.0
+  contract-smoke's +$213.23 / +0.534. Paired mean delta was −0.476R/setup;
+  5 improved / 5 worsened / 0 tied, sign-p 1.0. The two largest deficits were
+  stand-downs on 3.0 winners DTSS (+1.62R) and GRPN (+2.22R). One 3.0 OLOX
+  winner (+3.08R) used a forced 15:59 close; even treating that leaf as 0R leaves
+  3.0 ahead (+0.226 versus +0.058 effective R).
+- **Comparison caveat:** batchsim correctly refuses its formal paired comparison
+  because 3.0 is an agent runner beginning at the recorded trigger while 5.0 is
+  deterministic and starts at the open. The shared test-set hash makes this a
+  useful end-to-end diagnostic, not a controlled policy-only estimate.
+- **Decision:** ⏳ HOLD / DO NOT PROMOTE — deterministic reproducibility is proven,
+  but this 10-name diagnostic gives no performance evidence for replacing 3.0.0.
+  Keep 3.0.0 active; next isolate the missed-winner gates or run the full 100-row
+  descriptive panel before changing thresholds.
+
+---
+
 ### 4.1.0 — deterministic candlebars + entry/exit confluence scoring  ⏳ SAMPLE CANDIDATE — NOT YET VALIDATED
 - **Why:** the transcript teaches reading repeatable price patterns together with
   volume, VWAP, EMA, and MACD, while treating topping tails and failed breakouts as

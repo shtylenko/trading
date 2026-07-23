@@ -756,6 +756,12 @@ def init(
             "session_from_open": m.get("session_from_open"),
             "five_minute_context": m.get("five_minute_context"),
             "candlebar_context": m.get("candlebar_context"),
+            "strict_prior_three_context": m.get("strict_prior_three_context"),
+            "require_complete_five_minute_bars": m.get("require_complete_five_minute_bars"),
+            "scanner_event_context": m.get("scanner_event_context"),
+            "scanner_event_start": m.get("scanner_event_start"),
+            "scanner_event_release_delay_minutes": m.get("scanner_event_release_delay_minutes"),
+            "scanner_event_include_reason": m.get("scanner_event_include_reason"),
             "completed_five_minute_entry_required": m.get(
                 "completed_five_minute_entry_required"
             ),

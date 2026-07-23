@@ -1,0 +1,32 @@
+{
+  "created": "2026-07-23T00:00:00",
+  "seed": 47,
+  "n": 12,
+  "setups": [
+    {"ticker": "AZI", "date": "2024-11-11", "time_et": "10:30", "pattern": "acd_orb", "float_shares": 1729957.0, "gap_pct": 12.65},
+    {"ticker": "GOVX", "date": "2024-06-27", "time_et": "09:40", "pattern": "acd_orb", "float_shares": 3200192.0, "gap_pct": 20.6},
+    {"ticker": "GRPN", "date": "2024-05-10", "time_et": "09:30", "pattern": "acd_orb", "float_shares": 17719527.0, "gap_pct": 12.38},
+    {"ticker": "GXAI", "date": "2024-03-13", "time_et": "09:30", "pattern": "acd_orb", "float_shares": 9997548.0, "gap_pct": 99.06},
+    {"ticker": "INDO", "date": "2024-08-12", "time_et": "11:30", "pattern": "acd_orb", "float_shares": 9922512.0, "gap_pct": 7.1},
+    {"ticker": "OM", "date": "2024-04-08", "time_et": "09:30", "pattern": "acd_orb", "float_shares": 15496392.0, "gap_pct": 6.83},
+    {"ticker": "PBM", "date": "2024-12-19", "time_et": "10:05", "pattern": "acd_orb", "float_shares": 2607742.0, "gap_pct": 35.95},
+    {"ticker": "PHUN", "date": "2024-10-22", "time_et": "09:35", "pattern": "acd_orb", "float_shares": 19683708.0, "gap_pct": 10.58},
+    {"ticker": "RVSN", "date": "2024-01-23", "time_et": "10:20", "pattern": "acd_orb", "float_shares": 2090425.0, "gap_pct": 37.78},
+    {"ticker": "RVSN", "date": "2024-01-29", "time_et": "09:40", "pattern": "acd_orb", "float_shares": 2090425.0, "gap_pct": 11.37},
+    {"ticker": "TKNO", "date": "2024-07-22", "time_et": "10:30", "pattern": "acd_orb", "float_shares": 10879895.0, "gap_pct": 6.45},
+    {"ticker": "VCIG", "date": "2024-11-27", "time_et": "09:35", "pattern": "acd_orb", "float_shares": 16882.0, "gap_pct": 39.11}
+  ],
+  "cohort": {
+    "purpose": "causal scanner-event-close validation; disjoint from every prior Warrior testset",
+    "selection": "all remaining RTH-eligible entries after exclusion",
+    "excluded_testsets": [
+      "testset-DRUG-2024-10-15.json",
+      "testset.json",
+      "testset_100.json",
+      "testset_100u.json",
+      "testset_5x_holdout_27.json",
+      "testset_isolation_smoke_10u.json",
+      "testset_mini.json"
+    ]
+  }
+}

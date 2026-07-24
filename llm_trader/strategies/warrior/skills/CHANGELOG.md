@@ -9,6 +9,93 @@ Columns: **version** · **hypothesis** · **baseline→candidate batch tags** ·
 
 ---
 
+### 5.16.0 — 3.0 checklist watch + quality filters + runner retention  ⏳ DEV-PANEL PARITY — NOT PROMOTED
+- **Why:** v5.11–v5.15 were deterministic but far below the 3.0.0 agent baseline
+  (+$751…+$988 / ~0.19–0.25 eff R). Diagnostics isolated four loss sources under
+  the causal scanner-release contract: (1) one-minute / pattern-hard entry gates
+  collapsed participation from ~95% to ~20%; (2) `ENTER_NEXT_OPEN` after the
+  +4-minute release wiped the profitable event-minute cohort; (3)
+  `immediate_failed_break` vs the scanner trigger cut winners after confirmed-
+  close fills; (4) the single red 5m-under-prior-green runner exit clipped
+  multi-R winners before brackets and 15:55 flat could work.
+- **Change (`warrior_pattern_score_v15`):** causal scanner watch through 11:00
+  with the sealed **3.0 entry checklist** (break hold/new high, green, above
+  VWAP, clean upper-third, null-tolerant volume, MACD not negative). Soft
+  quality: pattern component ≥10, structural stop ≤5% of price. `ENTER_CLOSE`
+  with engine +1R/+2R thirds. Failed-break soft exit off; five-minute runner
+  exit off; exit-pressure threshold 70. Protective stop + 15:55 flat remain.
+- **Dev panel (spent, non-PIT float):** `warrior-5.16.0-checklist-runner-dev100u-20260723`
+  on `testset_100u.json`: **49 trades**, **41% wins**, **+$1,034.23 /
+  +0.26 effective R per setup**, zero audit voids. Comparable to / above the
+  three 3.0.0 DeepSeek control runs (+$988 / +$836 / +$751). Offline sealed-
+  stream replay of the same policy matched the batch P&L byte-for-byte on
+  aggregate.
+- **Caveats:** the panel is spent and the float gate is not point-in-time;
+  thresholds (stop 5%, pattern ≥10, exit 70) were chosen from that panel and
+  are **not** promotable evidence. Runner-exit off is an operationalization
+  choice to stop clipping convex winners under engine brackets — not a claim
+  that Cameron never manages 5m structure.
+- **Decision:** ⏳ HOLD for promotion. Deterministic P&L now reaches 3.0-class
+  numbers on the development panel; validate only via frozen forward-shadow
+  (see `RESEARCH_CONTROLS.md`). 3.0.0 remains the agent baseline; 5.16.0 is the
+  strongest deterministic candidate to date.
+
+### 5.15.0 — 3.0 checklist watch (ENTER_CLOSE)  ❌ REJECT — management/clipping
+- **Why:** 5.14 pattern-hard gates under-traded; 3.0 enters median +1m after
+  scanner via checklist, not rare geometry.
+- **Change:** causal watch + 3.0 checklist, no pattern hard gate, `ENTER_CLOSE`.
+- **Dev panel:** `warrior-5.15.0-checklist-dev100u-20260723`: **68 trades**,
+  **−$16.44 / −0.00 eff R**. Participation recovered, but failed-break-vs-
+  trigger and 5m runner exits plus exit-pressure 50 destroyed expectancy.
+  10:xx entries alone were −$23.
+- **Decision:** ❌ REJECT as a stand-alone version; keep the checklist entry
+  lane and fix management in 5.16.0.
+
+### 5.14.0 — scanner watch / later pattern-trigger fidelity correction  ⏳ WIRING-VALIDATED — NOT PROMOTED
+- **Why:** the v5.11–v5.13 lane treated the scanner-event release minute as the
+  only permitted entry minute. That conflates stock selection with an entry
+  trigger and rejects the micro-pullbacks and bull flags that form later.
+- **Change:** the causal scanner event now opens a watch state through 11:00 ET.
+  Candle-over-candle, micro-pullback-break, and bull-flag-break events can
+  trigger one next-open entry later in that window, but only with green price
+  action, 1-minute volume expansion, VWAP and EMA alignment, non-negative MACD,
+  and no bearish candle veto. v5.13 next-open execution and management remain.
+- **Validation:** unit coverage proves the scanner tick continues watching and a
+  later micro-pullback trigger can queue `ENTER_NEXT_OPEN`; batch dry run
+  resolves `warrior_pattern_score_v13`. Smoke batch
+  `warrior-5.14-watch-pattern-smoke-20260723` completed **10/10** sessions with
+  zero audit voids: **7** pattern-triggered entries and **3** stand-downs. It
+  realized −$195.73 / −0.49 effective R per setup on the already-spent smoke
+  panel; this records plumbing behavior, not a performance result.
+- **Decision:** forward-shadow only. The historical panel is spent and the
+  scanner float remains non-PIT.
+
+### 5.13.0 — next-open execution integrity correction  ⏳ WIRING-VALIDATED — NOT PROMOTED
+- **Why:** v5.12 correctly withheld a left-labelled `09:35` scanner bar until
+  the `09:39` close, but then filled an `ENTER_CLOSE` intent at that same close.
+  That still uses the closing price which supplied the confirmation evidence.
+- **Change:** after the completed `09:39` bar, v5.13 queues
+  `ENTER_NEXT_OPEN`; the engine first fills at the `09:40` open using configured
+  adverse slippage and capacity. An open at or below the structural stop cancels
+  the order. Attached targets cannot fill in the entry bar.
+- **Validation:** unit and policy/replay harness regressions cover same-close
+  prohibition and open-at-stop cancellation. The batch harness dry run resolves
+  the sealed `warrior_pattern_score_v12` policy without an LLM. No historical
+  P&L was used to choose this integrity correction.
+- **Post-seal diagnostic (not validation):** on the already-spent 100-row
+  development panel, `warrior-5.13.0-next-open-dev100u-20260723` traded
+  **20/100** and realized **−$10.74 / −0.003 effective R per setup** (80
+  stand-downs). The selected deepseek v3.0 diagnostic baseline traded **93/100**
+  and realized **+$751.42 / +0.19 effective R**. On the exact 20 names traded by
+  v5.13, v3 recorded +$350.69 versus v5.13's −$10.74. This is descriptive only:
+  v3 is agent-driven and uses a different fill/management contract, the panel
+  has been inspected, and the scanner float is non-PIT.
+- **Research status:** all legacy Warrior panels, including the former 27-row
+  holdout and residual 12-row causal smoke, are spent and non-promotable because
+  the float gate is not point-in-time. See `../RESEARCH_CONTROLS.md`.
+- **Decision:** do not promote or tune. Start a frozen forward-shadow cohort
+  with the new scanner-input ledger before measuring entry participation or P&L.
+
 ### 5.12.0 — scanner-event-close causality correction  ⏳ VALIDATED WIRING — NOT PROMOTED
 - **Why:** the market-data contract uses left-labelled five-minute bars. A
   scanner breakout labelled `09:35` is computed from the `09:35`–`09:39`

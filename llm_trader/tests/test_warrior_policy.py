@@ -18,7 +18,7 @@ from trading.llm_trader.strategies.warrior.policy import (
     decisions_for_ticks,
     PolicySettings,
 )
-from trading.llm_trader.strategies.warrior import policy_v2
+from trading.llm_trader.strategies.warrior import policy_v2, policy_v13, policy_v14, policy_v15
 
 
 def _event(
@@ -26,12 +26,13 @@ def _event(
     *,
     direction: str = "bullish",
     score: float = 1.0,
+    resolution: str = "5min",
 ) -> dict:
     return {
         "pattern": pattern,
         "direction": direction,
         "score": score,
-        "resolution": "5min",
+        "resolution": resolution,
         "time": "09:49",
         "evidence": {},
     }
@@ -124,7 +125,110 @@ def test_scanner_event_immediate_confirmation_can_enter_without_bar5():
     )
     decision = decisions_for_ticks([tick], settings=settings)[0]
     assert decision["action"] == "ENTER_CLOSE"
+
+
+def test_scanner_event_policy_can_queue_a_next_open_entry():
+    tick = _entry_tick()
+    tick["scanner_event"] = {
+        "time": tick["time"], "trigger": 10.0, "rvol": 5.0,
+        "signal": "historical_scanner_trigger",
+    }
+    settings = PolicySettings(
+        entry_threshold=70.0, scanner_event_required=True,
+        scanner_event_immediate_confirmation=True,
+        scanner_event_confirmation_bars=0,
+        entry_action="ENTER_NEXT_OPEN",
+    )
+    decision = decisions_for_ticks([tick], settings=settings)[0]
+    assert decision["action"] == "ENTER_NEXT_OPEN"
     assert decision["stop"] == 9.89
+
+
+def test_scanner_event_starts_a_watch_and_later_pattern_break_can_enter():
+    scanner_tick = _entry_tick(i=0, time="09:39")
+    scanner_tick["bar5_complete"] = None
+    scanner_tick["candlebar_patterns"] = []
+    scanner_tick["scanner_event"] = {
+        "time": "09:39", "trigger": 10.0, "rvol": 5.0,
+        "signal": "historical_scanner_trigger",
+    }
+    pattern_tick = _entry_tick(i=1, time="09:45")
+    pattern_tick["bar5_complete"] = None
+    pattern_tick["candlebar_patterns"] = [
+        _event("micro_pullback_break", resolution="1min")
+    ]
+
+    records = policy_v13.decisions_for_ticks([scanner_tick, pattern_tick], _config())
+
+    assert records[0]["action"] == "OBSERVE"
+    assert "no_bullish_pattern_trigger" in records[0]["reason_codes"]
+    assert records[1]["action"] == "ENTER_NEXT_OPEN"
+    assert records[1]["reason_codes"] == []
+
+
+def test_scanner_watch_does_not_enter_later_without_a_bullish_pattern_trigger():
+    scanner_tick = _entry_tick(i=0, time="09:39")
+    scanner_tick["bar5_complete"] = None
+    scanner_tick["candlebar_patterns"] = []
+    scanner_tick["scanner_event"] = {
+        "time": "09:39", "trigger": 10.0, "rvol": 5.0,
+        "signal": "historical_scanner_trigger",
+    }
+    later_tick = _entry_tick(i=1, time="09:45")
+    later_tick["bar5_complete"] = None
+    later_tick["candlebar_patterns"] = []
+
+    records = policy_v13.decisions_for_ticks([scanner_tick, later_tick], _config())
+    assert records[1]["action"] == "OBSERVE"
+    assert "no_bullish_pattern_trigger" in records[1]["reason_codes"]
+
+
+def test_v14_checklist_watch_enters_without_pattern_on_later_bar():
+    """3.0 checklist watch: no pattern hard-gate; first full-box bar ENTER_CLOSE."""
+    scanner_tick = _entry_tick(i=0, time="09:39")
+    scanner_tick["bar5_complete"] = None
+    scanner_tick["candlebar_patterns"] = []
+    scanner_tick["c"] = 9.50  # below trigger — observe only
+    scanner_tick["o"] = 9.40
+    scanner_tick["h"] = 9.55
+    scanner_tick["l"] = 9.35
+    scanner_tick["new_high"] = False
+    scanner_tick["scanner_event"] = {
+        "time": "09:39", "trigger": 10.0, "rvol": 5.0,
+        "signal": "historical_scanner_trigger",
+    }
+    later = _entry_tick(i=1, time="09:42")
+    later["bar5_complete"] = None
+    later["candlebar_patterns"] = []  # no pattern required
+    later["rvol_bar"] = None  # null rvol must not fail
+    later["v"] = 50_000
+    records = policy_v14.decisions_for_ticks([scanner_tick, later], _config())
+    assert records[0]["action"] == "OBSERVE"
+    assert records[1]["action"] == "ENTER_CLOSE"
+    assert records[1]["reason_codes"] == []
+    assert records[1]["stop"] == round(min(later["l"], scanner_tick["l"]) - 0.01, 4)
+
+
+def test_v15_rejects_wide_stop_and_keeps_runner_without_five_min_clip():
+    """Quality filters block chase entries; runner_exit_mode=off skips 5m clip."""
+    scanner_tick = _entry_tick(i=0, time="09:39")
+    scanner_tick["bar5_complete"] = None
+    scanner_tick["candlebar_patterns"] = []
+    scanner_tick["scanner_event"] = {
+        "time": "09:39", "trigger": 10.0, "rvol": 5.0,
+        "signal": "historical_scanner_trigger",
+    }
+    # Wide structural stop (>5% of price) should be rejected by v15.
+    wide = _entry_tick(i=1, time="09:42")
+    wide["bar5_complete"] = None
+    wide["candlebar_patterns"] = [_event("candle_over_candle", resolution="1min")]
+    wide["l"] = 9.0  # stop would be ~8.99 → ~12% below 10.18
+    wide["o"] = 10.05
+    wide["h"] = 10.20
+    wide["c"] = 10.18
+    records = policy_v15.decisions_for_ticks([scanner_tick, wide], _config())
+    assert records[1]["action"] == "OBSERVE"
+    assert "stop_too_wide" in records[1]["reason_codes"]
 
 
 def _config() -> ExecutionConfig:

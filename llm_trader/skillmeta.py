@@ -143,6 +143,9 @@ def read_skill_meta(path: str | Path) -> dict:
         "scanner_event_start": fm.get("scanner_event_start"),
         "scanner_event_release_delay_minutes": fm.get("scanner_event_release_delay_minutes"),
         "scanner_event_include_reason": fm.get("scanner_event_include_reason"),
+        "scanner_event_next_open_execution": fm.get("scanner_event_next_open_execution"),
+        "scanner_event_watch_until_cutoff": fm.get("scanner_event_watch_until_cutoff"),
+        "scanner_event_checklist_watch": fm.get("scanner_event_checklist_watch"),
         "completed_five_minute_entry_required": fm.get("completed_five_minute_entry_required"),
         # Multi-strategy / multi-horizon contracts
         "strategy": fm.get("strategy"),

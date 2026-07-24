@@ -33,7 +33,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--end", help="YYYY-MM-DD.")
     p.add_argument("--profile", choices=["small", "main"], help="Account profile (warrior).")
     p.add_argument("--gap-min", type=float, help="Min gap %% (warrior; default 5).")
-    p.add_argument("--rvol-min", type=float, help="Min relative volume (warrior; default 2).")
+    p.add_argument(
+        "--rvol-min", type=float,
+        help="Min prior-day volume ratio (legacy flag name; warrior default 2).",
+    )
     p.add_argument(
         "--float-max",
         type=float,
@@ -42,6 +45,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--price-min", type=float)
     p.add_argument("--price-max", type=float)
     p.add_argument("--db", help="Output SQLite path.")
+    p.add_argument(
+        "--forward-shadow-ledger",
+        help="Append contemporaneous Warrior scanner inputs to this JSONL ledger.",
+    )
     p.add_argument(
         "--max-symbols",
         type=int,
@@ -86,4 +93,6 @@ def config_from_args(args: argparse.Namespace) -> ScanConfig:
         cfg.float_max = None if args.float_max <= 0 else args.float_max
     if args.db:
         cfg.db_path = Path(args.db)
+    if args.forward_shadow_ledger:
+        cfg.forward_shadow_ledger = Path(args.forward_shadow_ledger)
     return cfg

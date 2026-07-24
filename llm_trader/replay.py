@@ -812,6 +812,26 @@ def _stream_jsonl(
         "context_warnings": ctx["context_warnings"],
         "session_end": RTH_CLOSE.strftime("%H:%M"),
     }
+    # Warrior's historical float gate is supplied by a retrieval-time snapshot.
+    # It is useful operationally, but it is not an as-of-date float and therefore
+    # cannot support promotable historical performance claims.  Put this warning
+    # directly in every replay stream rather than relying on a report reader to
+    # notice caveats in the scanner code.
+    if getattr(setup, "strategy", "warrior") == "warrior":
+        features = setup.features or {}
+        float_provenance = features.get("float_provenance")
+        if not isinstance(float_provenance, dict):
+            float_provenance = {
+                "as_of": "unknown_non_point_in_time",
+                "point_in_time": False,
+                "source": "legacy_or_unrecorded",
+            }
+        if not bool(float_provenance.get("point_in_time")):
+            meta.update({
+                "research_tier": "exploratory_non_pit_float",
+                "research_warnings": ["NON_PIT_FLOAT"],
+                "float_provenance": float_provenance,
+            })
     if neutral_meta:
         # The scanner chose the ticker/date, but the trader must discover its own
         # entry from the live tape. Do not reveal the scanner's completed-bar trigger,

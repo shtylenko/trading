@@ -80,6 +80,7 @@ INTENT_ACTIONS = {
     "OBSERVE",
     "STAND_DOWN",
     "ENTER_CLOSE",
+    "ENTER_NEXT_OPEN",
     "ARM_BUY_STOP",
     "CANCEL_ENTRY",
     "SET_STOP",
@@ -106,6 +107,10 @@ class ExecutionEngine:
         self.fees = 0.0
         self.stop: Optional[float] = None
         self.armed: Optional[dict[str, Any]] = None
+        # A close-confirmed decision cannot transact at that already-completed
+        # bar's close.  This order is submitted after bar i and may first fill
+        # at bar i+1's open.
+        self.next_open_entry: Optional[dict[str, Any]] = None
         self.targets: list[dict[str, Any]] = []
         self.pyramid: Optional[dict[str, Any]] = None
         self.order_events: list[dict[str, Any]] = []
@@ -510,6 +515,48 @@ class ExecutionEngine:
     def _resolve_open_orders(self, bar: dict[str, Any]) -> None:
         capacity = self._bar_capacity(bar)
 
+        # Execute a previously close-confirmed entry at the first subsequently
+        # observable open.  This is distinct from ENTER_CLOSE: it deliberately
+        # never manufactures a fill at the same bar close that supplied the
+        # confirmation evidence.
+        if (
+            self.shares == 0
+            and self.next_open_entry is not None
+            and int(bar["i"]) > self.next_open_entry["placed_i"]
+        ):
+            pending = self.next_open_entry
+            price = self._buy_price(float(bar["o"]))
+            stop = float(pending["stop"])
+            if price <= stop:
+                self.order_events.append({
+                    "i": int(bar["i"]),
+                    "action": "CANCEL_ENTRY",
+                    "reason": "next-open entry opened at or below its protective stop",
+                })
+                self.next_open_entry = None
+            else:
+                self.stop = stop
+                qty = self._entry_qty(price, stop, capacity, add=False)
+                filled = self._append_fill(
+                    bar, action="ENTER", buy=True, shares=qty, price=price,
+                    reason="close-confirmed next-open entry",
+                )
+                self.next_open_entry = None
+                if filled is None:
+                    self.stop = None
+                    self.order_events.append({
+                        "i": int(bar["i"]),
+                        "action": "CANCEL_ENTRY",
+                        "reason": (
+                            "next-open entry resolved to zero shares "
+                            "(capacity/buying-power/stop-distance)"
+                        ),
+                    })
+                else:
+                    capacity -= filled["shares"]
+                    self._attach_bracket(pending, fill=filled, placed_i=int(bar["i"]))
+                    self._start_pyramid(pending, filled)
+
         # Stop protection deliberately wins any ambiguous OHLC bar.  This is
         # conservative: without tick ordering, a target-before-stop path is not
         # knowable and must not be assumed.
@@ -528,7 +575,11 @@ class ExecutionEngine:
         # Limit scales are active only after the bar on which they were placed.
         if self.shares > 0:
             for target in list(self.targets):
-                if capacity <= 0 or float(bar["h"]) < target["target"]:
+                if (
+                    capacity <= 0
+                    or int(bar["i"]) <= int(target.get("placed_i", -1))
+                    or float(bar["h"]) < target["target"]
+                ):
                     continue
                 wanted = target.get("remaining")
                 if wanted is None:
@@ -660,6 +711,7 @@ class ExecutionEngine:
             return
         if action == "CANCEL_ENTRY":
             self.armed = None
+            self.next_open_entry = None
             return
         if action == "SET_STOP":
             new_stop = float(decision["stop"])
@@ -719,6 +771,19 @@ class ExecutionEngine:
             )
             self._attach_bracket(decision, fill=filled, placed_i=int(bar["i"]))
             self._start_pyramid(decision, filled)
+            return
+        if action == "ENTER_NEXT_OPEN":
+            if self.shares > 0 or self.armed is not None or self.next_open_entry is not None:
+                raise ValueError("ENTER_NEXT_OPEN requires a flat position with no active entry")
+            stop = float(decision["stop"])
+            self._bracket_scales(decision)
+            self._pyramid_spec(decision)
+            self.next_open_entry = {
+                "stop": stop,
+                "placed_i": int(bar["i"]),
+                "bracket": decision.get("bracket"),
+                "pyramid": decision.get("pyramid"),
+            }
             return
         if action == "ADD_CLOSE":
             if self.pyramid is not None:

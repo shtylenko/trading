@@ -39,8 +39,9 @@ def test_screen_filters_gap_rvol_price(tmp_path):
         ("2025-03-05", 4.0, 4.1, 3.9, 4.0, 200_000),
         ("2025-03-06", 4.0, 4.1, 3.9, 4.0, 210_000),
         ("2025-03-07", 4.0, 4.1, 3.9, 4.0, 190_000),
-        ("2025-03-09", 4.0, 4.1, 3.9, 4.0, 200_000),  # prior close for gap calc
-        ("2025-03-10", 4.8, 5.1, 4.7, 5.0, 1_200_000),  # +20% gap, high rvol
+        # The prior full-day volume is the causal next-session ratio input.
+        ("2025-03-09", 4.0, 4.1, 3.9, 4.0, 2_000_000),
+        ("2025-03-10", 4.8, 5.1, 4.7, 5.0, 300_000),  # +20% gap
         ("2025-03-11", 5.1, 5.2, 5.0, 5.05, 300_000),
     ])
 
@@ -50,7 +51,7 @@ def test_screen_filters_gap_rvol_price(tmp_path):
         c = cands[0]
         assert c.day == date(2025, 3, 10)
         assert c.gap_pct > 15
-        assert c.rvol > 2
+        assert c.prior_day_volume_ratio > 2
 
 
 def test_runner_smoke_with_mocks(tmp_path):
@@ -72,8 +73,14 @@ def test_runner_smoke_with_mocks(tmp_path):
         # screen returns a candidate for first ticker only
         mock_screen.side_effect = lambda s, c: [GapCandidate(s, date(2025, 3, 10), 5.0, 4.0, 25.0, 5.0, 600000, 800000)] if s == "TEST1" else []
         mock_float_inst = MockFloat.return_value
-        mock_float_inst.passes.return_value = True
-        mock_float_inst.get.return_value = 5_000_000
+        mock_float_inst.snapshot.return_value = {
+            "value": 5_000_000,
+            "source": "float",
+            "fetched_at": "2026-07-23T00:00:00+00:00",
+            "as_of": "retrieval_time_current_snapshot",
+            "point_in_time": False,
+            "fallback_used": False,
+        }
         mock_float_inst.flush = MagicMock()
 
         from trading.llm_trader.patterns import Entry as E

@@ -70,6 +70,7 @@ _SETUP_META_KEYS = (
     "entry_time", "entry_px", "anchor_px", "gap_pct", "rvol", "float_shares",
     "prior_close", "prior_high", "prior_low", "pm_high", "pm_low",
     "session_end", "reason",
+    "research_tier", "research_warnings", "float_provenance",
     # multi-strategy / swing plan levels
     "strategy", "pattern", "horizon", "bar_resolution",
     "stop_px", "target1_px", "target2_px", "atr", "handle_high",
@@ -762,6 +763,9 @@ def init(
             "scanner_event_start": m.get("scanner_event_start"),
             "scanner_event_release_delay_minutes": m.get("scanner_event_release_delay_minutes"),
             "scanner_event_include_reason": m.get("scanner_event_include_reason"),
+            "scanner_event_next_open_execution": m.get("scanner_event_next_open_execution"),
+            "scanner_event_watch_until_cutoff": m.get("scanner_event_watch_until_cutoff"),
+            "scanner_event_checklist_watch": m.get("scanner_event_checklist_watch"),
             "completed_five_minute_entry_required": m.get(
                 "completed_five_minute_entry_required"
             ),
@@ -994,7 +998,7 @@ def _validate_intent_record(
         )
     if action == "ENTER_CLOSE" and forbid_daily_enter_close:
         raise ValueError("this daily skill prohibits ENTER_CLOSE on a revealed daily bar")
-    if action in {"ENTER_CLOSE", "ARM_BUY_STOP", "SET_STOP", "ADD_CLOSE"}:
+    if action in {"ENTER_CLOSE", "ENTER_NEXT_OPEN", "ARM_BUY_STOP", "SET_STOP", "ADD_CLOSE"}:
         _number(record, "stop")
     if action == "ARM_BUY_STOP":
         trigger = _number(record, "trigger")
@@ -1014,7 +1018,7 @@ def _validate_intent_record(
             if (not isinstance(expiry_bars, int) or isinstance(expiry_bars, bool)
                     or expiry_bars < 1):
                 raise ValueError("ARM_BUY_STOP expiry_bars must be a positive integer")
-    if action in {"ENTER_CLOSE", "ARM_BUY_STOP"}:
+    if action in {"ENTER_CLOSE", "ENTER_NEXT_OPEN", "ARM_BUY_STOP"}:
         if require_entry_bracket and record.get("bracket") is None:
             raise ValueError("this skill requires an entry bracket on every new entry")
         if require_entry_pyramid and record.get("pyramid") is None:

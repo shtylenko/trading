@@ -74,6 +74,25 @@ class PolicySettings:
     scanner_event_required: bool = False
     scanner_event_immediate_confirmation: bool = False
     scanner_event_confirmation_bars: int = 5
+    # Scanner selection starts a watch; it is not itself an entry order.  The
+    # watch lane waits for a later, causally observed bullish pattern trigger.
+    scanner_event_watch_until_cutoff: bool = False
+    # v3-style hard checklist after the causal scanner event (no pattern hard gate).
+    # Patterns remain soft score components when present.
+    scanner_event_checklist_watch: bool = False
+    entry_action: str = "ENTER_CLOSE"
+    # Soft quality gates used by the checklist-watch lane (0 disables).
+    min_pattern_score: float = 0.0
+    max_stop_pct_of_price: float = 0.0
+    # Failed-break operationalization:
+    #   "trigger"     — close < scanner trigger within 2 bars (legacy, too aggressive)
+    #   "entry_low"   — red close below the entry bar low within 1 bar (3.0 structure)
+    #   "off"         — disable the soft failed-break exit (protective stop remains)
+    failed_break_mode: str = "trigger"
+    # 5-minute runner exit:
+    #   "prior_green_low" — red 5m close below prior green 5m low (legacy)
+    #   "off"             — rely on scales + exit-pressure + hard stop + 15:55 flat
+    runner_exit_mode: str = "prior_green_low"
 
 
 DEFAULT_SETTINGS = PolicySettings()
@@ -322,6 +341,250 @@ def _scanner_event_entry_assessment(
     return {"eligible": not failures, "score": score, "components": components, "failures": failures, "stop": stop, "break_level": trigger}
 
 
+def _scanner_checklist_entry_assessment(
+    tick: Mapping[str, Any],
+    *,
+    scanner_event: Mapping[str, Any] | None,
+    settings: PolicySettings,
+    recent_volume: list[tuple[bool, float]] | None = None,
+    prior_low: float | None = None,
+) -> dict[str, Any]:
+    """Operationalize the sealed 3.0.0 entry checklist after a causal scanner event.
+
+    Cameron / 3.0 enter on the first revealed bar where every box is true.  The
+    scanner event is only the stock-selection / breakout reference; it is not an
+    order.  Patterns from the transcript (candle-over-candle, micro-pullback,
+    bull-flag) are soft confluence, not a hard gate — 3.0 participation was ~95%
+    while pattern-hard gates collapsed to ~20%.
+    """
+    failures: list[str] = []
+    hhmm = str(tick["time"])
+    if hhmm >= settings.entry_cutoff:
+        failures.append("entry_cutoff")
+    if not isinstance(scanner_event, Mapping):
+        failures.append("scanner_event_not_received")
+        return {
+            "eligible": False, "score": None, "components": {},
+            "failures": failures, "stop": None, "break_level": None,
+        }
+    trigger = _optional_number(scanner_event.get("trigger"), "scanner_event.trigger")
+    scanner_rvol = _optional_number(scanner_event.get("rvol"), "scanner_event.rvol")
+    if trigger is None:
+        failures.append("scanner_trigger_missing")
+
+    open_ = _number(tick.get("o"), "tick.o")
+    high = _number(tick.get("h"), "tick.h")
+    low = _number(tick.get("l"), "tick.l")
+    close = _number(tick.get("c"), "tick.c")
+    volume = _number(tick.get("v"), "tick.v")
+    vwap = _optional_number(tick.get("vwap"), "tick.vwap")
+    macd_hist = _optional_number(tick.get("macd_hist"), "tick.macd_hist")
+    rvol_bar = _optional_number(tick.get("rvol_bar"), "tick.rvol_bar")
+    new_high = bool(tick.get("new_high"))
+    bar_range = high - low
+    green = close >= open_
+    clean_upper = bar_range <= 0 or (high - close) < bar_range / 3.0
+
+    # Break box: new session high OR reclaim/hold of the scanner trigger.
+    holding_break = trigger is not None and close >= trigger
+    if not (new_high or holding_break):
+        failures.append("no_break_confirmation")
+    if not green:
+        failures.append("not_green")
+    if vwap is None or close <= vwap:
+        failures.append("not_above_vwap")
+    if not clean_upper:
+        failures.append("topping_tail")
+    # MACD is a soft filter in 3.0 ("not against you"); null is allowed early.
+    if macd_hist is not None and macd_hist < 0:
+        failures.append("negative_macd")
+
+    # Volume: null rvol_bar must not fail (prime 09:30–10:00 window).  Prefer
+    # green>red dominance over the last ~5 revealed bars when rvol is cold.
+    history = list(recent_volume or [])
+    green_vol = sum(v for is_green, v in history if is_green)
+    red_vol = sum(v for is_green, v in history if not is_green)
+    # Include the current bar in the dominance test (it is already closed).
+    if green:
+        green_vol += volume
+    else:
+        red_vol += volume
+    volume_ok = False
+    if rvol_bar is not None and rvol_bar >= 1.5:
+        volume_ok = True
+    elif rvol_bar is None and green_vol > red_vol:
+        volume_ok = True
+    elif rvol_bar is not None and rvol_bar < 1.5 and green_vol > red_vol * 1.0:
+        # Elevated rvol preferred, but green dominance can still pass.
+        volume_ok = green_vol >= red_vol * 1.3
+    if not volume_ok:
+        failures.append("volume_not_expanded")
+
+    events = _events(tick)
+    best_pattern = max(
+        (
+            PATTERN_WEIGHTS[event["pattern"]] * event["score"]
+            for event in events
+            if event["direction"] == "bullish" and event["pattern"] in PATTERN_WEIGHTS
+        ),
+        default=0.0,
+    )
+    # Hard-veto only on a co-occurring bearish geometry; 3.0 already rejects
+    # topping tails via the clean-candle box.
+    bearish = any(
+        event["direction"] == "bearish" or event["pattern"] in BEARISH_PATTERNS
+        for event in events
+    )
+    if bearish:
+        failures.append("bearish_pattern_veto")
+
+    # Soft score for diagnostics / optional threshold; hard gates carry the edge.
+    components = {
+        "break": 25.0 if (new_high or holding_break) else 0.0,
+        "pattern": round(best_pattern, 4),
+        "volume": (
+            20.0 if rvol_bar is not None and rvol_bar >= 1.5
+            else (15.0 if volume_ok else 0.0)
+        ),
+        "trend": (
+            (10.0 if vwap is not None and close > vwap else 0.0)
+            + (10.0 if macd_hist is None or macd_hist >= 0 else 0.0)
+        ),
+        "quality": 15.0 if green and clean_upper and not bearish else 0.0,
+        "timing": 10.0 if hhmm < "10:30" else (5.0 if hhmm < settings.entry_cutoff else 0.0),
+        "scanner": 10.0 if scanner_rvol is not None and scanner_rvol >= 2.0 else 5.0,
+    }
+    score = round(sum(components.values()), 4)
+    if score < settings.entry_threshold:
+        failures.append(f"score_below_{settings.entry_threshold:g}")
+    if settings.min_pattern_score > 0 and best_pattern < settings.min_pattern_score:
+        failures.append("pattern_score_below_min")
+
+    stop_ref_low = low if prior_low is None else min(low, prior_low)
+    stop = round(stop_ref_low - 0.01, 4)
+    if stop >= close:
+        failures.append("invalid_structural_stop")
+    if (
+        settings.max_stop_pct_of_price > 0
+        and close > 0
+        and stop is not None
+        and (close - stop) / close > settings.max_stop_pct_of_price
+    ):
+        # Proxy for "not extended": a structural stop wider than ~5% of price
+        # collapses size and usually means the entry is a chase.
+        failures.append("stop_too_wide")
+    return {
+        "eligible": not failures,
+        "score": score,
+        "components": components,
+        "failures": failures,
+        "stop": stop,
+        "break_level": trigger if trigger is not None else high,
+    }
+
+
+def _scanner_watch_entry_assessment(
+    tick: Mapping[str, Any],
+    *,
+    scanner_event: Mapping[str, Any] | None,
+    settings: PolicySettings,
+) -> dict[str, Any]:
+    """Evaluate a later pattern trigger while a scanner-selected name is watched.
+
+    Unlike the old event-minute lane, this is intentionally available on every
+    revealed one-minute bar after the scanner event.  A candle pattern supplies
+    the *trigger*; volume and indicators are confirmation context.  This mirrors
+    the video's scanner → wait → pattern-break workflow without treating a
+    scanner timestamp as an order signal.
+    """
+    failures: list[str] = []
+    hhmm = str(tick["time"])
+    if hhmm >= settings.entry_cutoff:
+        failures.append("entry_cutoff")
+    if not isinstance(scanner_event, Mapping):
+        failures.append("scanner_event_not_received")
+        return {
+            "eligible": False, "score": None, "components": {},
+            "failures": failures, "stop": None, "break_level": None,
+        }
+    trigger = _optional_number(scanner_event.get("trigger"), "scanner_event.trigger")
+    if trigger is None:
+        failures.append("scanner_trigger_missing")
+    close = _number(tick.get("c"), "tick.c")
+    low = _number(tick.get("l"), "tick.l")
+    open_ = _number(tick.get("o"), "tick.o")
+    vwap = _optional_number(tick.get("vwap"), "tick.vwap")
+    ema9 = _optional_number(tick.get("ema9"), "tick.ema9")
+    ema20 = _optional_number(tick.get("ema20"), "tick.ema20")
+    macd_hist = _optional_number(tick.get("macd_hist"), "tick.macd_hist")
+    rvol_bar = _optional_number(tick.get("rvol_bar"), "tick.rvol_bar")
+    if trigger is not None and close < trigger:
+        failures.append("below_scanner_trigger")
+    if close < open_:
+        failures.append("not_green_trigger_bar")
+    if vwap is None or close <= vwap:
+        failures.append("not_above_vwap")
+    if ema9 is None or ema20 is None or ema9 < ema20:
+        failures.append("ema_alignment_missing")
+    if macd_hist is None or macd_hist < 0:
+        failures.append("negative_macd")
+    if rvol_bar is None or rvol_bar < 1.5:
+        failures.append("bar_volume_below_1_5")
+
+    events = _events(tick)
+    best_pattern = max(
+        (
+            PATTERN_WEIGHTS[event["pattern"]] * event["score"]
+            for event in events
+            if event["direction"] == "bullish" and event["pattern"] in PATTERN_WEIGHTS
+        ),
+        default=0.0,
+    )
+    if best_pattern <= 0:
+        failures.append("no_bullish_pattern_trigger")
+    bearish = any(
+        event["direction"] == "bearish" or event["pattern"] in BEARISH_PATTERNS
+        for event in events
+    )
+    if bearish:
+        failures.append("bearish_pattern_veto")
+
+    bar5 = tick.get("bar5_complete")
+    volume_ratio = (
+        _optional_number(bar5.get("volume_ratio"), "bar5_complete.volume_ratio")
+        if isinstance(bar5, dict) else None
+    )
+    volume_score = 15.0 if rvol_bar is not None and rvol_bar >= 1.5 else 0.0
+    if rvol_bar is not None and rvol_bar >= 2.0:
+        volume_score += 5.0
+    if volume_ratio is not None and volume_ratio >= 1.5:
+        volume_score += 5.0
+    trend_score = (
+        (8.0 if vwap is not None and close > vwap else 0.0)
+        + (6.0 if ema9 is not None and ema20 is not None and ema9 >= ema20 else 0.0)
+        + (6.0 if macd_hist is not None and macd_hist >= 0 else 0.0)
+    )
+    quality_score = 15.0 if close >= open_ and not bearish else 0.0
+    timing_score = 10.0 if hhmm < "10:30" else (5.0 if hhmm < settings.entry_cutoff else 0.0)
+    components = {
+        "pattern": round(best_pattern, 4),
+        "volume": volume_score,
+        "trend": trend_score,
+        "quality": quality_score,
+        "timing": timing_score,
+    }
+    score = round(sum(components.values()), 4)
+    if score < settings.entry_threshold:
+        failures.append(f"score_below_{settings.entry_threshold:g}")
+    stop = round(low - 0.01, 4)
+    if stop >= close:
+        failures.append("invalid_structural_stop")
+    return {
+        "eligible": not failures, "score": score, "components": components,
+        "failures": failures, "stop": stop, "break_level": trigger,
+    }
+
+
 def _exit_assessment(
     tick: Mapping[str, Any],
     *,
@@ -429,6 +692,7 @@ class WarriorPatternPolicy:
         self.exit_latched = False
         self.entry_i: int | None = None
         self.entry_bar_high: float | None = None
+        self.entry_bar_low: float | None = None
         self.break_level: float | None = None
         self.initial_stop: float | None = None
         self.high_water: float | None = None
@@ -437,8 +701,13 @@ class WarriorPatternPolicy:
         self.last_green_5m_low: float | None = None
         self.scanner_event: Mapping[str, Any] | None = None
         self.scanner_event_i: int | None = None
+        # Rolling context for the v3 checklist volume / stop formulas.
+        self.recent_volume: list[tuple[bool, float]] = []
+        self.prior_bar_low: float | None = None
 
     def _runner_exit(self, tick: Mapping[str, Any]) -> bool:
+        if self.settings.runner_exit_mode == "off":
+            return False
         bar5 = tick.get("bar5_complete")
         if not isinstance(bar5, dict) or self.last_green_5m_low is None:
             return False
@@ -500,15 +769,31 @@ class WarriorPatternPolicy:
                     "reason_codes": ["one_trade_complete"],
                 })
             else:
-                assessment = (
-                    _scanner_event_entry_assessment(
+                if self.settings.scanner_event_checklist_watch:
+                    assessment = _scanner_checklist_entry_assessment(
+                        tick,
+                        scanner_event=self.scanner_event,
+                        settings=self.settings,
+                        recent_volume=self.recent_volume,
+                        prior_low=self.prior_bar_low,
+                    )
+                elif self.settings.scanner_event_watch_until_cutoff:
+                    assessment = _scanner_watch_entry_assessment(
+                        tick, scanner_event=self.scanner_event, settings=self.settings,
+                    )
+                elif self.settings.scanner_event_immediate_confirmation:
+                    assessment = _scanner_event_entry_assessment(
                         tick, scanner_event=self.scanner_event,
-                        bars_since_event=(i - self.scanner_event_i) if self.scanner_event_i is not None else None,
+                        bars_since_event=(
+                            (i - self.scanner_event_i)
+                            if self.scanner_event_i is not None else None
+                        ),
                         settings=self.settings,
                     )
-                    if self.settings.scanner_event_immediate_confirmation
-                    else _entry_assessment(tick, settings=self.settings, scanner_event=self.scanner_event)
-                )
+                else:
+                    assessment = _entry_assessment(
+                        tick, settings=self.settings, scanner_event=self.scanner_event,
+                    )
                 record.update({
                     "entry_score": assessment["score"],
                     "score_components": assessment["components"],
@@ -521,13 +806,14 @@ class WarriorPatternPolicy:
                 })
                 if assessment["eligible"]:
                     record.update({
-                        "action": "ENTER_CLOSE",
+                        "action": self.settings.entry_action,
                         "stop": assessment["stop"],
                         "bracket": ENTRY_BRACKET,
                     })
                     self.entry_attempted = True
                     self.entry_i = i
                     self.entry_bar_high = _number(tick.get("h"), "tick.h")
+                    self.entry_bar_low = _number(tick.get("l"), "tick.l")
                     self.break_level = assessment["break_level"]
                     self.initial_stop = assessment["stop"]
         else:
@@ -536,6 +822,7 @@ class WarriorPatternPolicy:
             avg_entry = _number(snapshot.get("avg_entry"), "execution avg_entry")
             stop = _number(snapshot.get("stop"), "execution stop")
             high = _number(tick.get("h"), "tick.h")
+            open_ = _number(tick.get("o"), "tick.o")
             close = _number(tick.get("c"), "tick.c")
             self.high_water = max(self.high_water or high, high)
             if i > self.entry_i and self.entry_bar_high is not None and high > self.entry_bar_high:
@@ -555,11 +842,25 @@ class WarriorPatternPolicy:
                 avg_entry=avg_entry,
                 initial_stop_distance=initial_distance,
             )
-            failed_break = (
-                bars_since_entry <= 2
-                and self.break_level is not None
-                and close < self.break_level
-            )
+            fb_mode = self.settings.failed_break_mode
+            if fb_mode == "off":
+                failed_break = False
+            elif fb_mode == "entry_low":
+                # 3.0-aligned: the breakout bar's structure failed — red close
+                # under the entry bar low on the entry bar or the next bar.
+                failed_break = (
+                    bars_since_entry <= 1
+                    and close < open_
+                    and self.entry_bar_low is not None
+                    and close < self.entry_bar_low
+                )
+            else:
+                # Legacy "trigger" mode (v5.0–v5.15 default).
+                failed_break = (
+                    bars_since_entry <= 2
+                    and self.break_level is not None
+                    and close < self.break_level
+                )
             mandatory_flat = hhmm >= self.settings.mandatory_flat_time
             runner_exit = self._runner_exit(tick)
             scale_fill = any(fill.get("action") == "SCALE" for fill in snapshot["fills"])
@@ -636,8 +937,20 @@ class WarriorPatternPolicy:
             self.trade_complete = self.engine.shares <= 0
             if self.engine.shares > 0:
                 self.high_water = _number(tick.get("h"), "tick.h")
+        elif record["action"] == "ENTER_NEXT_OPEN":
+            # Order is queued; lifecycle completes when the engine fills or rejects.
+            self.entry_attempted = True
         self.engine._queue_pyramid_add(bar)
         self._update_green_5m(tick)
+        # Advance rolling volume / prior-low context after the decision so the
+        # current bar is not double-counted in green/red dominance.
+        close = _number(tick.get("c"), "tick.c")
+        open_ = _number(tick.get("o"), "tick.o")
+        volume = _number(tick.get("v"), "tick.v")
+        self.recent_volume.append((close >= open_, volume))
+        if len(self.recent_volume) > 5:
+            self.recent_volume = self.recent_volume[-5:]
+        self.prior_bar_low = _number(tick.get("l"), "tick.l")
         return record
 
 

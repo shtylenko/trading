@@ -31,6 +31,11 @@ class GapCandidate:
     avg_vol: float
     day_volume: float
 
+    @property
+    def prior_day_volume_ratio(self) -> float:
+        """Prior full-day volume / trailing baseline (not intraday RVOL)."""
+        return self.rvol
+
 
 def screen_ticker(ticker: str, cfg: ScanConfig) -> list[GapCandidate]:
     """Return all gap-up candidates for one ticker across the window.
@@ -54,9 +59,12 @@ def screen_ticker(ticker: str, cfg: ScanConfig) -> list[GapCandidate]:
 
     df = df.sort_index()
     df["prior_close"] = df["close"].shift(1)
-    df["avg_vol"] = df["volume"].shift(1).rolling(cfg.rvol_lookback).mean()
+    # Baseline ends two sessions before D: the numerator is D-1, so it must
+    # not also appear in its own comparison baseline.
+    df["avg_vol"] = df["volume"].shift(2).rolling(cfg.rvol_lookback).mean()
     df["gap_pct"] = (df["open"] - df["prior_close"]) / df["prior_close"].replace(0, pd.NA) * 100.0
-    # Causal RVOL: prior-day volume only (full-day volume is look-ahead for same-day entries).
+    # Prior-day volume ratio: previous full-day volume only.  This is causal for
+    # the next session, but is *not* an intraday relative-volume measurement.
     df["rvol"] = df["volume"].shift(1) / df["avg_vol"].replace(0, pd.NA)
 
     out: list[GapCandidate] = []

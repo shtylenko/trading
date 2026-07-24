@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from trading.llm_trader.floats import FloatCache
 from trading.llm_trader.store import EntryStore
@@ -12,6 +13,7 @@ from trading.llm_trader.universe import fetch_symbols
 from .config import ScanConfig
 from .patterns import detect_entry
 from .screen import screen_ticker
+from .forward_shadow import ForwardShadowLedger
 
 log = logging.getLogger("llm_trader.warrior")
 
@@ -42,6 +44,11 @@ def run_scan(
     floats = FloatCache()
     store = EntryStore(cfg.db_path)
     stats = ScanStats()
+    shadow_ledger = (
+        ForwardShadowLedger(cfg.forward_shadow_ledger)
+        if cfg.forward_shadow_ledger is not None else None
+    )
+    scan_id = datetime.now(timezone.utc).strftime("warrior-shadow-%Y%m%dT%H%M%SZ")
 
     log.info(
         "scan [%s] %s → %s | %d symbols | profile=%s price $%.0f–$%.0f | gap≥%.0f%% rvol≥%.1f float<%s",
@@ -68,9 +75,27 @@ def run_scan(
                 continue
             stats.gap_candidates += len(cands)
 
-            if not floats.passes(sym, cfg.float_max):
+            # A frozen forward-shadow cohort must capture the float lookup at
+            # this scan, rather than silently inheriting a month-old cache row.
+            float_snapshot = floats.snapshot(
+                sym, force_refresh=shadow_ledger is not None
+            )
+            fshares = float_snapshot.get("value")
+            float_gate_passed = (
+                cfg.float_max is None
+                or (fshares is not None and float(fshares) < cfg.float_max)
+            )
+            if shadow_ledger is not None:
+                for cand in cands:
+                    shadow_ledger.record_candidate(
+                        scan_id=scan_id,
+                        candidate=cand,
+                        float_snapshot=float_snapshot,
+                        float_gate_passed=float_gate_passed,
+                        config=cfg.to_dict(),
+                    )
+            if not float_gate_passed:
                 continue
-            fshares = floats.get(sym)
             stats.float_survivors += len(cands)
 
             for cand in cands:
@@ -81,6 +106,13 @@ def run_scan(
                     continue
                 if entry is not None:
                     entry.strategy = strategy_id
+                    entry.features.update({
+                        "float_provenance": float_snapshot,
+                        "research_quality": {
+                            "historical_promotion_eligible": False,
+                            "warning": "NON_PIT_FLOAT",
+                        },
+                    })
                     store.upsert(entry)
                     stats.entries_found += 1
         txt = store.dump_text(cfg.db_path.with_suffix(".txt"), strategy=strategy_id)

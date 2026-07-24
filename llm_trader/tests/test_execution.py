@@ -43,6 +43,37 @@ def test_stop_gap_uses_open_and_can_exceed_planned_risk():
     assert pnl["realized_pnl"] == -200.0  # $2 gap through a planned $1 stop
 
 
+def test_next_open_entry_never_fills_at_the_confirmation_close():
+    engine = ExecutionEngine(_config())
+    actions, _, pnl = engine.run(
+        [
+            _bar(0, 10.0, 10.4, 9.8, 10.3),
+            _bar(1, 10.6, 10.8, 10.4, 10.7),
+        ],
+        [{"i": 0, "time": "10:20", "action": "ENTER_NEXT_OPEN", "stop": 9.8}],
+        force_close=False,
+    )
+    assert [(a["action"], a["i"], a["price"]) for a in actions] == [("ENTER", 1, 10.6)]
+    assert pnl["entry_index"] == 1
+    assert pnl["entry_avg"] == 10.6
+
+
+def test_next_open_entry_cancels_if_open_is_at_or_below_structural_stop():
+    engine = ExecutionEngine(_config())
+    actions, _, pnl = engine.run(
+        [_bar(0, 10.0, 10.4, 9.8, 10.3), _bar(1, 9.7, 10.0, 9.5, 9.8)],
+        [{"i": 0, "time": "10:20", "action": "ENTER_NEXT_OPEN", "stop": 9.8}],
+        force_close=False,
+    )
+    assert actions == []
+    assert pnl["traded"] is False
+    assert engine.order_events == [{
+        "i": 1,
+        "action": "CANCEL_ENTRY",
+        "reason": "next-open entry opened at or below its protective stop",
+    }]
+
+
 def test_armed_entry_and_stop_same_bar_use_adverse_path():
     engine = ExecutionEngine(_config())
     actions, _, pnl = engine.run(

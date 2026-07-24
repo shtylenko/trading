@@ -26,9 +26,9 @@ One primary entry per ticker per day.
 
 | Decision | Resolution |
 |---|---|
-| **Window** | **2025-01-01 → 2026-06-30** (H1-2026). Current-snapshot float ≈ historical float over this span. Expand to earlier years later. |
+| **Window** | Historical scanner output is exploratory only. A current float snapshot is not an as-of-date float, regardless of how recent the window is. |
 | **Universe** | **Broad** — all US exchange-listed (NASDAQ/NYSE/AMEX) common stocks from Finnhub (~4,950, OTC excluded). Fetch intraday **on demand** for daily hits, even if not currently cached. |
-| **Float** | **Hard filter, default < 20M** (Cameron "hot"). Source: yfinance `floatShares` (current snapshot, cached per ticker). Threshold configurable. |
+| **Float** | **Hard filter, default < 20M** (Cameron "hot"). Source: yfinance retrieval-time `floatShares`, with a recorded `sharesOutstanding` fallback. Not point-in-time; not promotion evidence. |
 | **News / catalyst** | **Dropped as a filter** — no historical source reachable (Finnhub free = recent only; Alpaca news = 401). A 5%+ gap on high RVOL is treated as the implicit catalyst; user eyeballs actual news on TradingView during replay. |
 | **Patterns** | **Core ACD / ORB flat-top breakout** first. VWAP-bounce / micro-pullback deferred. |
 | **Output** | **Entry scanner only.** SQLite table + text dump: `ticker, date, time_et, reason`. No exit/stat simulation. |
@@ -74,9 +74,10 @@ A0 — Symbol universe        (Finnhub symbol list, cached to data/universe_symb
 A1 — Daily gap screen       (marketdata 1day, window)
    For each ticker, each trading day D:
      gap%   = (open_D - close_{D-1}) / close_{D-1}
-     rvol   = volume_D / avg_volume(20d ending D-1)
+     prior_day_volume_ratio = volume_(D-1) / avg_volume(20d ending D-2)
      price  = open_D (or prior close) within [price_min, price_max]
-   Keep (D, ticker) where gap% >= 5, price in band, avg_vol > 500K, rvol >= 2.
+   Keep (D, ticker) where gap% >= 5, price in band, avg_vol > 500K,
+   prior_day_volume_ratio >= 2. This is not intraday RVOL.
    -> candidate day-ticker pairs.
 
 A2 — Float gate             (yfinance, cached to data/float_cache.json)

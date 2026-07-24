@@ -41,8 +41,10 @@ class ScanConfig:
     gap_min_pct: float = 5.0                 # gap up vs prior close, percent
     gap_max_pct: float = 100.0               # guard: drop split/data-artifact gaps
     avg_vol_min: float = 500_000            # min 20d avg daily volume
-    rvol_min: float = 2.0                    # min relative volume
-    rvol_lookback: int = 20                  # days for avg-volume baseline
+    # Legacy field names retained for config compatibility. They represent a
+    # *prior-day volume ratio*, not intraday relative volume.
+    rvol_min: float = 2.0                    # min prior-day volume ratio
+    rvol_lookback: int = 20                  # preceding sessions in the baseline
     float_max: Optional[float] = 20_000_000  # Cameron "hot"; None disables
 
     # ── Universe ──────────────────────────────────────────────────────────
@@ -57,6 +59,9 @@ class ScanConfig:
 
     # ── Output ────────────────────────────────────────────────────────────
     db_path: Path = field(default_factory=lambda: DATA_DIR / "entries.db")
+    # Optional append-only contemporaneous scanner-input capture. A ledger is
+    # the required first artifact for a future frozen forward-shadow cohort.
+    forward_shadow_ledger: Optional[Path] = None
 
     # ── Profiles ──────────────────────────────────────────────────────────
     def apply_profile(self, *, override_bounds: bool = True) -> "ScanConfig":
@@ -87,6 +92,8 @@ class ScanConfig:
             raw["entry_window_et"] = tuple(raw["entry_window_et"])
         if "db_path" in raw and raw["db_path"] is not None:
             raw["db_path"] = Path(raw["db_path"])
+        if "forward_shadow_ledger" in raw and raw["forward_shadow_ledger"] is not None:
+            raw["forward_shadow_ledger"] = Path(raw["forward_shadow_ledger"])
         known = set(cls.__dataclass_fields__)
         unknown = set(raw) - known
         if unknown:
@@ -106,4 +113,6 @@ class ScanConfig:
         d["exchanges"] = list(self.exchanges)
         d["entry_window_et"] = list(self.entry_window_et)
         d["db_path"] = str(self.db_path)
+        if self.forward_shadow_ledger is not None:
+            d["forward_shadow_ledger"] = str(self.forward_shadow_ledger)
         return d

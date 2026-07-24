@@ -120,7 +120,8 @@ def detect_from_frame(
             else "(no premarket volume baseline)"
         )
         reason = (
-            f"ACD/ORB breakout: gapped +{cand.gap_pct:.1f}% on {cand.rvol:.1f}× RVOL, "
+            f"ACD/ORB breakout: gapped +{cand.gap_pct:.1f}% with prior-day volume ratio "
+            f"{cand.prior_day_volume_ratio:.1f}×, "
             f"{_fmt_float(float_shares)}; first 5-min new high at {t_et} ET cleared "
             f"consolidation high ${breakout_level:.2f} {vol_phrase}"
             + (", close above VWAP." if vwap is not None else ".")
@@ -138,6 +139,13 @@ def detect_from_frame(
             bar_vol_mult=round(vol_mult, 2) if vol_mult is not None else None,
             reason=reason,
             strategy="warrior",
+            features={
+                "prior_day_volume_ratio": round(cand.prior_day_volume_ratio, 2),
+                "prior_day_volume_ratio_lookback_days": cfg.rvol_lookback,
+                "intraday_volume_baseline": (
+                    "available" if vol_mult is not None else "unavailable"
+                ),
+            },
         )
 
     return None

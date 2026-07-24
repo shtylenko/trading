@@ -292,7 +292,7 @@ _AGENT_ABANDONED_LABEL = (
 )
 # Intents that open or keep a multi-day plan live (abandoning after these is incomplete).
 _LIVE_PLAN_ACTIONS = frozenset({
-    "ARM_BUY_STOP", "ENTER_CLOSE", "ENTER", "SCALE_LIMIT", "SET_STOP",
+    "ARM_BUY_STOP", "ENTER_CLOSE", "ENTER_NEXT_OPEN", "ENTER", "SCALE_LIMIT", "SET_STOP",
     "ADD_CLOSE", "EXIT_CLOSE",
 })
 # Multi-day streams are long (~80 daily bars). Hermes agents often exit mid-arm
@@ -693,6 +693,24 @@ def _cup_handle_research_tier(
         }, "exploratory"
 
 
+def _warrior_research_tier(path: Path, setups: list[dict]) -> tuple[dict, str]:
+    """Stamp historical Warrior panels as non-promotable until float is PIT.
+
+    The scanner's low-float gate uses a retrieval-time yfinance snapshot (and
+    can fall back to shares outstanding). Historical Warrior panels therefore
+    remain useful execution diagnostics, not validation or alpha evidence.
+    """
+    return {
+        "schema_version": 1,
+        "float_membership_basis": "retrieval_time_current_snapshot",
+        "point_in_time_float": False,
+        "promotion_eligible": False,
+        "warning": "NON_PIT_FLOAT",
+        "testset": path.name,
+        "setup_count": len(setups),
+    }, "exploratory_non_pit_float"
+
+
 # ───────────────────────────── run ──────────────────────────────────────────
 
 
@@ -1081,6 +1099,15 @@ def _preseal(work: dict, skill_path: Path, version: str, session_id: str) -> tup
             strategy=strategy_id,
             root=staging_root,
         )
+        # Preserve research eligibility on the leaf itself, not only on the
+        # batch index. The session survives independently in the viewer/report.
+        session_path = sdir / "session.json"
+        session_doc = recorder._load_json(session_path, {}) or {}
+        session_doc["research"] = {
+            "tier": work.get("research_tier"),
+            "provenance": work.get("research_provenance"),
+        }
+        atomic_write_json(session_path, session_doc, indent=2)
         gateway = step.start_isolated(
             sdir, ticker=work["ticker"], date=work["date"], at_time=work.get("time_et"),
             from_open=work.get("session_from_open", False),
@@ -1481,6 +1508,18 @@ def _policy_module_for(strategy_id: str, policy_id: Optional[str] = None):
         if policy_id == "warrior_pattern_score_v11":
             from .strategies.warrior import policy_v11 as v11
             return v11
+        if policy_id == "warrior_pattern_score_v12":
+            from .strategies.warrior import policy_v12 as v12
+            return v12
+        if policy_id == "warrior_pattern_score_v13":
+            from .strategies.warrior import policy_v13 as v13
+            return v13
+        if policy_id == "warrior_pattern_score_v14":
+            from .strategies.warrior import policy_v14 as v14
+            return v14
+        if policy_id == "warrior_pattern_score_v15":
+            from .strategies.warrior import policy_v15 as v15
+            return v15
         raise ValueError(
             f"no deterministic Warrior policy implementation for {policy_id!r}"
         )
@@ -1907,10 +1946,14 @@ def run(
                 "cannot resume with different skill bytes than the batch's recorded skill_hash"
             )
     setups = load_testset(testset)
-    research_provenance, research_tier = (
-        _cup_handle_research_tier(testset, setups, exploratory=exploratory)
-        if strategy_id == "cup_handle" else (None, "not_applicable")
-    )
+    if strategy_id == "cup_handle":
+        research_provenance, research_tier = _cup_handle_research_tier(
+            testset, setups, exploratory=exploratory
+        )
+    elif strategy_id == "warrior":
+        research_provenance, research_tier = _warrior_research_tier(testset, setups)
+    else:
+        research_provenance, research_tier = None, "not_applicable"
 
     # Do this before allocating a batch id, staging a session, or starting an
     # agent.  v0.5 needs scanner-produced plans; historical confirmed labels are
@@ -1969,6 +2012,8 @@ def run(
                 "scanner_event_release_delay_minutes": scanner_event_release_delay_minutes,
                 "scanner_event_include_reason": scanner_event_include_reason,
                 "engine_owned_targets": engine_owned_targets,
+                "research_provenance": research_provenance,
+                "research_tier": research_tier,
                 "horizon": horizon,
                 "bar_resolution": bar_resolution,
                 "strategy": strategy_id,
@@ -3053,6 +3098,14 @@ def compare(tag_a: str, tag_b: str) -> dict:
             "avg_loser": (sum(losers) / len(losers)) if losers else None,
         }
 
+    meta_a, meta_b = _read_batch_meta(tag_a), _read_batch_meta(tag_b)
+    warrior_non_pit = (
+        {meta_a.get("strategy"), meta_b.get("strategy")} & {"warrior"}
+        and (
+            meta_a.get("research_tier") != "promotion_eligible"
+            or meta_b.get("research_tier") != "promotion_eligible"
+        )
+    )
     return {
         "tag_a": tag_a, "tag_b": tag_b, "n_pairs": n,
         "mean_dR": round(mean_d, 3), "median_dR": round(med_d, 3),
@@ -3061,12 +3114,19 @@ def compare(tag_a: str, tag_b: str) -> dict:
         "top_contributors": [(k, round(dr, 2)) for k, _, _, dr in
                              sorted(pairs, key=lambda p: -abs(p[3]))[:8]],
         "stats_a": batch_stats(A), "stats_b": batch_stats(B),
+        "promotion_eligible": not warrior_non_pit,
+        "research_warning": (
+            "NON_PIT_FLOAT: diagnostic comparison only; it cannot select or promote a Warrior version."
+            if warrior_non_pit else None
+        ),
     }
 
 
 def _print_compare(r: dict) -> None:
     a, b = r["stats_a"], r["stats_b"]
     print(f"=== compare  A(baseline)={r['tag_a']}  vs  B(candidate)={r['tag_b']} ===")
+    if r.get("research_warning"):
+        print(f"⚠  {r['research_warning']}")
     print(f"paired on {r['n_pairs']} shared setups (effective R; stood-down=0R; invalid runs excluded)\n")
     print(f"  mean ΔR (B−A) : {r['mean_dR']:+.3f}")
     print(f"  median ΔR     : {r['median_dR']:+.3f}")
@@ -3092,7 +3152,9 @@ def _print_compare(r: dict) -> None:
     guard_ok = (b["void"] <= a["void"] + 2 and b["ooc"] == 0 and b["timeout"] == 0
                 and b["finalize_error"] == 0 and b["no_decision_log"] == 0
                 and b.get("agent_abandoned", 0) == 0)
-    if r["mean_dR"] > 0 and sig and broad and guard_ok:
+    if not r.get("promotion_eligible", True):
+        verdict = "⚠️ DIAGNOSTIC ONLY — cohort is not eligible for selection or promotion."
+    elif r["mean_dR"] > 0 and sig and broad and guard_ok:
         verdict = "✅ ACCEPT — B is broadly better and clears the gate."
     elif r["mean_dR"] > 0 and (sig or r["median_dR"] > 0):
         verdict = ("🟡 INVESTIGATE — positive but not a clean pass "

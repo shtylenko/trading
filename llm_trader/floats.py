@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -37,18 +38,44 @@ class FloatCache:
 
     def get(self, ticker: str) -> Optional[float]:
         """Float shares for ``ticker`` (None if unknown). Cached."""
+        return self.snapshot(ticker).get("value")
+
+    def snapshot(self, ticker: str, *, force_refresh: bool = False) -> dict:
+        """Return the retrieval provenance alongside the current float value.
+
+        This data is deliberately labelled as a *retrieval-time snapshot*, not
+        an as-of-date float.  Historical scanner rows must never be promoted as
+        point-in-time research merely because a float threshold was applied.
+        """
         ticker = ticker.upper()
         entry = self._data.get(ticker)
         now = time.time()
-        if entry is not None:
+        if entry is not None and not force_refresh:
             fresh_ttl = _MISS_TTL_S if entry.get("value") is None else _CACHE_TTL_S
             if now - entry.get("ts", 0) < fresh_ttl:
-                return entry.get("value")
+                return self._snapshot_record(entry)
 
         value, source = _fetch_float(ticker)
         self._data[ticker] = {"value": value, "ts": now, "source": source}
         self._dirty = True
-        return value
+        return self._snapshot_record(self._data[ticker])
+
+    @staticmethod
+    def _snapshot_record(entry: dict) -> dict:
+        """Normalize legacy cache rows into an explicit research record."""
+        ts = entry.get("ts")
+        fetched_at = None
+        if isinstance(ts, (int, float)):
+            fetched_at = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+        source = entry.get("source") or "unknown"
+        return {
+            "value": entry.get("value"),
+            "source": source,
+            "fetched_at": fetched_at,
+            "as_of": "retrieval_time_current_snapshot",
+            "point_in_time": False,
+            "fallback_used": source == "shares_outstanding",
+        }
 
     def passes(self, ticker: str, float_max: Optional[float]) -> bool:
         """True if ``ticker`` is within ``float_max`` (None ⇒ no gate).
@@ -58,7 +85,7 @@ class FloatCache:
         """
         if float_max is None:
             return True
-        value = self.get(ticker)
+        value = self.snapshot(ticker).get("value")
         if value is None:
             return False
         return value < float_max
